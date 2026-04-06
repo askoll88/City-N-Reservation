@@ -1,0 +1,1174 @@
+"""
+База данных для игры "Город N: Запретная Зона"
+PostgreSQL с пулом соединений
+"""
+import logging
+import psycopg2
+from psycopg2 import pool
+from psycopg2.extras import RealDictCursor
+import config
+import threading
+
+logger = logging.getLogger(__name__)
+
+# Пул соединений (создаётся один раз)
+_connection_pool = None
+_pool_lock = threading.Lock()
+
+
+def get_connection_pool():
+    """Получить пул соединений (потокобезопасно)"""
+    global _connection_pool
+
+    if _connection_pool is None:
+        with _pool_lock:
+            if _connection_pool is None:
+                _connection_pool = pool.ThreadedConnectionPool(
+                    minconn=2,
+                    maxconn=10,
+                    host=config.DB_HOST,
+                    port=config.DB_PORT,
+                    dbname=config.DB_NAME,
+                    user=config.DB_USER,
+                    password=config.DB_PASSWORD,
+                    cursor_factory=RealDictCursor
+                )
+                logger.info("Пул соединений с БД создан")
+
+    return _connection_pool
+
+
+def get_connection():
+    """Получить соединение из пула"""
+    return get_connection_pool().getconn()
+
+
+def release_connection(conn):
+    """Вернуть соединение в пул"""
+    get_connection_pool().putconn(conn)
+
+
+def init_db():
+    """Инициализация базы данных"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Таблица пользователей
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            vk_id BIGINT UNIQUE NOT NULL,
+            name VARCHAR(100) NOT NULL,
+            location VARCHAR(50) DEFAULT 'город',
+            health INTEGER DEFAULT 100,
+            energy INTEGER DEFAULT 100,
+            radiation INTEGER DEFAULT 0,
+            money INTEGER DEFAULT 100,
+            level INTEGER DEFAULT 1,
+            experience INTEGER DEFAULT 0,
+            strength INTEGER DEFAULT 5,
+            stamina INTEGER DEFAULT 5,
+            perception INTEGER DEFAULT 5,
+            luck INTEGER DEFAULT 5,
+            armor_defense INTEGER DEFAULT 0,
+            equipped_weapon VARCHAR(100),
+            equipped_armor VARCHAR(100),
+            equipped_backpack VARCHAR(100),
+            max_weight INTEGER DEFAULT 20,
+            newbie_kit_received INTEGER DEFAULT 0
+        )
+    """)
+
+    # Таблица предметов
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS items (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(100) UNIQUE NOT NULL,
+            category VARCHAR(50) NOT NULL,
+            description TEXT,
+            price INTEGER DEFAULT 0,
+            attack INTEGER DEFAULT 0,
+            defense INTEGER DEFAULT 0,
+            weight REAL DEFAULT 1.0,
+            backpack_bonus INTEGER DEFAULT 0
+        )
+    """)
+
+    # Таблица инвентаря пользователей
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_inventory (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+            quantity INTEGER DEFAULT 1,
+            UNIQUE(user_id, item_id)
+        )
+    """)
+
+    # Заполняем базовые предметы, если их нет
+    items = [
+        # Оружие - Пистолеты (attack, defense, weight)
+        ("ПМ", "weapons", "Простой пистолет Макарова. Надёжный, но слабый.", 50, 15, 0, 0.8),
+        ("ТТ", "weapons", "Пистолет Токарева. Мощнее ПМ, но ненадёжен.", 70, 20, 0, 0.9),
+        ("Глок", "weapons", "Австрийский пистолет. Точный и современный.", 120, 25, 0, 0.7),
+        ("Удав", "weapons", "Российский пистолет-пулемёт. Компактный и скорострельный.", 180, 22, 0, 0.65),
+        ("ПММ", "weapons", "Модернизированный Макаров. Увеличенный магазин.", 90, 18, 0, 0.85),
+        ("Корд", "weapons", "Спортивный пистолет. Высокая точность.", 140, 24, 0, 0.75),
+        ("П-96", "weapons", "Профессиональный спортивный пистолет.", 200, 28, 0, 0.7),
+        ("С-40П", "weapons", "Самозарядный пистолет повышенной мощности.", 250, 32, 0, 0.9),
+
+        # Оружие - Автоматы
+        ("АК-74", "weapons", "Автомат Калашникова. Хорошая огневая мощь.", 200, 35, 0, 3.5),
+        ("АКС-74У", "weapons", "Укороченный автомат. Для ближнего боя.", 180, 30, 0, 2.8),
+        ("М4А1", "weapons", "Американский карабин. Точный и лёгкий.", 220, 38, 0, 3.0),
+        ("АК-101", "weapons", "Экспортный вариант АК. Под натовский патрон.", 280, 40, 0, 3.6),
+        ("АК-105", "weapons", "Современный автомат под малокалиберный патрон.", 320, 42, 0, 3.2),
+        ("ГРОЗ-35", "weapons", "Бесшумный автомат специального назначения.", 380, 38, 0, 3.0),
+        ("М4А1 Кастом", "weapons", "Улучшенная версия М4 с длинным стволом.", 350, 45, 0, 3.4),
+        ("АК-12", "weapons", "Современный автомат Калашникова. Модульный.", 400, 48, 0, 3.5),
+
+        # Оружие - Снайперские винтовки
+        ("СВД", "weapons", "Снайперская винтовка Драгунова. Точность на высоте.", 350, 60, 0, 4.2),
+        ("Винторез", "weapons", "Снайперская винтовка с интегрированным глушителем.", 400, 70, 0, 3.8),
+        ("СВ-98", "weapons", "Снайперская винтовка повышенной точности.", 480, 75, 0, 4.5),
+        ("Т-5000", "weapons", "Точная винтовка для дальних дистанций.", 520, 80, 0, 4.8),
+        ("ОСВ-96", "weapons", "Крупнокалиберная снайперская винтовка.", 600, 95, 0, 6.0),
+        ("Мосина", "weapons", "Легендарная винтовка. Простая и надёжная.", 280, 55, 0, 3.8),
+        ("ВСК-100", "weapons", "Спортивная винтовка. Идеальна для тренировок.", 320, 58, 0, 4.0),
+        ("Лось-7", "weapons", "Охотничий карабин. Мощный и точный.", 420, 72, 0, 4.2),
+
+        # Оружие - Дробовики
+        ("ИЖ-27", "weapons", "Двуствольное охотничье ружьё. Мощный выстрел в упор.", 150, 45, 0, 3.2),
+        ("Сайга-12", "weapons", "Полуавтоматический дробовик. Быстрый огонь.", 250, 40, 0, 3.5),
+        ("МР-153", "weapons", "Многоствольный дробовик. Надёжность.", 200, 48, 0, 3.3),
+        ("Вепрь-12", "weapons", "Самозарядный дробовик. Мощный и практичный.", 280, 52, 0, 3.6),
+        ("Кострома", "weapons", "Дробовик с длинным стволом. Точность.", 320, 55, 0, 3.8),
+        ("Бекас-Авто", "weapons", "Автоматический дробовик для спорта.", 350, 50, 0, 3.4),
+        ("Сайга-410", "weapons", "Дробовик под малокалиберный патрон.", 220, 42, 0, 3.0),
+
+        # Оружие - Пулеметы
+        ("ПКМ", "weapons", "Пулемёт Калашникова. Огонь на подавление.", 450, 30, 0, 7.5),
+        ("РПК-74", "weapons", "Ручной пулемёт. Баланс мобильности и огня.", 380, 28, 0, 5.0),
+        ("Печенег", "weapons", "Модернизированный ПК. Повышенная надёжность.", 520, 35, 0, 8.0),
+        ("М240", "weapons", "Американский пулемёт. Тяжёлый, но мощный.", 580, 38, 0, 8.5),
+        ("М249", "weapons", "Легкий пулемёт. Мобильный огонь.", 480, 32, 0, 6.5),
+        ("РПК-16", "weapons", "Современный ручной пулемёт.", 550, 36, 0, 6.0),
+        ("Корд", "weapons", "Крупнокалиберный пулемёт. Бронебойный.", 650, 42, 0, 10.0),
+
+        # Оружие - Ножи
+        ("Нож сталкера", "weapons", "Простой нож. Лучше, чем ничего.", 30, 10, 0, 0.3),
+        ("Мачете", "weapons", "Длинный нож для рубки. Хорош в ближнем бою.", 60, 15, 0, 0.8),
+        ("Нож разведчика", "weapons", "Армейский нож. Прочный и острый.", 80, 18, 0, 0.35),
+        ("Штык-нож", "weapons", "Штык от автомата. Многофункциональный.", 70, 16, 0, 0.4),
+        ("Финка", "weapons", "Финский нож. Классика.", 50, 12, 0, 0.25),
+        ("Кинжал", "weapons", "Острый кинжал. Смертоносный в ближнем бою.", 90, 20, 0, 0.45),
+        ("Ятаган", "weapons", "Изогнутый клинок. Мощный рубящий удар.", 120, 22, 0, 0.9),
+
+        # Броня - Шлемы
+        ("Вязаная шапка", "armor", "Старая вязаная шапка. От холода, не от пуль.", 10, 0, 2, 0.2),
+        ("Каска", "armor", "Советская каска. Лёгкая защита от осколков.", 50, 0, 8, 0.8),
+        ("Баллистический шлем", "armor", "Современный бронешлем. Защита от пуль.", 150, 0, 20, 1.2),
+        ("Шлем-штурмовик", "armor", "Усиленный шлем с забралом. Полная защита головы.", 220, 0, 25, 1.5),
+        ("Шлем связиста", "armor", "Шлем со встроенными наушниками.", 180, 0, 22, 1.3),
+        ("Тактический шлем", "armor", "Лёгкий тактический шлем с креплением для附件.", 280, 0, 28, 1.4),
+        ("Десантный шлем", "armor", "Шлем десантника. Прочный и практичный.", 200, 0, 24, 1.6),
+        ("Шлем спецназа", "armor", "Профессиональный шлем для спецопераций.", 350, 0, 32, 1.8),
+
+        # Броня - Броня
+        ("Кожаная куртка", "armor", "Стандартная кожаная куртка. Минимальная защита.", 30, 0, 5, 1.5),
+        ("Бронежилет", "armor", "Армейский бронежилет. Средняя защита.", 100, 0, 18, 3.0),
+        ("Комбинезон сталкера", "armor", "Спецкостюм для работы в Зоне. Хорошая защита.", 300, 0, 35, 5.0),
+        ("Экзоскелет", "armor", "Тяжёлая броня с приводом. Максимальная защита.", 600, 0, 55, 15.0),
+        ("Бронекостюм", "armor", "Полный бронекостюм. Защищает от всего.", 450, 0, 45, 8.0),
+        ("Скафандр", "armor", "Защитный скафандр. Изолирует от радиации.", 500, 0, 40, 7.5),
+        ("Боевой комбинезон", "armor", "Усиленный боевой комбинезон.", 380, 0, 38, 6.0),
+        ("Штурмовой костюм", "armor", "Костюм для штурмовых операций.", 420, 0, 42, 6.5),
+
+        # Броня - Штаны
+        ("Джинсы", "armor", "Обычные джинсы. Никакой защиты.", 10, 0, 2, 0.5),
+        ("Камуфляжные штаны", "armor", "Военные штаны с карманами. Немного защиты.", 40, 0, 8, 0.8),
+        ("Боевой костюм", "armor", "Штаны от боевого костюма. Хорошая защита.", 120, 0, 20, 1.5),
+        ("Бронештаны", "armor", "Штаны с бронепластинами.", 180, 0, 25, 2.0),
+        ("Тактические штаны", "armor", "Штаны с множеством карманов и защитой.", 150, 0, 22, 1.8),
+        ("Горные штаны", "armor", "Прочные штаны для горной местности.", 100, 0, 15, 1.3),
+        ("Зимние штаны", "armor", "Утеплённые штаны для холодной погоды.", 130, 0, 18, 1.6),
+        ("Спецштаны", "armor", "Штаны для спецподразделений.", 200, 0, 28, 2.2),
+
+        # Броня - Перчатки
+        ("Тканевые перчатки", "armor", "Простые перчатки. От царапин.", 5, 0, 2, 0.1),
+        ("Кожаные перчатки", "armor", "Кожаные перчатки. Чуть лучше.", 20, 0, 4, 0.2),
+        ("Боевые перчатки", "armor", "Бронеперчатки с защитой кистей.", 60, 0, 8, 0.4),
+        ("Тактические перчатки", "armor", "Перчатки с противоударной защитой.", 80, 0, 10, 0.45),
+        ("Зимние перчатки", "armor", "Тёплые перчатки для холодной погоды.", 45, 0, 6, 0.3),
+        ("Мотоперчатки", "armor", "Перчатки для мотоциклистов. Защита от стирания.", 55, 0, 7, 0.35),
+        ("Спецперчатки", "armor", "Перчатки со встроенной защитой.", 100, 0, 12, 0.5),
+        ("Огнестойкие перчатки", "armor", "Перчатки с защитой от огня.", 90, 0, 11, 0.48),
+
+        # Броня - Ботинки
+        ("Кроссовки", "armor", "Удобные, но не защищают.", 10, 0, 2, 0.4),
+        ("Армейские ботинки", "armor", "Прочные армейские ботинки. Защита ног.", 40, 0, 8, 0.8),
+        ("Боевые ботинки", "armor", "Бронированные ботинки. Максимум защиты.", 80, 0, 15, 1.2),
+        ("Тактические ботинки", "armor", "Ботинки для тактических операций.", 120, 0, 18, 1.4),
+        ("Берцы", "armor", "Классические военные ботинки.", 60, 0, 12, 1.0),
+        ("Треккинговые ботинки", "armor", "Ботинки для походов. Удобные и прочные.", 70, 0, 10, 0.9),
+        ("Зимние ботинки", "armor", "Утеплённые ботинки для зимы.", 90, 0, 14, 1.3),
+        ("Спецботинки", "armor", "Ботинки для спецназа.", 150, 0, 20, 1.6),
+
+        # Артефакты (обычные)
+        ("Медуза", "artifacts", "Светящийся артефакт. Слабое свечение.", 80, 0, 0, 0.5),
+        ("Пульсатор", "artifacts", "Пульсирующий артефакт. Тёплый на ощупь.", 120, 0, 0, 0.3),
+        ("Камень", "artifacts", "Обычный с виду камень. Но что-то в нём есть...", 50, 0, 0, 1.0),
+
+        # Новые артефакты из аномалий
+        ("Грозовая", "artifacts", "Искрящийся артефакт. Увеличивает шанс критического удара. +10% крита.", 1000, 0, 0, 0.3),
+        ("Пустышка", "artifacts", "Пустой артефакт, но обладает полезными свойствами. +5 к удаче.", 500, 0, 0, 0.2),
+        ("Воронка", "artifacts", "Артефакт в форме воронки. +20% к находкам.", 1200, 0, 0, 0.8),
+        ("Слизь", "artifacts", "Скользкий артефакт. Восстанавливает +10 HP.", 400, 0, 0, 0.4),
+        ("Пыль", "artifacts", "Лёгкий артефакт, похожий на пыль. +5% к уклонению.", 550, 0, 0, 0.1),
+        ("Фрагмент", "artifacts", "Осколок аномалии. +5 к силе.", 700, 0, 0, 0.6),
+
+        # Приборы
+        ("Детектор аномалий", "other", "Прибор для обнаружения аномалий. Показывает тип и опасность.", 800, 0, 0, 0.5),
+
+        # Артефакты из аномалий (обычные)
+        ("Огненник", "artifacts", "Тёплый камень из Жарки. +10 защиты от огня, но радиоактивен.", 100, 0, 0, 0.4),
+        ("Электра", "artifacts", "Искрящийся шар из Токсичного тумана. +15 энергии, но слегка повреждает.", 110, 0, 0, 0.3),
+        ("Слеза", "artifacts", "Светящаяся вода из лужи. -15 радиации.", 90, 0, 0, 0.5),
+        ("Вихревик", "artifacts", "Быстро вращающийся артефакт. +10% уклонения, но -5 защиты.", 95, 0, 0, 0.3),
+        ("Кристалл", "artifacts", "Острый кристалл. +5% крита, но +10 радиации.", 130, 0, 0, 0.4),
+        ("Тень", "artifacts", "Полупрозрачный артефакт. +20% находки, но -10% защиты.", 105, 0, 0, 0.3),
+        ("Холод", "artifacts", "Ледяной осколок. -10 радиации, но -10 HP.", 85, 0, 0, 0.4),
+        ("Пульсар", "artifacts", "Пульсирующий свет. +25 энергии, но эффект непредсказуем.", 150, 0, 0, 0.2),
+        ("Щит", "artifacts", "Прочный кристалл. +15 защиты, но тяжёлый (+1кг).", 140, 0, 0, 0.6),
+        ("Светляк", "artifacts", "Светящийся осколок. Освещает путь. Радиоактивен (+3).", 70, 0, 0, 0.3),
+
+        # Редкие артефакты (только положительные, шанс выпадения 1%)
+        ("Мечта", "rare_artifacts", "Редчайший артефакт. +20% крита, +10% находки, -20 радиации!", 500, 0, 0, 0.3),
+        ("Грааль", "rare_artifacts", "Святой артефакт. Полное восстановление HP и -50 радиации.", 600, 0, 0, 0.2),
+        ("Феникс", "rare_artifacts", "Огненная птица в камне. +30 защиты, иммунитет к огню.", 550, 0, 0, 0.4),
+        ("Вечный", "rare_artifacts", "Не стареет. +50 максимального HP навсегда.", 700, 0, 0, 0.2),
+        ("Золото", "rare_artifacts", "Солнечный артефакт. +30% находки, +15% крита.", 450, 0, 0, 0.3),
+        ("Призрак", "rare_artifacts", "Позволяет уклоняться. +25% уклонения.", 480, 0, 0, 0.25),
+        ("Бездна", "rare_artifacts", "Поглощает радиацию. -50 радиации, +20 энергии.", 520, 0, 0, 0.3),
+
+        # Другое - Аптечка и медицина
+        ("Аптечка", "other", "Медицинский набор. Лечит раны.", 20, 0, 0, 0.5),
+        ("Бинт", "other", "Простой бинт. Можно перевязать раны.", 5, 0, 0, 0.1),
+        ("Антирад", "other", "Препарат против радиации. Выводит радиацию.", 30, 0, 0, 0.2),
+
+        # Другое - Еда
+        ("Хлеб", "other", "Чёрствый хлеб. Лучше, чем ничего.", 10, 0, 0, 0.3),
+        ("Тушёнка", "other", "Банка тушёнки. Восстанавливает силы.", 15, 0, 0, 0.4),
+        ("Консервы", "other", "Разные консервы. Сытно.", 12, 0, 0, 0.35),
+
+        # Другое - Напитки
+        ("Кофе", "other", "Банка кофе. Бодрит.", 8, 0, 0, 0.25),
+        ("Энергетик", "other", "Баночка с энергетиком. Восстанавливает силы.", 10, 0, 0, 0.25),
+        ("Супер энергетик", "other", "Супер энергетик. Полностью восстанавливает энергию.", 50, 0, 0, 0.3),
+        ("Вода", "other", "Бутылка воды. Утоляет жажду.", 5, 0, 0, 0.5),
+
+        # Другое - Приборы
+        ("Дозиметр", "other", "Прибор для измерения радиации.", 25, 0, 0, 0.3),
+        ("Фонарик", "other", "Поисковый фонарь. Освещает темноту.", 15, 0, 0, 0.4),
+        ("Компас", "other", "Простой компас. Не даст заблудиться.", 10, 0, 0, 0.1),
+        ("Рация", "other", "Рация для связи. Полезно в группе.", 40, 0, 0, 0.8),
+
+        # Рюкзаки
+        ("Походный рюкзак", "backpacks", "Обычный походный рюкзак. Увеличивает переносимый вес.", 80, 0, 0, 3.0, 15),
+        ("Военный рюкзак", "backpacks", "Армейский рюкзак. Хорошая вместимость.", 150, 0, 0, 4.0, 25),
+        ("Тактический рюкзак", "backpacks", "Современный тактический рюкзак с системой быстрого доступа.", 250, 0, 0, 5.0, 40),
+        ("Грузовой рюкзак", "backpacks", "Большой грузовой рюкзак для перевозки тяжёлых грузов.", 400, 0, 0, 8.0, 60),
+
+        # === МУСОР (выпадает с монстров) ===
+        # Мусор - Ржавое/сломанное (1-3 руб.)
+        ("Ржавая гильза", "trash", "Стреляная гильза, уже ни на что не годна.", 1, 0, 0, 0.01),
+        ("Сломанный патрон", "trash", "Патрон без пороха, можно разобрать.", 1, 0, 0, 0.01),
+        ("Пустая гильза", "trash", "Пустая латунная гильза.", 1, 0, 0, 0.01),
+        ("Ржавый болт", "trash", "Покрытый ржавчиной болт.", 1, 0, 0, 0.02),
+        ("Сломанная гайка", "trash", "Гайка со сорванной резьбой.", 1, 0, 0, 0.02),
+        ("Обрывок проволоки", "trash", "Кусок ржавой проволоки.", 1, 0, 0, 0.03),
+        ("Пластиковый осколок", "trash", "Осколок пластика.", 1, 0, 0, 0.01),
+        ("Стеклянный осколок", "trash", "Острый осколок стекла.", 1, 0, 0, 0.02),
+        ("Резиновый обрезок", "trash", "Кусок старой резины.", 1, 0, 0, 0.02),
+        ("Картонный клочок", "trash", "Мокрый картон.", 1, 0, 0, 0.01),
+
+        # Мусор - Ткань/одежда (1-5 руб.)
+        ("Грязная тряпка", "trash", "Вонючая тряпка.", 2, 0, 0, 0.05),
+        ("Старая ткань", "trash", "Обрывок ткани.", 2, 0, 0, 0.05),
+        ("Порванный носок", "trash", "Дырявый носок.", 1, 0, 0, 0.03),
+        ("Лоскут ткани", "trash", "Кусок ткани от одежды.", 2, 0, 0, 0.04),
+        ("Грязная футболка", "trash", "Испачканная кровью футболка.", 3, 0, 0, 0.1),
+        ("Порванные перчатки", "trash", "Дырявые перчатки.", 2, 0, 0, 0.05),
+        ("Обрывок бинта", "trash", "Использованный бинт.", 2, 0, 0, 0.03),
+        ("Старая кепка", "trash", "Заношенная кепка.", 3, 0, 0, 0.08),
+        ("Порванный шарф", "trash", "Разорванный шарф.", 2, 0, 0, 0.06),
+        ("Грязный платок", "trash", "Мокрый платок.", 1, 0, 0, 0.03),
+
+        # Мусор - Банки/бутылки (1-3 руб.)
+        ("Пустая банка", "trash", "Пустая консервная банка.", 1, 0, 0, 0.05),
+        ("Пустая бутылка", "trash", "Стеклянная бутылка из-под водки.", 2, 0, 0, 0.08),
+        ("Пластиковая бутылка", "trash", "Пустая пластиковая бутылка.", 1, 0, 0, 0.03),
+        ("Банка из-под энергетика", "trash", "Пустая банка из-под энергетика.", 1, 0, 0, 0.04),
+        ("Разбитая бутылка", "trash", "Осколки бутылки.", 1, 0, 0, 0.02),
+        ("Пробка", "trash", "Пластиковая пробка.", 1, 0, 0, 0.01),
+        ("Жестяная крышка", "trash", "Крышка от банки.", 1, 0, 0, 0.02),
+
+        # Мусор - Еда (1-5 руб.)
+        ("Засохший хлеб", "trash", "Чёрствый хлеб, непригодный в пищу.", 2, 0, 0, 0.1),
+        ("Гнилое яблоко", "trash", "Испорченное яблоко.", 1, 0, 0, 0.08),
+        ("Обглоданная кость", "trash", "Кость с остатками мяса.", 3, 0, 0, 0.1),
+        ("Испорченная тушёнка", "trash", "Просроченные консервы.", 2, 0, 0, 0.08),
+        ("Сухая корка", "trash", "Засохшая корка хлеба.", 1, 0, 0, 0.05),
+        ("Очистки", "trash", "Очистки от овощей.", 1, 0, 0, 0.04),
+
+        # Мусор - Инструменты/приборы (2-10 руб.)
+        ("Сломанный нож", "trash", "Затупившийся ржавый нож.", 5, 0, 0, 0.15),
+        ("Разбитый фонарик", "trash", "Не работает, можно разобрать.", 8, 0, 0, 0.1),
+        ("Сломанный дозиметр", "trash", "Не работает, нужны запчасти.", 10, 0, 0, 0.08),
+        ("Треснувшая линза", "trash", "Треснувшая линза от прибора.", 3, 0, 0, 0.05),
+        ("Обрывок провода", "trash", "Кусок электрического провода.", 4, 0, 0, 0.06),
+        ("Сломанная батарейка", "trash", "Села батарейка.", 2, 0, 0, 0.04),
+        ("Пустая рация", "trash", "Рация без батареек.", 15, 0, 0, 0.05),
+        ("Треснувший экран", "trash", "Разбитый экран от прибора.", 5, 0, 0, 0.04),
+        ("Ржавая отвёртка", "trash", "Старая отвёртка.", 3, 0, 0, 0.05),
+        ("Сломанные плоскогубцы", "trash", "Не хватает зубьев.", 4, 0, 0, 0.06),
+
+        # Мусор - Патроны/оружие (2-8 руб.)
+        ("Патрон 5.45", "trash", "Один патрон для АК.", 2, 0, 0, 0.1),
+        ("Патрон 7.62", "trash", "Патрон для СВД или ПК.", 3, 0, 0, 0.08),
+        ("Патрон 9мм", "trash", "Пистолетный патрон.", 2, 0, 0, 0.12),
+        ("Дробинка", "trash", "Одна дробинка.", 1, 0, 0, 0.05),
+        ("Капсула", "trash", "Металлическая капсула от патрона.", 1, 0, 0, 0.04),
+        ("Порох", "trash", "Чуть пороха, мокрый.", 3, 0, 0, 0.05),
+        ("Обойма", "trash", "Пустая обойма без патронов.", 4, 0, 0, 0.06),
+        ("Лента для патронов", "trash", "Пустая патронная лента.", 5, 0, 0, 0.04),
+        ("Гильза от дробовика", "trash", "Большая гильза.", 1, 0, 0, 0.06),
+
+        # Мусор - Металлолом (2-8 руб.)
+        ("Ржавая железка", "trash", "Кусок ржавого железа.", 4, 0, 0, 0.15),
+        ("Алюминиевая банка", "trash", "Мятая алюминиевая банка.", 3, 0, 0, 0.1),
+        ("Жестяная банка", "trash", "Консервная банка.", 2, 0, 0, 0.08),
+        ("Кусок арматуры", "trash", "Ржавая арматура.", 5, 0, 0, 0.12),
+        ("Обломок трубы", "trash", "Кусок старой трубы.", 6, 0, 0, 0.08),
+        ("Стальной лом", "trash", "Кусок стали.", 5, 0, 0, 0.1),
+        ("Медная проволока", "trash", "Кусок медной проволоки.", 8, 0, 0, 0.06),
+        ("Алюминиевый лом", "trash", "Лом алюминия.", 4, 0, 0, 0.08),
+        ("Свинцовая пластина", "trash", "Кусок свинца.", 6, 0, 0, 0.05),
+
+        # Мусор - Кости/части тел (3-8 руб.)
+        ("Кость", "trash", "Чья-то кость.", 3, 0, 0, 0.15),
+        ("Череп крысы", "trash", "Череп мёртвой крысы.", 4, 0, 0, 0.1),
+        ("Зуб", "trash", "Выпавший зуб.", 2, 0, 0, 0.08),
+        ("Коготь", "trash", "Животный коготь.", 3, 0, 0, 0.06),
+        ("Шерсть", "trash", "Клок шерсти.", 3, 0, 0, 0.08),
+        ("Перо", "trash", "Перо птицы.", 2, 0, 0, 0.05),
+        ("Хвост", "trash", "Обрезанный хвост животного.", 4, 0, 0, 0.05),
+        ("Кожа", "trash", "Кусок кожи.", 5, 0, 0, 0.06),
+        ("Сухожилие", "trash", "Высохшее сухожилие.", 3, 0, 0, 0.04),
+        ("Внутренности", "trash", "Внутренности (тьфу).", 4, 0, 0, 0.05),
+
+        # Мусор - Аномальные артефакты (мусорные) (5-15 руб.)
+        ("Мёртвый артефакт", "trash", "Потухший артефакт, потерявший силу.", 8, 0, 0, 0.08),
+        ("Осколок камня", "trash", "Просто камень, не светится.", 3, 0, 0, 0.1),
+        ("Погасший кристалл", "trash", "Был артефактом, теперь нет.", 10, 0, 0, 0.05),
+        ("Пустой пузырёк", "trash", "Пузырёк из-под артефакта.", 5, 0, 0, 0.06),
+        ("Зараженная вода", "trash", "Мутировавшая вода.", 4, 0, 0, 0.08),
+
+        # Мусор - Документы/книги (3-10 руб.)
+        ("Мокрая газета", "trash", "Нечитаемая газета.", 2, 0, 0, 0.08),
+        ("Порванная книга", "trash", "Книга без страниц.", 5, 0, 0, 0.06),
+        ("Документ", "trash", "Какой-то документ, весь в крови.", 8, 0, 0, 0.05),
+        ("Записка", "trash", "Записка с неразборчивым почерком.", 6, 0, 0, 0.06),
+        ("Фотография", "trash", "Старая фотография, размытая.", 4, 0, 0, 0.05),
+        ("Карта", "trash", "Карта, которую невозможно прочитать.", 7, 0, 0, 0.04),
+        ("Удостоверение", "trash", "Удостоверение неизвестного.", 10, 0, 0, 0.03),
+
+        # Мусор - Разное (2-10 руб.)
+        ("Пустой рюкзак", "trash", "Рюкзак без ничего.", 5, 0, 0, 0.08),
+        ("Сломанный компас", "trash", "Стрелка не крутится.", 6, 0, 0, 0.06),
+        ("Часы", "trash", "Часы остановились.", 5, 0, 0, 0.05),
+        ("Ключ", "trash", "Какой-то ключ.", 3, 0, 0, 0.08),
+        ("Зажигалка", "trash", "Зажигалка не работает.", 2, 0, 0, 0.06),
+        ("Сигареты", "trash", "Разорванная пачка сигарет.", 3, 0, 0, 0.08),
+        ("Спички", "trash", "Спички намокли.", 2, 0, 0, 0.06),
+        ("Нитки", "trash", "Клубок ниток.", 2, 0, 0, 0.05),
+        ("Иголка", "trash", "Швейная иголка.", 2, 0, 0, 0.04),
+        ("Пуговица", "trash", "Металлическая пуговица.", 1, 0, 0, 0.05),
+        ("Резинка", "trash", "Резинка для волос.", 1, 0, 0, 0.04),
+        ("Скрепка", "trash", "Канцелярская скрепка.", 1, 0, 0, 0.03),
+        ("Монета", "trash", "Старая монетка.", 3, 0, 0, 0.06),
+        ("Брелок", "trash", "Брелок от ключей.", 4, 0, 0, 0.05),
+        ("Очки", "trash", "Очки с трещиной.", 5, 0, 0, 0.04),
+
+        # === РЕДКОЕ ОРУЖИЕ (только с людей) ===
+        ("Коготь кровососа", "rare_weapons", "Острый коготь мутанта-кровососа. Смертоносный в ближнем бою.", 150, 25, 0, 0.5),
+        ("Кость снорка", "rare_weapons", "Обточенная кость снорка. Острая и прочная.", 100, 18, 0, 0.4),
+        ("Клинок химеры", "rare_weapons", "Лезвие из кости химеры. Невероятно острое.", 200, 30, 0, 0.6),
+        ("Череп зомби", "rare_weapons", "Тяжёлый череп зомби. Можно оглушить.", 80, 22, 0, 1.0),
+        ("Нож рейдера", "rare_weapons", "Нож погибшего рейдера. Хорошее лезвие.", 120, 20, 0, 0.35),
+        ("Топор выжившего", "rare_weapons", "Самодельный топор. Страшное оружие.", 180, 28, 0, 0.9),
+        ("Кастет", "rare_weapons", "Стальной кастет. Бьёт сильно.", 90, 15, 0, 0.3),
+        ("Боевой молот", "rare_weapons", "Тяжёлый молот. Один удар - и всё.", 250, 35, 1.2),
+
+        # === РЕДКАЯ БРОНЯ (только с людей) ===
+        ("Шкура волка", "rare_armor", "Шкура мутант-волка. Тёплая и прочная.", 100, 0, 12, 1.5),
+        ("Броня из кожи химеры", "rare_armor", "Прочная кожа химеры. Слабая, но лёгкая.", 180, 0, 18, 2.5),
+        ("Плащ невидимка", "rare_armor", "Старый плащ сталкера-невидимки.", 60, 0, 8, 0.8),
+        ("Шлем рейдера", "rare_armor", "Бронированный шлем погибшего рейдера.", 150, 0, 15, 1.0),
+        ("Бронежилет спецназа", "rare_armor", "Бронежилет спецназа. Лучшая защита.", 300, 0, 28, 3.5),
+        ("Камуфляж", "rare_armor", "Военный камуфляж с защитой.", 80, 0, 10, 1.2),
+        ("Перчатки бойца", "rare_armor", "Боевые перчатки с защитой.", 50, 0, 8, 0.4),
+        ("Ботинки сталкера", "rare_armor", "Прочные ботинки для Зоны.", 70, 0, 10, 0.9),
+
+        # === ПРЕДМЕТЫ ДЛЯ ИСПОЛЬЗОВАНИЯ (с мутантов и людей) ===
+        ("Стимулятор", "consumables", "Военный стимулятор. +50 HP, +20 энергии.", 80, 0, 0, 0.1),
+        ("Энергетический батончик", "consumables", "Солдатский паёк. +40 энергии.", 40, 0, 0, 0.15),
+        ("Лечебная трава", "consumables", "Трава из Зоны. +25 HP.", 30, 0, 0, 0.08),
+        ("Чистая вода", "consumables", "Отфильтрованная вода. +30 HP, -10 радиации.", 50, 0, 0, 0.3),
+        ("Витамины", "consumables", "Витамины. +10 к макс. HP навсегда.", 100, 0, 0, 0.05),
+        ("Ремнабор", "consumables", "Ремкомплект для брони. Восстанавливает 10 защиты.", 60, 0, 0, 0.15),
+        ("Антидот", "consumables", "Средство от отравления. -30 радиации.", 70, 0, 0, 0.1),
+        ("Боевой стимулятор", "consumables", "Мощный стимулятор. +80 HP, +50 энергии.", 150, 0, 0, 0.08),
+    ]
+
+    # Сначала выполняем миграцию (добавляем новые колонки)
+    migrate_add_new_columns()
+
+    for item in items:
+        if len(item) == 7:
+            name, category, description, price, attack, defense, weight = item
+            cursor.execute("""
+                INSERT INTO items (name, category, description, price, attack, defense, weight)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name) DO NOTHING
+            """, (name, category, description, price, attack, defense, weight))
+        elif len(item) == 8:
+            name, category, description, price, attack, defense, weight, backpack_bonus = item
+            cursor.execute("""
+                INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name) DO NOTHING
+            """, (name, category, description, price, attack, defense, weight, backpack_bonus))
+
+    conn.commit()
+    # Создаём индексы для ускорения запросов
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_vk_id ON users(vk_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_inventory_user_id ON user_inventory(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_inventory_item_id ON user_inventory(item_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_category ON items(category)")
+
+    conn.commit()
+    cursor.close()
+    release_connection(conn)
+    logger.info("База данных PostgreSQL инициализирована")
+    logger.info("Индексы созданы")
+
+
+def migrate_add_new_columns():
+    """Добавить новые колонки для существующих пользователей и предметов"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    added_columns = []
+
+    def try_add_column(table: str, column: str, definition: str):
+        """Безопасное добавление колонки"""
+        try:
+            # Сначала проверяем, существует ли колонка
+            cursor.execute(f"""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = '{table}' AND column_name = '{column}'
+            """)
+            if cursor.fetchone():
+                return  # Колонка уже существует
+
+            # Добавляем колонку
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            conn.commit()
+            added_columns.append(f"  + {table}.{column}")
+        except Exception as e:
+            # При ошибке просто игнорируем
+            conn.rollback()
+
+    # Миграция для users
+    try_add_column("users", "level", "INTEGER DEFAULT 1")
+    try_add_column("users", "experience", "INTEGER DEFAULT 0")
+    try_add_column("users", "strength", "INTEGER DEFAULT 5")
+    try_add_column("users", "stamina", "INTEGER DEFAULT 5")
+    try_add_column("users", "perception", "INTEGER DEFAULT 5")
+    try_add_column("users", "luck", "INTEGER DEFAULT 5")
+    try_add_column("users", "armor_defense", "INTEGER DEFAULT 0")
+    try_add_column("users", "max_weight", "INTEGER DEFAULT 20")
+    try_add_column("users", "equipped_backpack", "VARCHAR(100)")
+    try_add_column("users", "equipped_weapon", "VARCHAR(100)")
+    try_add_column("users", "equipped_armor", "VARCHAR(100)")
+    try_add_column("users", "newbie_kit_received", "INTEGER DEFAULT 0")
+    # Артефакты
+    try_add_column("users", "artifact_slots", "INTEGER DEFAULT 3")
+    try_add_column("users", "equipped_artifact_1", "VARCHAR(100)")
+    try_add_column("users", "equipped_artifact_2", "VARCHAR(100)")
+    try_add_column("users", "equipped_artifact_3", "VARCHAR(100)")
+    try_add_column("users", "max_health_bonus", "INTEGER DEFAULT 0")
+    # Раздел инвентаря (для обработки цифр при экипировке)
+    try_add_column("users", "inventory_section", "VARCHAR(50)")
+    # Предыдущая локация (для возврата из инвентаря)
+    try_add_column("users", "previous_location", "VARCHAR(50)")
+    # Состояние меню (для возврата из статуса и других меню)
+    try_add_column("users", "menu_state", "VARCHAR(50)")
+
+    # Миграция для items
+    try_add_column("items", "attack", "INTEGER DEFAULT 0")
+    try_add_column("items", "defense", "INTEGER DEFAULT 0")
+    try_add_column("items", "weight", "REAL DEFAULT 1.0")
+    try_add_column("items", "backpack_bonus", "INTEGER DEFAULT 0")
+
+    cursor.close()
+    release_connection(conn)
+
+    # Вывод результатов миграции
+    if added_columns:
+        logger.info("Миграция выполнена:")
+        for col in added_columns:
+            logger.info(col)
+    else:
+        logger.info("База данных уже обновлена")
+
+
+# Кэш для статических данных (предметы, магазины)
+_items_cache = {}
+_items_by_category_cache = {}
+_shop_items_cache = None
+_cache_lock = threading.Lock()
+
+
+def _get_cached_items():
+    """Получить кэшированные предметы (вызывается один раз при инициализации)"""
+    global _items_cache, _items_by_category_cache, _shop_items_cache
+
+    with _cache_lock:
+        if not _items_cache:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM items")
+            rows = cursor.fetchall()
+            cursor.close()
+            release_connection(conn)
+
+            for row in rows:
+                item = dict(row)
+                _items_cache[item['name']] = item
+
+            # Кэшируем по категориям
+            for name, item in _items_cache.items():
+                cat = item['category']
+                if cat not in _items_by_category_cache:
+                    _items_by_category_cache[cat] = []
+                _items_by_category_cache[cat].append(item)
+
+            # Кэшируем магазин
+            _shop_items_cache = {
+                None: list(_items_cache.values()),
+                'weapons': _items_by_category_cache.get('weapons', []),
+                'armor': _items_by_category_cache.get('armor', []),
+            }
+
+            logger.info(f"Кэш предметов загружен: {len(_items_cache)} предметов")
+
+        return _items_cache, _items_by_category_cache, _shop_items_cache
+
+
+# Функции для работы с пользователями
+def get_user_by_vk(vk_id: int) -> dict | None:
+    """Получить пользователя по VK ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+    row = cursor.fetchone()
+    cursor.close()
+    release_connection(conn)
+    return dict(row) if row else None
+
+
+def create_user(vk_id: int, name: str) -> dict:
+    """Создать нового пользователя"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO users (vk_id, name, location, health, energy, radiation, money, level, experience, strength, stamina, perception, luck, armor_defense, max_weight)
+        VALUES (%s, %s, 'город', 100, 100, 0, 100, 1, 0, 5, 5, 5, 5, 0, 20)
+        RETURNING *
+    """, (vk_id, name))
+    conn.commit()
+    row = cursor.fetchone()
+    cursor.close()
+    release_connection(conn)
+    return get_user_by_vk(vk_id)
+
+
+def update_user_location(vk_id: int, location: str):
+    """Обновить локацию пользователя"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET location = %s WHERE vk_id = %s", (location, vk_id))
+    conn.commit()
+    cursor.close()
+    release_connection(conn)
+
+
+def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None, equipped_backpack: str = None, equipped_weapon: str = None, equipped_armor: str = None, newbie_kit_received: int = None, artifact_slots: int = None, equipped_artifact_1: str = None, equipped_artifact_2: str = None, equipped_artifact_3: str = None, max_health_bonus: int = None, inventory_section: str = None, previous_location: str = None, menu_state: str = None):
+    """Обновить характеристики пользователя"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    updates = []
+    params = []
+    if health is not None:
+        updates.append("health = %s")
+        params.append(health)
+    if energy is not None:
+        updates.append("energy = %s")
+        params.append(energy)
+    if radiation is not None:
+        updates.append("radiation = %s")
+        params.append(radiation)
+    if money is not None:
+        updates.append("money = %s")
+        params.append(money)
+    if level is not None:
+        updates.append("level = %s")
+        params.append(level)
+    if experience is not None:
+        updates.append("experience = %s")
+        params.append(experience)
+    if strength is not None:
+        updates.append("strength = %s")
+        params.append(strength)
+    if stamina is not None:
+        updates.append("stamina = %s")
+        params.append(stamina)
+    if perception is not None:
+        updates.append("perception = %s")
+        params.append(perception)
+    if luck is not None:
+        updates.append("luck = %s")
+        params.append(luck)
+    if armor_defense is not None:
+        updates.append("armor_defense = %s")
+        params.append(armor_defense)
+    if max_weight is not None:
+        updates.append("max_weight = %s")
+        params.append(max_weight)
+    if equipped_backpack is not None:
+        updates.append("equipped_backpack = %s")
+        params.append(equipped_backpack)
+    if equipped_weapon is not None:
+        updates.append("equipped_weapon = %s")
+        params.append(equipped_weapon)
+    if equipped_armor is not None:
+        updates.append("equipped_armor = %s")
+        params.append(equipped_armor)
+    if newbie_kit_received is not None:
+        updates.append("newbie_kit_received = %s")
+        params.append(newbie_kit_received)
+    if artifact_slots is not None:
+        updates.append("artifact_slots = %s")
+        params.append(artifact_slots)
+    if equipped_artifact_1 is not None:
+        updates.append("equipped_artifact_1 = %s")
+        params.append(equipped_artifact_1)
+    if equipped_artifact_2 is not None:
+        updates.append("equipped_artifact_2 = %s")
+        params.append(equipped_artifact_2)
+    if equipped_artifact_3 is not None:
+        updates.append("equipped_artifact_3 = %s")
+        params.append(equipped_artifact_3)
+    if max_health_bonus is not None:
+        updates.append("max_health_bonus = %s")
+        params.append(max_health_bonus)
+    if inventory_section is not None:
+        updates.append("inventory_section = %s")
+        params.append(inventory_section)
+    # Для previous_location и menu_state - используем пустую строку как маркер для очистки (NULL в БД)
+    if previous_location == "":
+        updates.append("previous_location = NULL")
+    elif previous_location is not None:
+        updates.append("previous_location = %s")
+        params.append(previous_location)
+
+    if menu_state == "":
+        updates.append("menu_state = NULL")
+    elif menu_state is not None:
+        updates.append("menu_state = %s")
+        params.append(menu_state)
+
+    if updates:
+        params.append(vk_id)
+        import sys
+        print(f"[DB_UPDATE] SQL: UPDATE users SET {', '.join(updates)}", file=sys.stderr)
+        print(f"[DB_UPDATE] params: {params}", file=sys.stderr)
+        try:
+            cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE vk_id = %s", params)
+            conn.commit()
+            print(f"[DB_UPDATE] Committed successfully", file=sys.stderr)
+        except Exception as e:
+            error_msg = str(e)
+            # Если ошибка из-за отсутствия колонки - добавляем её и повторяем
+            if "does not exist" in error_msg:
+                try:
+                    if "menu_state" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN menu_state VARCHAR(50)")
+                    if "previous_location" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN previous_location VARCHAR(50)")
+                    conn.commit()
+                    # Повторяем запрос
+                    cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE vk_id = %s", params)
+                    conn.commit()
+                except:
+                    pass
+            else:
+                raise
+
+    cursor.close()
+    release_connection(conn)
+
+
+# Функции для работы с артефактами
+ARTIFACT_BONUSES = {
+    # Обычные артефакты: (бонус, значение, радиация, вес)
+    "Огненник": {"defense_fire": 5, "radiation": 5},
+    "Электра": {"energy": 10, "health": -5},
+    "Слеза": {"radiation": -15},
+    "Вихревик": {"dodge": 5, "defense": -5},
+    "Кристалл": {"crit": 3, "radiation": 10},
+    "Тень": {"find_chance": 10, "defense": -10},
+    "Холод": {"radiation": -10, "health": -10},
+    "Пульсар": {"energy": 15},
+    "Щит": {"defense": 8, "weight": 1},
+    "Светляк": {"find_chance": 5, "radiation": 3},
+    # Редкие артефакты
+    "Мечта": {"crit": 15, "find_chance": 10, "radiation": -20},
+    "Грааль": {"full_heal": True, "radiation": -50},
+    "Феникс": {"defense": 20, "fire_immune": True},
+    "Вечный": {"max_health_bonus": 50},
+    "Золото": {"find_chance": 20, "crit": 15},
+    "Призрак": {"dodge": 15},
+    "Бездна": {"radiation": -25, "energy": 20},
+}
+
+ARTIFACT_SLOT_COSTS = {
+    4: 1000,  # 4 слота = 1000 руб.
+    5: 2500,  # 5 слотов = 2500 руб.
+    6: 5000,  # 6 слотов = 5000 руб.
+}
+
+
+def equip_artifact(vk_id: int, artifact_name: str) -> dict:
+    """Экипировать артефакт. Возвращает результат."""
+    import random
+
+    user = get_user_by_vk(vk_id)
+    if not user:
+        return {"success": False, "message": "Пользователь не найден"}
+
+    # Проверяем, есть ли артефакт в инвентаре
+    inventory = get_user_inventory(vk_id)
+    all_items = inventory
+    artifacts_in_inv = [i for i in all_items if i['category'] in ['artifacts', 'rare_artifacts']]
+
+    artifact = next((a for a in artifacts_in_inv if a['name'] == artifact_name), None)
+    if not artifact:
+        return {"success": False, "message": "Артефакт не найден в инвентаре"}
+
+    # Проверяем, сколько слотов занято
+    slots_used = 0
+    equipped = []
+    for i in range(1, 4):
+        slot = user.get(f'equipped_artifact_{i}')
+        if slot:
+            slots_used += 1
+            equipped.append(slot)
+
+    # Редкие артефакты занимают 2 слота
+    is_rare = artifact['category'] == 'rare_artifacts'
+    slots_needed = 2 if is_rare else 1
+    max_slots = user.get('artifact_slots', 3)
+
+    if slots_used + slots_needed > max_slots:
+        return {"success": False, "message": f"Недостаточно слотов! Занято: {slots_used}/{max_slots}"}
+
+    # Проверяем, не экипирован ли уже
+    if artifact_name in equipped:
+        return {"success": False, "message": "Этот артефакт уже экипирован"}
+
+    # Находим свободный слот
+    for i in range(1, 4):
+        slot = user.get(f'equipped_artifact_{i}')
+        if not slot:
+            # Экипируем
+            update_user_stats(vk_id, **{f'equipped_artifact_{i}': artifact_name})
+            return {"success": True, "message": f"✅ Артефакт {artifact_name} экипирован!"}
+
+    return {"success": False, "message": "Нет свободных слотов"}
+
+
+def unequip_artifact(vk_id: int, artifact_name: str) -> dict:
+    """Снять артефакт."""
+    user = get_user_by_vk(vk_id)
+    if not user:
+        return {"success": False, "message": "Пользователь не найден"}
+
+    # Ищем артефакт в слотах
+    for i in range(1, 4):
+        slot = user.get(f'equipped_artifact_{i}')
+        if slot == artifact_name:
+            update_user_stats(vk_id, **{f'equipped_artifact_{i}': None})
+            return {"success": True, "message": f"✅ Артефакт {artifact_name} снят!"}
+
+    return {"success": False, "message": "Этот артефакт не экипирован"}
+
+
+def get_equipped_artifacts(vk_id: int) -> list:
+    """Получить список экипированных артефактов."""
+    user = get_user_by_vk(vk_id)
+    if not user:
+        return []
+
+    artifacts = []
+    for i in range(1, 4):
+        slot = user.get(f'equipped_artifact_{i}')
+        if slot:
+            artifacts.append(slot)
+    return artifacts
+
+
+def get_artifact_bonuses(vk_id: int) -> dict:
+    """Получить все бонусы от экипированных артефактов."""
+    equipped = get_equipped_artifacts(vk_id)
+
+    bonuses = {
+        "defense": 0,
+        "defense_fire": 0,
+        "energy": 0,
+        "radiation": 0,
+        "crit": 0,
+        "find_chance": 0,
+        "dodge": 0,
+        "max_health_bonus": 0,
+        "weight": 0,
+        "fire_immune": False,
+        "full_heal": False,
+    }
+
+    for artifact_name in equipped:
+        bonus = ARTIFACT_BONUSES.get(artifact_name, {})
+        for key, value in bonus.items():
+            if key == "full_heal" and value:
+                bonuses["full_heal"] = True
+            elif key == "fire_immune" and value:
+                bonuses["fire_immune"] = True
+            elif key in bonuses:
+                bonuses[key] += value
+
+    return bonuses
+
+
+def buy_artifact_slot(vk_id: int) -> dict:
+    """Купить дополнительный слот для артефактов."""
+    user = get_user_by_vk(vk_id)
+    if not user:
+        return {"success": False, "message": "Пользователь не найден"}
+
+    current_slots = user.get('artifact_slots', 3)
+
+    if current_slots >= 6:
+        return {"success": False, "message": "Достигнут максимум слотов (6)"}
+
+    if current_slots < 25:
+        return {"success": False, "message": "Нужен 25 уровень для покупки слотов"}
+
+    cost = ARTIFACT_SLOT_COSTS.get(current_slots + 1)
+    if not cost:
+        return {"success": False, "message": "Нельзя купить больше слотов"}
+
+    if user['money'] < cost:
+        return {"success": False, "message": f"Недостаточно денег! Нужно: {cost} руб."}
+
+    # Покупаем
+    update_user_stats(vk_id, money=user['money'] - cost, artifact_slots=current_slots + 1)
+    return {"success": True, "message": f"✅ Куплен {current_slots + 1}-й слот за {cost} руб.!",
+            "new_slots": current_slots + 1}
+
+
+# Функции для работы с инвентарём
+def get_user_inventory(vk_id: int) -> list[dict]:
+    """Получить инвентарь пользователя"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT i.name, i.category, i.description, i.price, i.attack, i.defense, i.weight, i.backpack_bonus, ui.quantity
+        FROM user_inventory ui
+        JOIN items i ON ui.item_id = i.id
+        JOIN users u ON ui.user_id = u.id
+        WHERE u.vk_id = %s
+    """, (vk_id,))
+    rows = cursor.fetchall()
+    cursor.close()
+    release_connection(conn)
+    return [dict(row) for row in rows]
+
+
+def add_item_to_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+    """Добавить предмет в инвентарь"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Получаем id пользователя и предмета
+    cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+    user_row = cursor.fetchone()
+    if not user_row:
+        logger.warning(f"[ADD_ITEM] User not found: vk_id={vk_id}")
+        cursor.close()
+        release_connection(conn)
+        return False
+    
+    cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+    item_row = cursor.fetchone()
+    if not item_row:
+        logger.warning(f"[ADD_ITEM] Item not found: '{item_name}'")
+        cursor.close()
+        release_connection(conn)
+        return False
+    
+    user_id = user_row['id']
+    item_id = item_row['id']
+    logger.info(f"[ADD_ITEM] Adding item_id={item_id} ({item_name}) to user_id={user_id}, qty={quantity}")
+
+    # Добавляем или обновляем количество
+    cursor.execute("""
+        INSERT INTO user_inventory (user_id, item_id, quantity)
+        VALUES (%s, %s, %s)
+        ON CONFLICT(user_id, item_id) 
+        DO UPDATE SET quantity = user_inventory.quantity + %s
+    """, (user_id, item_id, quantity, quantity))
+    
+    conn.commit()
+    logger.info(f"[ADD_ITEM] Committed successfully")
+    cursor.close()
+    release_connection(conn)
+    return True
+
+
+def remove_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+    """Удалить предмет из инвентаря"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+    user_row = cursor.fetchone()
+    if not user_row:
+        cursor.close()
+        release_connection(conn)
+        return False
+    
+    cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+    item_row = cursor.fetchone()
+    if not item_row:
+        cursor.close()
+        release_connection(conn)
+        return False
+    
+    user_id = user_row['id']
+    item_id = item_row['id']
+    
+    # Уменьшаем количество
+    cursor.execute("""
+        UPDATE user_inventory 
+        SET quantity = quantity - %s
+        WHERE user_id = %s AND item_id = %s AND quantity >= %s
+    """, (quantity, user_id, item_id, quantity))
+    
+    # Удаляем запись если количество стало 0
+    cursor.execute("""
+        DELETE FROM user_inventory 
+        WHERE user_id = %s AND item_id = %s AND quantity <= 0
+    """, (user_id, item_id))
+    
+    conn.commit()
+    cursor.close()
+    release_connection(conn)
+    return True
+
+
+def get_item_by_name(item_name: str) -> dict | None:
+    """Получить предмет по имени (из кэша)"""
+    items, _, _ = _get_cached_items()
+    return items.get(item_name)
+
+
+def get_items_by_category(category: str) -> list[dict]:
+    """Получить все предметы категории (из кэша)"""
+    _, by_category, _ = _get_cached_items()
+    return by_category.get(category, [])
+
+
+def get_shop_items(category: str = None) -> list[dict]:
+    """Получить предметы для продажи (из кэша)"""
+    _, _, shop_items = _get_cached_items()
+    return shop_items.get(category, [])
+
+
+def get_random_trash(count: int = 3) -> list[dict]:
+    """Получить случайный мусор (для выпадения с монстров)"""
+    _, by_category, _ = _get_cached_items()
+    trash_items = by_category.get('trash', [])
+
+    if not trash_items:
+        return []
+
+    import random
+    return random.sample(trash_items, min(count, len(trash_items)))
+
+
+def get_loot_from_human(player_luck: int = 5) -> list[dict]:
+    """Получить лут с человека (военный, рейдер, охранник) - оружие и броня из магазина
+
+    Параметры:
+        player_luck: удача игрока (влияет на шанс выпадения)
+    """
+    _, by_category, _ = _get_cached_items()
+    import random
+
+    loot = []
+
+    # Категории из магазина
+    weapons = by_category.get('weapons', [])
+    armor = by_category.get('armor', [])
+    trash = by_category.get('trash', [])
+    consumables = by_category.get('consumables', [])
+
+    # Базовые шансы
+    base_weapon_chance = 7
+    base_armor_chance = 7
+    base_consumable_chance = 31
+
+    # Бонус к шансам от удачи (совсем минимальный)
+    luck_bonus = max(0, player_luck - 10) // 5  # только удача 10+ даёт бонус, каждые 5 пунктов +1%
+    weapon_chance = base_weapon_chance + luck_bonus
+    armor_chance = base_armor_chance + luck_bonus
+    consumable_chance = base_consumable_chance + luck_bonus
+
+    # 1-2 предмета мусора
+    if trash:
+        loot.extend(random.sample(trash, min(1, len(trash))))
+
+    # Определяем, что выпадет (с учётом удачи)
+    roll = random.randint(1, 100)
+
+    if roll <= weapon_chance:
+        # Оружие из магазина
+        if weapons:
+            loot.append(random.choice(weapons))
+    elif roll <= weapon_chance + armor_chance:
+        # Броня из магазина
+        if armor:
+            loot.append(random.choice(armor))
+    elif roll <= weapon_chance + armor_chance + consumable_chance:
+        # Предмет для использования
+        if consumables:
+            loot.append(random.choice(consumables))
+    else:
+        # Мусор
+        if trash:
+            loot.append(random.choice(trash))
+
+    return loot
+
+
+def give_newbie_kit(vk_id: int) -> dict:
+    """Выдать набор новичка игроку
+
+    Возвращает:
+        dict с информацией о выданных предметах или None при ошибке
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Предметы набора новичка
+    newbie_items = [
+        ("ПМ", 1),
+        ("Кожаная куртка", 1),
+        ("Аптечка", 2),
+        ("Бинт", 2),
+        ("Хлеб", 1),
+        ("Вода", 1),
+    ]
+
+    # Проверяем, не получал ли уже игрок набор
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT newbie_kit_received FROM users WHERE vk_id = %s", (vk_id,))
+    row = cursor.fetchone()
+    logger.info(f"[NEWBIE_KIT] User {vk_id}, row: {row}")
+
+    if not row or row['newbie_kit_received'] == 1:
+        logger.info(f"[NEWBIE_KIT] Already received or user not found")
+        cursor.close()
+        release_connection(conn)
+        return None
+
+    # Выдаём предметы
+    success_items = []
+    for item_name, quantity in newbie_items:
+        logger.info(f"[NEWBIE_KIT] Adding item: {item_name} x{quantity}")
+        result = add_item_to_inventory(vk_id, item_name, quantity)
+        logger.info(f"[NEWBIE_KIT] Result for {item_name}: {result}")
+        if result:
+            success_items.append((item_name, quantity))
+
+    logger.info(f"[NEWBIE_KIT] Success items: {success_items}")
+
+    # Устанавливаем флаг, что набор получен и выдаём деньги
+    update_user_stats(vk_id, newbie_kit_received=1, money=10000)
+
+    cursor.close()
+    release_connection(conn)
+
+    return {
+        "items": success_items,
+        "message": "Набор новичка выдан!"
+    }
+
+
+def get_loot_from_mutant(player_luck: int = 5) -> list[dict]:
+    """Получить лут с мутанта (волк, химера, зомби) - больше мусора и расходников
+
+    Параметры:
+        player_luck: удача игрока (влияет на шанс выпадения)
+    """
+    _, by_category, _ = _get_cached_items()
+    import random
+
+    loot = []
+
+    trash = by_category.get('trash', [])
+    consumables = by_category.get('consumables', [])
+
+    # Базовый шанс на расходники + бонус от удачи (совсем минимальный)
+    base_consumable_chance = 40
+    luck_bonus = max(0, player_luck - 10) // 5  # только удача 10+ даёт бонус, каждые 5 пунктов +1%
+    consumable_chance = base_consumable_chance + luck_bonus
+
+    # 2-4 предмета мусора
+    if trash:
+        loot.extend(random.sample(trash, min(random.randint(2, 4), len(trash))))
+
+    # Шанс на расходники (с учётом удачи)
+    if consumables and random.randint(1, 100) <= consumable_chance:
+        loot.append(random.choice(consumables))
+
+    return loot
+
+
