@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 # Настройка логирования
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%H:%M:%S'
 )
@@ -808,6 +808,10 @@ def main():
         return
     
     logger.info("Starting VK S.T.A.L.K.E.R. bot...")
+
+    # Инициализация БД
+    logger.info("Инициализация базы данных...")
+    database.init_db()
 
     vk_session = vk_api.VkApi(token=TOKEN)
     vk = vk_session.get_api()
