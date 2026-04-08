@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TARGET_DIR=/opt/stalker_bot
-VENV_DIR="$TARGET_DIR/.venv"
+VENV_DIR="$TARGET_DIR/venv"
 SERVICE_FILE=/etc/systemd/system/stalker_bot.service
 
 mkdir -p "$TARGET_DIR"
