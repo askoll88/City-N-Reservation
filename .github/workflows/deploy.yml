@@ -51,6 +51,7 @@ jobs:
             --exclude '.git' \
             --exclude '.github' \
             --exclude '.env' \
+            --exclude 'venv' \
             --exclude 'tests' \
             --exclude '__pycache__' \
             -e "ssh -p $SSH_PORT -o StrictHostKeyChecking=no" \
