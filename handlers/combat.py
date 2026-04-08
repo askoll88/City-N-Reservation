@@ -12,6 +12,8 @@ from constants import RESEARCH_LOCATIONS
 # === Глобальное состояние ===
 _combat_state = {}  # Хранит состояние боя для каждого пользователя
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
+_skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
+_active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
 
 
 # === События исследования ===
@@ -542,30 +544,257 @@ def _handle_research_event(player, vk, user_id: int, event_id: str, time_sec: in
         return
 
 
+# Состояние взаимодействия с аномалиями
+_anomaly_state = {}
+
+
 def _handle_anomaly(player, vk, user_id: int):
     """Обработка попадания в аномалию"""
-    _, create_location_keyboard, _, _ = _get_main_imports()
+    import anomalies as anomalies_module
+    _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
 
-    # Получаем реальные данные игрока
+    # Получаем данные игрока
     user = database.get_user_by_vk(user_id)
     if not user:
         return
 
-    damage = random.randint(10, 25)
-    new_health = max(0, user['health'] - damage)
-    database.update_user_stats(user_id, health=new_health)
+    # Проверяем детектор - БЕЗ ДЕТЕКТОРА АНОМАЛИЮ НЕ ВИДНО!
+    detector = anomalies_module.get_equipped_detector(player)
+    if not detector:
+        # Без детектора аномалия не обнаружена - игрок просто исследует дальше
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "Ты исследуешь территорию...\n\n"
+                "Аномалий не обнаружено (нужен детектор).\n\n"
+                "Энергия потрачена."
+            ),
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    # Получаем случайную аномалию
+    anomaly = anomalies_module.get_random_anomaly()
+    anomaly_type = anomaly["type"]
+    anomaly_name = anomaly["name"]
+    anomaly_icon = anomaly["icon"]
+    anomaly_desc = anomaly["description"]
+    anomaly_danger = anomaly["danger_level"]
+
+    # Получаем бонус детектора
+    detector_bonus = anomalies_module.get_detector_bonus(player)
+    detector_name = detector["name"]
+
+    # Урон с детектором (меньше)
+    damage_min, damage_max = anomaly.get("damage_with_detector", [5, 15])
+
+    # Возможные артефакты в этой аномалии
+    possible_artifacts = anomaly.get("artifacts", [])
+
+    # Получаем количество гильз
+    shells = database.get_user_shells(user_id)
+
+    # Сохраняем состояние аномалии
+    _anomaly_state[user_id] = {
+        "anomaly_type": anomaly_type,
+        "anomaly_name": anomaly_name,
+        "anomaly_icon": anomaly_icon,
+        "damage_min": damage_min,
+        "damage_max": damage_max,
+        "possible_artifacts": possible_artifacts,
+        "detector": detector_name,
+        "detector_bonus": detector_bonus,
+        "location_id": player.current_location_id
+    }
+
+    # Формируем сообщение
+    message = (
+        f"⚠️ АНОМАЛИЯ ОБНАРУЖЕНА! ⚠️\n\n"
+        f"{anomaly_icon} {anomaly_name}\n"
+        f"{anomaly_desc}\n\n"
+        f"Опасность: {anomaly_danger}\n"
+        f"Детектор: {detector_name} (+{detector_bonus}% к шансу)\n"
+        f"Гильзы: {shells} шт.\n"
+    )
+
+    if possible_artifacts:
+        message += f"Возможные артефакты: {', '.join(possible_artifacts)}\n"
+
+    message += "\nВыбери действие:"
+
+    # Клавиатура выбора
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Обойти", color=VkKeyboardColor.POSITIVE)
+    if shells > 0:
+        keyboard.add_button("Бросить гильзу", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("Отступить", color=VkKeyboardColor.NEGATIVE)
+
+    if shells == 0:
+        message += "\n\n⚠️ У тебя нет гильз! Сначала найди гильзы."
 
     vk.messages.send(
         user_id=user_id,
-        message=(
-            f"АНОМАЛИЯ!\n\n"
-            f"Ты попал в гравитационную ловушку! Тебя сильно сдавило.\n\n"
-            f"Получен урон: {damage}\n"
-            f"Текущее HP: {new_health}/100"
-        ),
-        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        message=message,
+        keyboard=keyboard.get_keyboard(),
         random_id=0
     )
+
+
+def handle_anomaly_action(player, vk, user_id: int, action: str):
+    """Обработка действия игрока с аномалией"""
+    import anomalies as anomalies_module
+
+    _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
+
+    # Получаем состояние аномалии
+    anomaly_data = _anomaly_state.get(user_id)
+    if not anomaly_data:
+        return
+
+    anomaly_type = anomaly_data["anomaly_type"]
+    anomaly_name = anomaly_data["anomaly_name"]
+    anomaly_icon = anomaly_data["anomaly_icon"]
+    damage_min = anomaly_data["damage_min"]
+    damage_max = anomaly_data["damage_max"]
+    possible_artifacts = anomaly_data["possible_artifacts"]
+    location_id = anomaly_data["location_id"]
+
+    user = database.get_user_by_vk(user_id)
+    if not user:
+        return
+
+    # Удаляем состояние аномалии
+    del _anomaly_state[user_id]
+
+    if action == "обойти":
+        # Попытка обойти - зависит от восприятия
+        perception = user.get('perception', 1)
+        dodge_chance = 30 + perception * 5  # 30-80%
+
+        if random.randint(1, 100) <= dodge_chance:
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    f"{anomaly_icon} ОБХОД\n\n"
+                    f"Ты аккуратно обошёл аномалию '{anomaly_name}'.\n\n"
+                    f"Твоё восприятие помогло найти безопасный путь.\n\n"
+                    f"Никаких потерь."
+                ),
+                keyboard=create_location_keyboard(location_id).get_keyboard(),
+                random_id=0
+            )
+        else:
+            # Не удалось обойти - получаем урон
+            damage = random.randint(damage_min, damage_max)
+            new_health = max(0, user['health'] - damage)
+            database.update_user_stats(user_id, health=new_health)
+
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    f"{anomaly_icon} НЕУДАЧНЫЙ ОБХОД\n\n"
+                    f"Не удалось обойти аномалию '{anomaly_name}'!\n\n"
+                    f"Получен урон: {damage}\n"
+                    f"Текущее HP: {new_health}/100"
+                ),
+                keyboard=create_location_keyboard(location_id).get_keyboard(),
+                random_id=0
+            )
+
+    elif action == "бросить гильзу" or action == "добыть":
+        # === НОВАЯ МЕХАНИКА: бросок гильзы ===
+        shells = database.get_user_shells(user_id)
+
+        if shells <= 0:
+            # Нет гильз - показываем сообщение и возвращаем в меню аномалии
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    f"{anomaly_icon} НЕТ ГИЛЬЗ!\n\n"
+                    f"У тебя нет гильз для добычи артефакта.\n\n"
+                    f"Сначала найди гильзы (выпадают с врагов или покупаются)."
+                ),
+                keyboard=create_location_keyboard(location_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Тратим одну гильзу
+        database.remove_shells(user_id, 1)
+        shells_after = shells - 1
+
+        # Получаем бонус детектора
+        detector = anomalies_module.get_equipped_detector(player)
+        detector_bonus = anomalies_module.get_detector_bonus(player) if detector else 0
+
+        # Бросок гильзы - пытаемся получить артефакт
+        luck = user.get('luck', 5)
+        result = database.roll_artifact_from_anomaly(anomaly_type, luck, detector_bonus)
+
+        if result:
+            # Артефакт получен!
+            artifact_name = result["name"]
+            rarity = result["rarity"]
+
+            # Добавляем артефакт в инвентарь
+            database.add_item_to_inventory(user_id, artifact_name, 1)
+
+            # Формируем сообщение об успехе
+            rarity_emoji = {
+                "common": "⚪",
+                "rare": "🔵",
+                "unique": "🟣",
+                "legendary": "🟡"
+            }.get(rarity, "⚪")
+
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    f"{anomaly_icon} ✨ АРТЕФАКТ ПОЛУЧЕН! ✨\n\n"
+                    f"Ты бросил гильзу в аномалию '{anomaly_name}'...\n\n"
+                    f"{rarity_emoji} <b>{artifact_name}</b>\n"
+                    f"Редкость: {rarity}\n\n"
+                    f"Гильз осталось: {shells_after}\n\n"
+                    f"Артефакт добавлен в инвентарь!"
+                ),
+                keyboard=create_location_keyboard(location_id).get_keyboard(),
+                random_id=0
+            )
+        else:
+            # Артефакт не выпал - гильза потеряна
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    f"{anomaly_icon} ПОПЫТКА ДОБЫЧИ\n\n"
+                    f"Ты бросил гильзу в аномалию '{anomaly_name}'...\n\n"
+                    f"Гильза сгорела в аномалии!\n"
+                    f"Артефакт не выпал.\n\n"
+                    f"Гильз осталось: {shells_after}"
+                ),
+                keyboard=create_location_keyboard(location_id).get_keyboard(),
+                random_id=0
+            )
+
+    elif action == "отступить":
+        # Гарантированный урон при отступлении
+        damage = random.randint(damage_min, damage_max)
+        new_health = max(0, user['health'] - damage)
+        database.update_user_stats(user_id, health=new_health)
+
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                f"{anomaly_icon} ОТСТУПЛЕНИЕ\n\n"
+                f"Ты решил отступить от аномалии '{anomaly_name}'.\n\n"
+                f"При отступлении аномалия нанесла удар:\n"
+                f"Получен урон: {damage}\n"
+                f"Текущее HP: {new_health}/100"
+            ),
+            keyboard=create_location_keyboard(location_id).get_keyboard(),
+            random_id=0
+        )
 
 
 def _handle_radiation(player, vk, user_id: int):
@@ -820,15 +1049,527 @@ def _spawn_item(player, vk, user_id: int):
     )
 
 
-def create_combat_keyboard():
+def create_combat_keyboard(player=None, user_id=None):
     """Клавиатура боя"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
     keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
+    # Кнопка навыков - показываем только если есть класс
+    if player and player.player_class:
+        keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
     return keyboard
+
+
+def create_skills_keyboard(player, user_id: int = None):
+    """Клавиатура навыков в бою"""
+    from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+    from classes import get_class, get_class_by_weapon
+
+    keyboard = VkKeyboard(one_time=False)
+
+    # Определяем текущий класс по оружию
+    current_weapon = player.equipped_weapon
+    class_id = get_class_by_weapon(current_weapon) if current_weapon else player.player_class
+
+    if not class_id:
+        return None
+
+    player_class = get_class(class_id)
+    if not player_class:
+        return None
+
+    # Получаем кулдауны игрока
+    if user_id is None:
+        user_id = getattr(player, 'vk_id', None)
+    cooldowns = _skill_cooldowns.get(user_id, {})
+    active_effects = _active_skill_effects.get(player.vk_id, {})
+
+    # Добавляем кнопки активных навыков
+    for skill in player_class.active_skills:
+        skill_name = skill["name"]
+        skill_cost = skill["energy_cost"]
+        cd = cooldowns.get(skill_name, 0)
+
+        # Проверяем, можно ли использовать навык
+        can_use = True
+        status = ""
+
+        if player.energy < skill_cost:
+            can_use = False
+            status = f" (мало энергии)"
+        elif cd > 0:
+            can_use = False
+            status = f" (перезарядка {cd} ход)"
+
+        # Проверяем активные эффекты
+        for effect_name, effect_turns in active_effects.items():
+            if "damage_boost" in str(skill.get("effect", {})) and effect_name == "damage_boost":
+                status = f" (активен)"
+            elif skill_name == "Уклонение" and effect_name == "perfect_dodge":
+                status = f" (активен)"
+            elif skill_name == "Бронирование" and effect_name == "temp_defense":
+                status = f" (активен)"
+
+        btn_text = f"{skill_name} ({skill_cost} эн)"
+        if status:
+            btn_text = f"{skill_name}{status}"
+
+        color = VkKeyboardColor.POSITIVE if can_use else VkKeyboardColor.SECONDARY
+        keyboard.add_button(btn_text, color=color)
+        keyboard.add_line()
+
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def show_skills_in_combat(player, vk, user_id):
+    """Показать навыки в бою"""
+    from classes import get_class, get_class_by_weapon
+
+    current_weapon = player.equipped_weapon
+    class_id = get_class_by_weapon(current_weapon) if current_weapon else player.player_class
+
+    if not class_id:
+        vk.messages.send(
+            user_id=user_id,
+            message="⚡ У тебя нет класса!\n\nСначала получи класс у Наставника в Убежище.",
+            random_id=0
+        )
+        return
+
+    player_class = get_class(class_id)
+    if not player_class:
+        return
+
+    # Формируем сообщение
+    msg = f"⚡ <b>НАВЫКИ КЛАССА {class_id.upper()}</b>\n\n"
+    msg += f"Твоя энергия: {player.energy}/100\n\n"
+
+    cooldowns = _skill_cooldowns.get(user_id, {})
+    active_effects = _active_skill_effects.get(user_id, {})
+
+    for skill in player_class.active_skills:
+        skill_name = skill["name"]
+        skill_desc = skill["description"]
+        skill_cost = skill["energy_cost"]
+        cd = cooldowns.get(skill_name, 0)
+
+        # Проверяем активные эффекты
+        effect_active = False
+        for effect_name in active_effects:
+            if "damage_boost" in str(skill.get("effect", {})) and effect_name == "damage_boost":
+                effect_active = True
+
+        status = "✅ Готов" if cd == 0 and not effect_active else "⏳"
+        if cd > 0:
+            status = f"🔄 Перезарядка: {cd} ход"
+        elif effect_active:
+            status = f"✨ Активен"
+        elif player.energy < skill_cost:
+            status = f"❌ Мало энергии"
+
+        msg += f"<b>{skill_name}</b>\n"
+        msg += f"   {skill_desc}\n"
+        msg += f"   Энергия: {skill_cost} | Кулдаун: {skill['cooldown']} ходов\n"
+        msg += f"   Статус: {status}\n\n"
+
+    # Показываем активные эффекты
+    if active_effects:
+        msg += "🔮 <b>Активные эффекты:</b>\n"
+        for effect_name, turns in active_effects.items():
+            msg += f"• {effect_name}: {turns} ходов\n"
+
+    keyboard = create_skills_keyboard(player, user_id)
+    if not keyboard:
+        return
+
+    vk.messages.send(
+        user_id=user_id,
+        message=msg,
+        keyboard=keyboard.get_keyboard(),
+        random_id=0
+    )
+
+
+def use_skill(player, vk, user_id: int, skill_name: str):
+    """Использовать навык в бою"""
+    from classes import get_class, get_class_by_weapon
+    import database
+
+    combat = _combat_state.get(user_id)
+    if not combat:
+        vk.messages.send(
+            user_id=user_id,
+            message="⚠️ Ты не в бою!",
+            random_id=0
+        )
+        return
+
+    current_weapon = player.equipped_weapon
+    class_id = get_class_by_weapon(current_weapon) if current_weapon else player.player_class
+
+    if not class_id:
+        vk.messages.send(
+            user_id=user_id,
+            message="⚡ У тебя нет класса!",
+            random_id=0
+        )
+        return
+
+    player_class = get_class(class_id)
+    if not player_class:
+        return
+
+    # Ищем навык
+    skill = None
+    for s in player_class.active_skills:
+        if skill_name.lower() in s["name"].lower():
+            skill = s
+            break
+
+    if not skill:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"⚡ Навык '{skill_name}' не найден!",
+            random_id=0
+        )
+        return
+
+    # Проверяем кулдаун
+    cooldowns = _skill_cooldowns.get(user_id, {})
+    if cooldowns.get(skill["name"], 0) > 0:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"⚡ Навык '{skill['name']}' на перезарядке! Осталось {cooldowns[skill['name']]} ходов.",
+            random_id=0
+        )
+        return
+
+    # Проверяем энергию
+    if player.energy < skill["energy_cost"]:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"⚡ Не хватает энергии! Нужно {skill['energy_cost']}, есть {player.energy}.",
+            random_id=0
+        )
+        return
+
+    # Тратим энергию
+    new_energy = player.energy - skill["energy_cost"]
+    database.update_user_stats(user_id, energy=new_energy)
+    player.energy = new_energy
+
+    # Устанавливаем кулдаун
+    if user_id not in _skill_cooldowns:
+        _skill_cooldowns[user_id] = {}
+    _skill_cooldowns[user_id][skill["name"]] = skill["cooldown"]
+
+    # Применяем эффект навыка
+    effect = skill.get("effect", {})
+    result_msg = _apply_skill_effect(player, vk, user_id, skill, combat, effect)
+
+    # === Проверяем, нанесен ли урон (мгновенные эффекты) или требуется следующий ход ===
+    instant_damage_effects = ["double_shot", "burst_count", "damage_mult", "ignore_defense"]
+
+    if any(eff in effect for eff in instant_damage_effects):
+        # Мгновенный урон - обрабатываем ответ врага
+        if combat['enemy_hp'] > 0:
+            # Враг атакует
+            enemy_damage = combat['enemy_damage']
+            active_effects = get_active_effects(user_id)
+
+            is_dodged = random.randint(1, 100) <= player.dodge_chance
+            if is_dodged:
+                result_msg += f"\nТы уклонился от атаки!"
+            else:
+                total_defense = player.total_defense
+
+                # Применяем эффекты защиты
+                if "temp_defense_active" in active_effects:
+                    total_defense += active_effects.get("temp_defense", 0)
+                if "incoming_damage_reduction" in active_effects:
+                    enemy_damage = int(enemy_damage * (1 - active_effects["incoming_damage_reduction"]))
+                if "enemy_damage_reduction" in active_effects:
+                    enemy_damage = int(enemy_damage * (1 - active_effects["enemy_damage_reduction"]))
+
+                final_damage = max(1, enemy_damage - total_defense)
+                player.health -= final_damage
+                result_msg += f"\n{combat['enemy_name']} атакует!\nПолучен урон: {final_damage}"
+
+                # Проверка на смерть
+                if player.health <= 0:
+                    player.health = 0
+                    database.update_user_stats(user_id, health=0)
+                    del _combat_state[user_id]
+                    _handle_death(player, vk, user_id)
+                    return
+
+        # Проверяем победу
+        if combat['enemy_hp'] <= 0:
+            result_msg += _handle_victory(player, combat, user_id)
+            vk.messages.send(
+                user_id=user_id,
+                message=result_msg,
+                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Обновляем HP в БД
+        database.update_user_stats(user_id, health=player.health)
+
+        # Прогресс-бары
+        enemy_hp_bar = _create_hp_bar(combat['enemy_hp'], combat['enemy_max_hp'])
+        player_hp_bar = _create_hp_bar(player.health, player.max_health)
+
+        result_msg += (
+            f"\n\n{combat['enemy_name']}\n"
+            f"HP {enemy_hp_bar} {combat['enemy_hp']}/{combat['enemy_max_hp']}\n\n"
+            f"Ты\n"
+            f"HP {player_hp_bar} {player.health}/{player.max_health}"
+        )
+    else:
+        # Не мгновенный эффект - показываем сообщение и возвращаем в бой
+        pass
+
+    # Уменьшаем кулдауны
+    _decrease_cooldowns(user_id)
+
+    # Сохраняем состояние боя
+    _combat_state[user_id] = combat
+
+    # Показываем результат и клавиатуру боя
+    vk.messages.send(
+        user_id=user_id,
+        message=result_msg,
+        keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
+        random_id=0
+    )
+
+
+def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, effect: dict):
+    """Применить эффект навыка"""
+    from classes import get_class, get_class_by_weapon
+    import database
+
+    skill_name = skill["name"]
+    message = ""
+
+    # === Двойной выстрел ===
+    if "double_shot" in effect:
+        second_mult = effect.get("second_damage_mult", 0.7)
+
+        # Первый выстрел
+        weapon_damage = 0
+        if player.equipped_weapon:
+            item = database.get_item_by_name(player.equipped_weapon)
+            if item:
+                weapon_damage = item.get('attack', 0)
+
+        melee = player.melee_damage
+        first_damage = weapon_damage + melee
+
+        # Второй выстрел
+        second_damage = int(first_damage * second_mult)
+
+        total_damage = first_damage + second_damage
+        combat['enemy_hp'] -= total_damage
+
+        message = f"🎯 <b>{skill_name}</b>\n\n"
+        message += f"Первый выстрел: {first_damage} урона\n"
+        message += f"Второй выстрел: {second_damage} урона ({int(second_mult*100)}%)\n"
+        message += f"<b>Всего: {total_damage} урона</b>\n\n"
+
+    # === Точный выстрел (damage_boost) ===
+    elif "damage_boost" in effect:
+        mult = effect.get("damage_boost", 1.5)
+
+        if user_id not in _active_skill_effects:
+            _active_skill_effects[user_id] = {}
+        _active_skill_effects[user_id]["damage_boost"] = 1  # 1 ход
+
+        message = f"🎯 <b>{skill_name}</b>\n\n"
+        message += f"Прицел взят! Следующая атака нанесет {int((mult-1)*100)}% бонусного урона.\n\n"
+        message += "Используй 'Атаковать' для нанесения удара!\n\n"
+
+    # === Очередь (burst) ===
+    elif "burst_count" in effect:
+        burst_count = effect.get("burst_count", 3)
+        burst_damage = effect.get("burst_damage", 0.4)
+
+        weapon_damage = 0
+        if player.equipped_weapon:
+            item = database.get_item_by_name(player.equipped_weapon)
+            if item:
+                weapon_damage = item.get('attack', 0)
+
+        melee = player.melee_damage
+        base_damage = weapon_damage + melee
+        per_shot = int(base_damage * burst_damage)
+        total_damage = per_shot * burst_count
+
+        combat['enemy_hp'] -= total_damage
+
+        message = f"🔥 <b>{skill_name}</b>\n\n"
+        message += f"Очередь из {burst_count} выстрелов:\n"
+        for i in range(burst_count):
+            message += f"  Выстрел {i+1}: {per_shot} урона\n"
+        message += f"<b>Всего: {total_damage} урона</b>\n\n"
+
+    # === Подавление ===
+    elif "enemy_damage_reduction" in effect:
+        reduction = effect.get("enemy_damage_reduction", 0.25)
+
+        if user_id not in _active_skill_effects:
+            _active_skill_effects[user_id] = {}
+        _active_skill_effects[user_id]["enemy_damage_reduction"] = 1
+
+        message = f"🛡️ <b>{skill_name}</b>\n\n"
+        message += f"Враг подавлен! Его атаки наносят на {int(reduction*100)}% меньше урона.\n\n"
+
+    # === Прицельный выстрел ===
+    elif "damage_mult" in effect:
+        mult = effect.get("damage_mult", 2.5)
+        cannot_dodge = effect.get("cannot_dodge", False)
+
+        weapon_damage = 0
+        if player.equipped_weapon:
+            item = database.get_item_by_name(player.equipped_weapon)
+            if item:
+                weapon_damage = item.get('attack', 0)
+
+        melee = player.melee_damage
+        base_damage = weapon_damage + melee
+        total_damage = int(base_damage * mult)
+
+        combat['enemy_hp'] -= total_damage
+
+        message = f"🎯 <b>{skill_name}</b>\n\n"
+        message += f"Мощный прицельный выстрел!\n"
+        message += f"База: {base_damage} x {mult} = {total_damage} урона\n"
+        if cannot_dodge:
+            message += "Враг не может уклониться!\n"
+        message += "\n"
+
+    # === Незримый ===
+    elif "incoming_damage_reduction" in effect:
+        reduction = effect.get("incoming_damage_reduction", 0.5)
+
+        if user_id not in _active_skill_effects:
+            _active_skill_effects[user_id] = {}
+        _active_skill_effects[user_id]["incoming_damage_reduction"] = 1
+
+        message = f"👻 <b>{skill_name}</b>\n\n"
+        message += f"Ты стал невидимым! Следующий урон врага уменьшен на {int(reduction*100)}%.\n\n"
+
+    # === Шквал огня ===
+    elif "burst_count" in effect:  # Уже обработано выше, но для пулемётчика
+        burst_count = effect.get("burst_count", 5)
+        burst_damage = effect.get("burst_damage", 0.3)
+
+        weapon_damage = 0
+        if player.equipped_weapon:
+            item = database.get_item_by_name(player.equipped_weapon)
+            if item:
+                weapon_damage = item.get('attack', 0)
+
+        melee = player.melee_damage
+        base_damage = weapon_damage + melee
+        per_shot = int(base_damage * burst_damage)
+        total_damage = per_shot * burst_count
+
+        combat['enemy_hp'] -= total_damage
+
+        message = f"💥 <b>{skill_name}</b>\n\n"
+        message += f"Шквал из {burst_count} выстрелов:\n"
+        for i in range(burst_count):
+            message += f"  Выстрел {i+1}: {per_shot} урона\n"
+        message += f"<b>Всего: {total_damage} урона</b>\n\n"
+
+    # === Бронирование ===
+    elif "temp_defense" in effect:
+        defense = effect.get("temp_defense", 25)
+
+        if user_id not in _active_skill_effects:
+            _active_skill_effects[user_id] = {}
+        _active_skill_effects[user_id]["temp_defense"] = defense
+        _active_skill_effects[user_id]["temp_defense_active"] = 1
+
+        message = f"🛡️ <b>{skill_name}</b>\n\n"
+        message += f"Бронирование активировано! +{defense} защиты на 1 ход.\n\n"
+
+    # === Клинок в сердце ===
+    elif "ignore_defense" in effect:
+        ignore_def = effect.get("ignore_defense", 20)
+
+        weapon_damage = 0
+        if player.equipped_weapon:
+            item = database.get_item_by_name(player.equipped_weapon)
+            if item:
+                weapon_damage = item.get('attack', 0)
+
+        melee = player.melee_damage
+        base_damage = weapon_damage + melee
+        total_damage = int(base_damage * 1.5)  # 150% урона
+
+        combat['enemy_hp'] -= total_damage
+
+        message = f"🗡️ <b>{skill_name}</b>\n\n"
+        message += f"Точный удар в уязвимое место!\n"
+        message += f"Урон: {total_damage} (150%)\n"
+        message += f"Игнорирование защиты: {ignore_def}%\n\n"
+
+    # === Уклонение (perfect_dodge) ===
+    elif "perfect_dodge" in effect:
+        if user_id not in _active_skill_effects:
+            _active_skill_effects[user_id] = {}
+        _active_skill_effects[user_id]["perfect_dodge"] = 1
+
+        message = f"💨 <b>{skill_name}</b>\n\n"
+        message += "Ты готов уклониться от следующей атаки!\n\n"
+
+    # === Заградительный огонь ===
+    elif "aoe_damage_reduction" in effect:
+        reduction = effect.get("aoe_damage_reduction", 0.15)
+
+        if user_id not in _active_skill_effects:
+            _active_skill_effects[user_id] = {}
+        _active_skill_effects[user_id]["aoe_damage_reduction"] = reduction
+
+        message = f"🔥 <b>{skill_name}</b>\n\n"
+        message += f"Заградительный огонь! Все враги поблизости наносят на {int(reduction*100)}% меньше урона.\n\n"
+
+    else:
+        message = f"⚡ <b>{skill_name}</b>\n\nНавык активирован!\n\n"
+
+    return message
+
+
+def _decrease_cooldowns(user_id: int):
+    """Уменьшить кулдауны навыков после хода"""
+    if user_id not in _skill_cooldowns:
+        return
+
+    for skill_name in list(_skill_cooldowns[user_id].keys()):
+        _skill_cooldowns[user_id][skill_name] -= 1
+        if _skill_cooldowns[user_id][skill_name] <= 0:
+            del _skill_cooldowns[user_id][skill_name]
+
+    # Уменьшаем активные эффекты
+    if user_id in _active_skill_effects:
+        for effect_name in list(_active_skill_effects[user_id].keys()):
+            if isinstance(_active_skill_effects[user_id][effect_name], int):
+                _active_skill_effects[user_id][effect_name] -= 1
+                if _active_skill_effects[user_id][effect_name] <= 0:
+                    del _active_skill_effects[user_id][effect_name]
+
+
+def get_active_effects(user_id: int) -> dict:
+    """Получить активные эффекты игрока"""
+    return _active_skill_effects.get(user_id, {})
 
 
 def handle_combat_attack(player, vk, user_id: int):
@@ -839,6 +1580,9 @@ def handle_combat_attack(player, vk, user_id: int):
     if not combat:
         return
     
+    # === Проверяем активные эффекты ===
+    active_effects = get_active_effects(user_id)
+
     weapon_damage = 0
     weapon_name = None
     weapon_is_knife = False
@@ -857,6 +1601,15 @@ def handle_combat_attack(player, vk, user_id: int):
     melee = player.melee_damage
     total_damage = weapon_damage + melee
     
+    # === Применяем эффекты навыков ===
+    skill_message = ""
+
+    # Damage boost (Точный выстрел)
+    if "damage_boost" in active_effects:
+        total_damage = int(total_damage * 1.5)  # +50%
+        skill_message += "🎯 Точный выстрел! +50% урона!\n"
+        del _active_skill_effects[user_id]["damage_boost"]
+
     is_crit = random.randint(1, 100) <= player.crit_chance
     if is_crit:
         total_damage = int(total_damage * 1.5)
@@ -905,13 +1658,39 @@ def handle_combat_attack(player, vk, user_id: int):
     else:
         enemy_damage = combat['enemy_damage']
         
-        is_dodged = random.randint(1, 100) <= player.dodge_chance
-        if is_dodged:
-            message += f"\nТы уклонился от атаки!"
+        # === Проверяем perfect_dodge (навык Уклонение) ===
+        if "perfect_dodge" in active_effects:
+            message += "💨 Ты уклонился от атаки (навык Уклонение)!\n"
+            del _active_skill_effects[user_id]["perfect_dodge"]
         else:
-            total_defense = player.total_defense
-            final_damage = max(1, enemy_damage - total_defense)
-            player.health -= final_damage
+            is_dodged = random.randint(1, 100) <= player.dodge_chance
+            if is_dodged:
+                message += f"\nТы уклонился от атаки!"
+            else:
+                total_defense = player.total_defense
+
+                # === Применяем temp_defense (Бронирование) ===
+                if "temp_defense_active" in active_effects:
+                    temp_def = active_effects.get("temp_defense", 0)
+                    total_defense += temp_def
+                    message += f"🛡️ Бронирование: +{temp_def} защиты!\n"
+
+                # === Применяем incoming_damage_reduction (Незримый) ===
+                if "incoming_damage_reduction" in active_effects:
+                    reduction = active_effects["incoming_damage_reduction"]
+                    enemy_damage = int(enemy_damage * (1 - reduction))
+                    message += f"👻 Незримый: урон уменьшен на {int(reduction*100)}%!\n"
+                    del _active_skill_effects[user_id]["incoming_damage_reduction"]
+
+                # === Применяем enemy_damage_reduction (Подавление) ===
+                if "enemy_damage_reduction" in active_effects:
+                    reduction = active_effects["enemy_damage_reduction"]
+                    enemy_damage = int(enemy_damage * (1 - reduction))
+                    message += f"🔥 Подавление: враг ослаблен на {int(reduction*100)}%!\n"
+                    del _active_skill_effects[user_id]["enemy_damage_reduction"]
+
+                final_damage = max(1, enemy_damage - total_defense)
+                player.health -= final_damage
 
             # Проверка на смерть
             if player.health <= 0:
@@ -939,9 +1718,21 @@ def handle_combat_attack(player, vk, user_id: int):
             f"HP {player_hp_bar} {player.health}/{player.max_health}"
         )
 
+        # Уменьшаем кулдауны после хода
+        _decrease_cooldowns(user_id)
+
+        # Показываем активные эффекты
+        active_effects = get_active_effects(user_id)
+        if active_effects:
+            effects_msg = "\n🔮 <b>Активные эффекты:</b>\n"
+            for eff_name, eff_val in active_effects.items():
+                if isinstance(eff_val, int) and eff_val > 0:
+                    effects_msg += f"• {eff_name}: {eff_val} ход\n"
+            message += effects_msg
+
         # Сохраняем состояние боя и показываем клавиатуру боя
         _combat_state[user_id] = combat
-        keyboard = create_combat_keyboard()
+        keyboard = create_combat_keyboard(player, user_id)
 
     vk.messages.send(
         user_id=user_id,
@@ -1002,10 +1793,17 @@ def _handle_victory(player, combat, user_id: int) -> str:
     
     experience = random.randint(10, 30)
     money = random.randint(5, 25)
-    
+    shells_drop = random.randint(1, 3)  # 1-3 гильзы с врага
+
     player.experience += experience
     player.money += money
     
+    # Добавляем гильзы с учетом вместимости мешочка
+    shells_info = database.get_shells_info(user_id)
+    success, msg = database.add_shells(user_id, shells_drop)
+    current_shells = database.get_user_shells(user_id)
+    capacity = shells_info['capacity']
+
     database.update_user_stats(user_id, experience=player.experience, money=player.money)
     
     level_up = player._check_level_up()
@@ -1016,10 +1814,14 @@ def _handle_victory(player, combat, user_id: int) -> str:
         f"ПОБЕДА!\n\n"
         f"Ты победил {combat['enemy_name']}!\n\n"
         f"Награда: {money} руб.\n"
-        f"Опыт: +{experience}\n\n"
-        f"Ты\n"
-        f"HP {player_hp_bar} {player.health}/{player.max_health}\n"
+        f"Опыт: +{experience}\n"
+        f"Гильзы: {current_shells}/{capacity}\n"
     )
+
+    if not success:
+        message += f"⚠️ Мешочек переполнен! {msg}\n"
+
+    message += f"\nТы\nHP {player_hp_bar} {player.health}/{player.max_health}\n"
 
     if level_up:
         message += f"\n{level_up}"

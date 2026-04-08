@@ -9,7 +9,7 @@ def get_weapon_type(weapon_name):
 
     weapon_lower = weapon_name.lower()
 
-    # Пистолеты: ПМ, ТТ, Глок, Удав, ПММ, Корд (пистолет), П-96, С-40П
+    # Пистолеты: ПМ, ТТ, Глок, Удав, ПММ, П-99, П-96, С-40П
     if "пистолет" in weapon_lower or "пм" in weapon_lower or "тт" in weapon_lower or \
        "глок" in weapon_lower or "удав" in weapon_lower:
         return "пистолет"

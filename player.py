@@ -20,6 +20,7 @@ class Inventory:
         self.armor = []
         self.backpacks = []
         self.artifacts = []
+        self.shells_bags = []
         self.other = []
 
         for item in items:
@@ -32,6 +33,8 @@ class Inventory:
                 self.backpacks.append(item)
             elif category == 'artifacts':
                 self.artifacts.append(item)
+            elif category == 'shells_bag':
+                self.shells_bags.append(item)
             else:
                 self.other.append(item)
 
@@ -136,12 +139,14 @@ class Player:
         self.equipped_backpack = self._data.get('equipped_backpack')  # Надетый рюкзак
         self.equipped_weapon = self._data.get('equipped_weapon')  # Надетое оружие
         self.equipped_armor = self._data.get('equipped_armor')  # Надетая броня
+        self.equipped_device = self._data.get('equipped_device')  # Экипированное устройство (детектор)
         self.newbie_kit_received = self._data.get('newbie_kit_received', 0)  # Получил набор новичка
         self.max_weight = self._data['max_weight']   # Максимальный переносимый вес
         self.artifact_slots = self._data.get('artifact_slots', 3)  # Слоты для артефактов
         self.max_health_bonus = self._data.get('max_health_bonus', 0)  # Бонус к HP от артефактов
         self.inventory_section = self._data.get('inventory_section')  # Текущий раздел инвентаря
         self.previous_location = self._data.get('previous_location')  # Предыдущая локация для возврата
+        self.player_class = self._data.get('player_class')  # Класс персонажа
 
         # Экипированные артефакты
         self.equipped_artifact_1 = self._data.get('equipped_artifact_1')
@@ -186,10 +191,14 @@ class Player:
             self.equipped_backpack = self._data.get('equipped_backpack')
             self.equipped_weapon = self._data.get('equipped_weapon')
             self.equipped_armor = self._data.get('equipped_armor')
+            self.equipped_device = self._data.get('equipped_device')
             self.newbie_kit_received = self._data.get('newbie_kit_received', 0)
             self.inventory_section = self._data.get('inventory_section')
             self.previous_location = self._data.get('previous_location')
-            base_max_weight = 20 + self.strength * 2
+            # max_weight с учётом пассивных навыков
+            passive = self._get_passive_bonuses()
+            passive_weight_bonus = passive.get('max_weight', 0)
+            base_max_weight = 20 + self.strength * 2 + passive_weight_bonus
             self.max_weight = base_max_weight
             if self.equipped_backpack:
                 backpack = next((b for b in self.inventory.backpacks if b['name'] == self.equipped_backpack), None)
@@ -199,8 +208,11 @@ class Player:
 
     @property
     def dodge_chance(self) -> int:
-        """Шанс уклонения (%) от артефактов"""
-        return self._artifact_bonuses.get('dodge', 0)
+        """Шанс уклонения (%)"""
+        base = 10  # Базовый шанс уклонения
+        passive = self._get_passive_bonuses()
+        artifact = self._artifact_bonuses.get('dodge', 0)
+        return base + passive.get('dodge', 0) + artifact
 
     @property
     def artifact_radiation(self) -> int:
@@ -218,20 +230,36 @@ class Player:
     def crit_chance(self) -> int:
         """Шанс критического удара (%)"""
         base = 5 + (self.luck - 1) * 2  # Базовый 5% + 2% за каждый пункт удачи свыше 1
-        bonus = self._artifact_bonuses.get('crit', 0)
-        return min(100, base + bonus)
+        artifact_bonus = self._artifact_bonuses.get('crit', 0)
+        passive_bonus = self._get_passive_bonuses().get('crit_chance', 0)
+        return min(100, base + artifact_bonus + passive_bonus)
+
+    @property
+    def crit_damage(self) -> int:
+        """Бонус к критическому урону (%)"""
+        passive = self._get_passive_bonuses()
+        return passive.get('crit_damage', 0)
 
     @property
     def rare_find_chance(self) -> int:
         """Шанс редкой находки (%)"""
         base = self.luck * 2  # 2% за каждый пункт удачи
-        bonus = self._artifact_bonuses.get('rare_find_chance', 0)
-        return min(100, base + bonus)
+        artifact_bonus = self._artifact_bonuses.get('rare_find_chance', 0)
+        passive_bonus = self._get_passive_bonuses().get('rare_find_chance', 0)
+        return min(100, base + artifact_bonus + passive_bonus)
 
     @property
     def melee_damage(self) -> int:
         """Урон в ближнем бою"""
-        return 5 + self.strength
+        passive = self._get_passive_bonuses()
+        strength_bonus = passive.get('strength', 0)
+        return 5 + self.strength + strength_bonus
+
+    @property
+    def sell_bonus(self) -> int:
+        """Бонус к продаже предметов (%)"""
+        passive = self._get_passive_bonuses()
+        return passive.get('sell_bonus', 0)
 
     @property
     def max_health(self) -> int:
@@ -240,9 +268,21 @@ class Player:
 
     @property
     def total_defense(self) -> int:
-        """Общая защита (броня + артефакты)"""
+        """Общая защита (броня + артефакты + пассивные навыки)"""
         artifact_def = self._get_artifact_bonuses().get('defense', 0)
-        return self.armor_defense + artifact_def
+        passive_bonus = self._get_passive_bonuses().get('defense', 0)
+        return self.armor_defense + artifact_def + passive_bonus
+
+    def _get_passive_bonuses(self) -> dict:
+        """Получить бонусы от пассивных навыков класса"""
+        if not self.player_class:
+            return {}
+
+        try:
+            from classes import get_passive_bonuses
+            return get_passive_bonuses(self.player_class, self.level)
+        except Exception:
+            return {}
 
     @property
     def fire_defense(self) -> int:
@@ -368,8 +408,44 @@ class Player:
 
         equip_text = "\n".join(equip_parts)
 
+        # Получаем информацию о гильзах
+        shells_info = database.get_shells_info(self.user_id)
+        shells_current = shells_info['current']
+        shells_capacity = shells_info['capacity']
+        shells_bag = shells_info['equipped_bag'] or "нет"
+
+        shells_text = f"Гильзы: {shells_current}/{shells_capacity}"
+        if shells_bag != "нет":
+            shells_text += f" (мешочек: {shells_bag})"
+
+        # Получаем бонусы от пассивных навыков
+        passive_bonuses = self._get_passive_bonuses()
+        passive_info = ""
+        if passive_bonuses and self.player_class:
+            passive_info = "\n🎓 <b>Бонусы класса:</b>\n"
+            bonus_parts = []
+            if passive_bonuses.get('dodge'):
+                bonus_parts.append(f"Уклонение: +{passive_bonuses['dodge']}%")
+            if passive_bonuses.get('crit_chance'):
+                bonus_parts.append(f"Крит: +{passive_bonuses['crit_chance']}%")
+            if passive_bonuses.get('sell_bonus'):
+                bonus_parts.append(f"Продажа: +{passive_bonuses['sell_bonus']}%")
+            if passive_bonuses.get('weapon_damage'):
+                bonus_parts.append(f"Урон оружия: +{passive_bonuses['weapon_damage']}%")
+            if passive_bonuses.get('max_weight'):
+                bonus_parts.append(f"Перенос: +{passive_bonuses['max_weight']}кг")
+            if passive_bonuses.get('defense'):
+                bonus_parts.append(f"Защита: +{passive_bonuses['defense']}")
+            if passive_bonuses.get('strength'):
+                bonus_parts.append(f"Сила: +{passive_bonuses['strength']}")
+            if passive_bonuses.get('crit_damage'):
+                bonus_parts.append(f"Крит урон: +{passive_bonuses['crit_damage']}%")
+            passive_info += ", ".join(bonus_parts) if bonus_parts else "нет"
+
+        class_info = f"\n🎭 Класс: {self.player_class.upper()}" if self.player_class else ""
+
         return (
-            f"📊 СТАТУС ПЕРСОНАЖА\n\n"
+            f"📊 СТАТУС ПЕРСОНАЖА{class_info}\n\n"
             f"HP {hp_bar} {self.health}/{self.max_health}\n"
             f"Энергия {energy_bar} {self.energy}/100\n"
             f"Радиация {rad_bar} {self.radiation}%\n\n"
@@ -381,10 +457,12 @@ class Player:
             f"- Сила: {self.strength} (урон: {self.melee_damage}, +{self.strength * 2}кг)\n"
             f"- Выносливость: {self.stamina} (HP: {self.max_health})\n"
             f"- Восприятие: {self.perception} (находка: {self.find_chance}%)\n"
-            f"- Удача: {self.luck} (крит: {self.crit_chance}%, редкое: {self.rare_find_chance}%)\n\n"
+            f"- Удача: {self.luck} (крит: {self.crit_chance}%, редкое: {self.rare_find_chance}%)\n"
+            f"- Уклонение: {self.dodge_chance}%\n{passive_info}\n\n"
             f"Груз:\n"
             f"- Защита: {defense_info}\n"
-            f"- Вес: {current_weight}/{self.max_weight}кг {weight_status}"
+            f"- Вес: {current_weight}/{self.max_weight}кг {weight_status}\n\n"
+            f"🎯 {shells_text}"
         )
 
     def update_stats(self, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None):
@@ -410,7 +488,9 @@ class Player:
             self._check_level_up()
         if strength is not None:
             self.strength = max(1, min(20, strength))
-            self.max_weight = 20 + self.strength * 2
+            passive = self._get_passive_bonuses()
+            passive_weight_bonus = passive.get('max_weight', 0)
+            self.max_weight = 20 + self.strength * 2 + passive_weight_bonus
         if stamina is not None:
             self.stamina = max(1, min(20, stamina))
         if perception is not None:
@@ -517,7 +597,9 @@ class Player:
         if backpack_name is None:
             if self.equipped_backpack:
                 self.equipped_backpack = None
-                self.max_weight = 20 + self.strength * 2
+                passive = self._get_passive_bonuses()
+                passive_weight_bonus = passive.get('max_weight', 0)
+                self.max_weight = 20 + self.strength * 2 + passive_weight_bonus
                 database.update_user_stats(self.user_id, equipped_backpack=None, max_weight=self.max_weight)
                 return True, "Рюкзак снят."
             return False, "Рюкзак не надет."
@@ -527,7 +609,9 @@ class Player:
             return False, f"У тебя нет рюкзака '{backpack_name}' в инвентаре."
 
         self.equipped_backpack = backpack_name
-        base_max_weight = 20 + self.strength * 2
+        passive = self._get_passive_bonuses()
+        passive_weight_bonus = passive.get('max_weight', 0)
+        base_max_weight = 20 + self.strength * 2 + passive_weight_bonus
         backpack_bonus = backpack.get('backpack_bonus', 0)
         self.max_weight = base_max_weight + backpack_bonus
 
@@ -578,6 +662,51 @@ class Player:
         database.update_user_stats(self.user_id, equipped_armor=armor_name, armor_defense=defense)
 
         return True, f"Надета броня: {armor_name} ({defense})"
+
+    def equip_device(self, device_name: str = None) -> tuple[bool, str]:
+        """Надеть или снять устройство (детектор аномалий)"""
+        self.inventory.reload()
+
+        if device_name is None:
+            if self.equipped_device:
+                self.equipped_device = None
+                database.update_user_stats(self.user_id, equipped_device=None)
+                return True, "Устройство снято."
+            return False, "Устройство не надето."
+
+        device = next((d for d in self.inventory.other if d['name'].lower() == device_name.lower()), None)
+        if not device:
+            return False, f"У тебя нет устройства '{device_name}' в инвентаре."
+
+        self.equipped_device = device_name
+        database.update_user_stats(self.user_id, equipped_device=device_name)
+
+        return True, f"Надето устройство: {device_name}"
+
+    def equip_shells_bag(self, bag_name: str = None) -> tuple[bool, str]:
+        """Надеть или снять мешочек для гильз"""
+        self.inventory.reload()
+
+        # Проверяем, есть ли категория shells_bag в инвентаре
+        if not hasattr(self.inventory, 'shells_bags'):
+            return False, "У тебя нет мешочков для гильз."
+
+        if bag_name is None:
+            # Снять мешочек
+            user_data = database.get_user_by_vk(self.user_id)
+            current_bag = user_data.get('equipped_shells_bag') if user_data else None
+            if current_bag:
+                result = database.unequip_shells_bag(self.user_id)
+                return result['success'], result['message']
+            return False, "Мешочек не надет."
+
+        # Надеть мешочек
+        bag = next((b for b in self.inventory.shells_bags if b['name'].lower() == bag_name.lower()), None)
+        if not bag:
+            return False, f"У тебя нет мешочка '{bag_name}' в инвентаре."
+
+        result = database.equip_shells_bag(self.user_id, bag['name'])
+        return result['success'], result['message']
 
     def use_item(self, item_name: str) -> tuple[bool, str]:
         """Использовать предмет из инвентаря"""
@@ -699,7 +828,15 @@ class Player:
         if not item_info:
             return False, "Ошибка продажи."
 
-        sell_price = item_info.get('price', 0) // 2
+        base_sell_price = item_info.get('price', 0) // 2
+
+        # Применяем бонус к продаже от пассивных навыков
+        sell_bonus = self.sell_bonus
+        if sell_bonus > 0:
+            bonus_amount = int(base_sell_price * (sell_bonus / 100))
+            sell_price = base_sell_price + bonus_amount
+        else:
+            sell_price = base_sell_price
 
         db.remove_item_from_inventory(self.user_id, item_name, 1)
 
@@ -708,7 +845,8 @@ class Player:
 
         self.inventory.reload()
 
-        return True, f"Ты продал {item_name} за {sell_price} руб.\nДенег: {self.money} руб."
+        bonus_msg = f" (+{sell_bonus}% бонус)" if sell_bonus > 0 else ""
+        return True, f"Ты продал {item_name} за {sell_price} руб.{bonus_msg}\nДенег: {self.money} руб."
 
     def get_shop_items(self, category: str = None) -> list[dict]:
         """Получить список предметов в магазине"""

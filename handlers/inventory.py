@@ -325,6 +325,52 @@ def show_other(player, vk, user_id: int):
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
 
+def show_resources_shop(player, vk, user_id: int):
+    """Показать ресурсы в магазине (гильзы)"""
+    import database as db
+
+    # Получаем ресурсы из магазина
+    resources = db.get_items_by_category('resources')
+
+    if not resources:
+        vk.messages.send(
+            user_id=user_id,
+            message="Ресурсы временно недоступны.",
+            random_id=0
+        )
+        return
+
+    # Также добавляем мешочки для гильз
+    shells_bags = db.get_items_by_category('shells_bag')
+
+    # Формируем сообщение
+    msg = "📦 <b>РЕСУРСЫ</b>\n\n"
+    msg += "Гильзы — для добычи артефактов из аномалий.\n\n"
+
+    for idx, item in enumerate(resources, 1):
+        price = item.get('price', 0)
+        name = item['name']
+        desc = item.get('description', '')[:50]
+        weight = item.get('weight', 0.1)
+        msg += f"{idx}. {name} — {price} руб.\n   {desc} Вес: {weight}кг\n\n"
+
+    if shells_bags:
+        msg += "🎒 <b>Мешочки для гильз:</b>\n\n"
+        start_idx = len(resources) + 1
+        for idx, item in enumerate(shells_bags, start_idx):
+            price = item.get('price', 0)
+            name = item['name']
+            capacity = item.get('backpack_bonus', 0)  # Вместимость
+            weight = item.get('weight', 0.1)
+            msg += f"{idx}. {name} — {price} руб.\n   Вместимость: {capacity} гильз. Вес: {weight}кг\n\n"
+
+    msg += f"Твои деньги: {player.money} руб.\n"
+    msg += f"Гильзы: {db.get_user_shells(user_id)} шт.\n\n"
+    msg += "Напиши 'купить <номер>' или 'купить <название>'"
+
+    vk.messages.send(user_id=user_id, message=msg, random_id=0)
+
+
 def show_all(player, vk, user_id: int):
     """Показать весь инвентарь"""
     from main import create_inventory_keyboard
@@ -592,3 +638,288 @@ def handle_use_item(player, item_name: str, vk, user_id: int):
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
         random_id=0
     )
+
+
+# === Магазин у военного на КПП ===
+
+# Кэш списков товаров для покупки по номеру
+_shop_cache = {}  # {user_id: {'weapons': [...], 'armor': [...]}}
+
+
+def _get_shop_items_by_number(user_id: int, category: str, number: int) -> str | None:
+    """Получить название предмета по номеру в магазине"""
+    global _shop_cache
+
+    if user_id not in _shop_cache:
+        _shop_cache[user_id] = {}
+
+    if category not in _shop_cache[user_id]:
+        items = database.get_items_by_category(category)
+        _shop_cache[user_id][category] = items
+
+    items = _shop_cache[user_id].get(category, [])
+    if 1 <= number <= len(items):
+        return items[number - 1]['name']
+    return None
+
+
+def clear_shop_cache(user_id: int = None):
+    """Очистить кэш магазина"""
+    global _shop_cache
+    if user_id:
+        _shop_cache.pop(user_id, None)
+    else:
+        _shop_cache.clear()
+
+
+def show_soldier_weapons(player, vk, user_id: int):
+    """Показать оружие в магазине военного"""
+    from main import create_kpp_shop_keyboard
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Очищаем старый кэш и сохраняем новый
+        clear_shop_cache(user_id)
+
+        # Проверяем, есть ли данные в БД, если нет - инициализируем
+        try:
+            # Используем существующую функцию для получения предметов
+            all_items = database.get_all_items()
+            logger.info(f"[SOLDIER_SHOP] Всего предметов: {len(all_items)}")
+
+            if len(all_items) == 0:
+                logger.info("[SOLDIER_SHOP] База данных пуста, выполняем инициализацию...")
+                database.init_db()
+                import time
+                time.sleep(1)
+                all_items = database.get_all_items()
+        except Exception as e:
+            logger.info(f"[SOLDIER_SHOP] Ошибка проверки БД: {e}")
+            try:
+                database.init_db()
+                import time
+                time.sleep(1)
+            except:
+                pass
+
+        # Используем кэш предметов из database
+        all_weapons = database.get_items_by_category('weapons')
+        # Ограничиваем до 10 предметов (VK лимит)
+        weapons = all_weapons[:10]
+        logger.info(f"[SOLDIER_SHOP] Загружено оружия: {len(weapons)} из {len(all_weapons)}")
+        _shop_cache[user_id] = {'weapons': weapons}
+
+        if not weapons:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎖️ <b>Военный:</b>\n\n«Оружия нет в наличии. Загляни позже.»",
+                keyboard=create_kpp_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        msg = "🎖️ <b>ВОЕННЫЙ СКЛАД — ОРУЖИЕ</b>\n\n"
+        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+
+        for idx, weapon in enumerate(weapons, 1):
+            name = weapon['name']
+            price = weapon.get('price', 0)
+            attack = weapon.get('attack', 0)
+            weight = weapon.get('weight', 1.0)
+            desc = weapon.get('description', '')[:40]
+
+            msg += f"{idx}. {name}\n"
+            msg += f"   🔫 Урон: {attack} | Вес: {weight}кг\n"
+            msg += f"   📝 {desc}\n"
+            msg += f"   💵 Цена: {price} руб.\n\n"
+
+        msg += "Напиши 'купить <номер>' или 'купить <название>'"
+
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_kpp_shop_keyboard().get_keyboard(),
+            random_id=0
+        )
+    except Exception as e:
+        logger.error(f"[SOLDIER_SHOP] Ошибка: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при загрузке оружия: {e}",
+            random_id=0
+        )
+
+
+def show_soldier_armor(player, vk, user_id: int):
+    """Показать броню в магазине военного"""
+    from main import create_kpp_shop_keyboard
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Очищаем старый кэш и сохраняем новый
+        clear_shop_cache(user_id)
+
+        # Проверяем, есть ли данные в БД
+        try:
+            all_items = database.get_all_items()
+            logger.info(f"[SOLDIER_SHOP] Всего предметов: {len(all_items)}")
+
+            if len(all_items) == 0:
+                logger.info("[SOLDIER_SHOP] База данных пуста, выполняем инициализацию...")
+                database.init_db()
+                import time
+                time.sleep(1)
+        except Exception as e:
+            logger.info(f"[SOLDIER_SHOP] Ошибка проверки БД: {e}")
+            try:
+                database.init_db()
+                import time
+                time.sleep(1)
+            except:
+                pass
+
+        # Используем кэш предметов из database
+        all_armor = database.get_items_by_category('armor')
+        # Ограничиваем до 10 предметов (VK лимит)
+        armor_list = all_armor[:10]
+        logger.info(f"[SOLDIER_SHOP] Загружено брони: {len(armor_list)} из {len(all_armor)}")
+        _shop_cache[user_id] = {'armor': armor_list}
+
+        if not armor_list:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎖️ <b>Военный:</b>\n\n«Брони нет в наличии. Загляни позже.»",
+                keyboard=create_kpp_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        msg = "🎖️ <b>ВОЕННЫЙ СКЛАД — БРОНЯ</b>\n\n"
+        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+
+        for idx, armor in enumerate(armor_list, 1):
+            name = armor['name']
+            price = armor.get('price', 0)
+            defense = armor.get('defense', 0)
+            weight = armor.get('weight', 1.0)
+            desc = armor.get('description', '')[:40]
+
+            msg += f"{idx}. {name}\n"
+            msg += f"   🛡️ Защита: {defense} | Вес: {weight}кг\n"
+            msg += f"   📝 {desc}\n"
+            msg += f"   💵 Цена: {price} руб.\n\n"
+
+        msg += "Напиши 'купить <номер>' или 'купить <название>'"
+
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_kpp_shop_keyboard().get_keyboard(),
+            random_id=0
+        )
+    except Exception as e:
+        logger.error(f"[SOLDIER_SHOP] Ошибка: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при загрузке брони: {e}",
+            random_id=0
+        )
+
+
+def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
+    """Показать медикаменты и еду в магазине учёного"""
+    from main import create_scientist_shop_keyboard
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Очищаем старый кэш и сохраняем новый
+        clear_shop_cache(user_id)
+
+        # Проверяем, есть ли данные в БД
+        try:
+            all_items = database.get_all_items()
+            logger.info(f"[SCIENTIST_SHOP] Всего предметов: {len(all_items)}")
+
+            # Покажем все категории
+            cats = {}
+            for item in all_items:
+                cat = item.get('category', 'unknown')
+                cats[cat] = cats.get(cat, 0) + 1
+            logger.info(f"[SCIENTIST_SHOP] Категории: {cats}")
+
+            if len(all_items) == 0:
+                database.init_db()
+                import time
+                time.sleep(1)
+        except Exception as e:
+            logger.info(f"[SCIENTIST_SHOP] Ошибка: {e}")
+
+        # Меню выбора категорий
+        if category == 'all':
+            vk.messages.send(
+                user_id=user_id,
+                message="🔬 <b>Учёный:</b>\n\n«Выбирай, сталкер:\n\n💊 Лекарства — аптечки, бинты, стимуляторы\n⚡ Энергетики — еда и напитки\n\nЦены честные, научные!»",
+                keyboard=create_scientist_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Получаем категорию meds или food
+        if category == 'meds':
+            items = database.get_items_by_category('meds')[:10]
+            title = "ЛЕКАРСТВА"
+        else:
+            items = database.get_items_by_category('food')[:10]
+            title = "ЭНЕРГЕТИКИ"
+
+        logger.info(f"[SCIENTIST_SHOP] Категория consumables: {len(items)} предметов")
+        _shop_cache[user_id] = {'scientist': items, 'category': category}
+
+        if not items:
+            vk.messages.send(
+                user_id=user_id,
+                message="🔬 <b>Учёный:</b>\n\n«Лекарств пока нет. Загляни позже.»",
+                keyboard=create_scientist_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        msg = f"🔬 <b>ЛАБОРАТОРИЯ — {title}</b>\n\n"
+        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+
+        for idx, item in enumerate(items, 1):
+            name = item['name']
+            price = item.get('price', 0)
+            weight = item.get('weight', 0.1)
+            desc = item.get('description', '')[:35]
+            msg += f"{idx}. {name}\n"
+            msg += f"   📝 {desc}\n"
+            msg += f"   💵 Цена: {price} руб. | Вес: {weight}кг\n\n"
+
+        msg += "Напиши 'купить <номер>' или 'купить <название>'\n"
+        msg += "\nНажми 'Назад' для выбора категории"
+
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_scientist_shop_keyboard().get_keyboard(),
+            random_id=0
+        )
+    except Exception as e:
+        logger.error(f"[SCIENTIST_SHOP] Ошибка: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при загрузке магазина: {e}",
+            random_id=0
+        )
+
+

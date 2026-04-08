@@ -19,9 +19,10 @@ logger.info("Loading main.py...")
 load_dotenv()
 
 # Отладка - проверяем загрузку переменных
-DEBUG_TOKEN = os.getenv('VK_TOKEN', 'NOT_FOUND')
-DEBUG_GROUP = os.getenv('GROUP_ID', 'NOT_FOUND')
-logger.debug(f"After load_dotenv: TOKEN={DEBUG_TOKEN[:20] if DEBUG_TOKEN != 'NOT_FOUND' else 'NOT_FOUND'}, GROUP={DEBUG_GROUP}")
+DEBUG_TOKEN = os.getenv('VK_TOKEN')
+DEBUG_GROUP = os.getenv('GROUP_ID')
+token_preview = (DEBUG_TOKEN[:20] + '...') if DEBUG_TOKEN and len(DEBUG_TOKEN) > 20 else (DEBUG_TOKEN if DEBUG_TOKEN else 'NOT_FOUND')
+logger.debug(f"After load_dotenv: TOKEN={token_preview}, GROUP={DEBUG_GROUP}")
 
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
@@ -42,7 +43,7 @@ from handlers.inventory import (
     handle_use_item, handle_buy_item, handle_sell_item, 
     handle_buy_artifact_slot, handle_equip_backpack, handle_unequip_backpack
 )
-from handlers.combat import handle_explore, handle_combat_attack, handle_combat_flee, _combat_state as combat_state_module
+from handlers.combat import handle_explore, handle_combat_attack, handle_combat_flee, _combat_state as combat_state_module, _anomaly_state, handle_anomaly_action
 from npcs import get_npc_by_location, get_npc
 
 
@@ -205,6 +206,27 @@ def create_shop_keyboard():
     keyboard.add_button("Артефакты", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("Медицина", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Ресурсы", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_kpp_shop_keyboard():
+    """Клавиатура магазина у военного на КПП"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Оружие", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Броня", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_scientist_shop_keyboard():
+    """Клавиатура магазина у учёного на КПП"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Лекарства", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Энергетики", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
@@ -225,6 +247,8 @@ def create_npc_select_keyboard(location_id: str):
             keyboard.add_button("Барыга", color=VkKeyboardColor.PRIMARY)
         elif npc_id == "местный житель":
             keyboard.add_button("Местный житель", color=VkKeyboardColor.PRIMARY)
+        elif npc_id == "наставник":
+            keyboard.add_button("Наставник", color=VkKeyboardColor.PRIMARY)
 
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
@@ -251,6 +275,9 @@ def create_npc_dialog_keyboard(npc_id: str):
 
 def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None):
     """Показать диалог с NPC"""
+    import sys
+    print(f"[DEBUG] show_npc_dialog: user={user_id}, npc={npc_id}, dialog_id={dialog_id}", file=sys.stderr)
+
     npc = get_npc(npc_id)
     if not npc:
         vk.messages.send(
@@ -316,15 +343,219 @@ def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None
             )
         return
 
+    # Обработка получения класса персонажа
+    CLASS_CHANGE_COST = 500000  # Цена смены класса
+
+    if dialog_id == "get_class":
+        # Проверяем уровень
+        if player.level < 10:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎓 <b>Наставник:</b>\n\n«Ты ещё слишком слаб, сталкер. Приходи, когда достигнешь 10 уровня. К тому времени я посмотрю, на что ты способен.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Проверяем оружие
+        if not player.equipped_weapon:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎓 <b>Наставник:</b>\n\n«У тебя нет оружия! Как ты собираешься выживать в Зоне? Экипируй оружие и приходи снова.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Определяем класс по оружию
+        from classes import get_class_by_weapon, format_class_info
+        class_id = get_class_by_weapon(player.equipped_weapon)
+
+        if not class_id:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎓 <b>Наставник:</b>\n\n«Хм, это оружие мне не знакомо. Приходи с другим — я посмотрю, какой стиль боя тебе подходит.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Если класс уже есть - проверяем деньги на смену
+        if player.player_class and player.player_class != class_id:
+            if player.money < CLASS_CHANGE_COST:
+                vk.messages.send(
+                    user_id=user_id,
+                    message=f"🎓 <b>Наставник:</b>\n\n«Ты уже имеешь класс, но хочешь сменить на {class_id.upper()}. Это стоит {CLASS_CHANGE_COST:,} руб.\n\nУ тебя недостаточно денег — нужно ещё {CLASS_CHANGE_COST - player.money:,} руб.»",
+                    keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                    random_id=0
+                )
+                return
+
+            # Списываем деньги и меняем класс
+            from player import invalidate_player_cache
+            new_money = player.money - CLASS_CHANGE_COST
+            database.update_user_stats(user_id, money=new_money, player_class=class_id)
+            invalidate_player_cache(user_id)
+            player = get_player(user_id)
+
+            class_info = format_class_info(class_id)
+            vk.messages.send(
+                user_id=user_id,
+                message=f"💰 <b>Наставник:</b>\n\n«Переобучение прошло успешно! Списано {CLASS_CHANGE_COST:,} руб.\n\nТеперь ты — {class_id.split()[0]} {class_id.upper()}.\n\n{class_info}\n\n'Запомни: сила класса — в оружии. Меняй оружие — меняется и класс!'»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Если класса ещё нет - просто выдаём
+        from player import invalidate_player_cache
+        database.update_user_stats(user_id, player_class=class_id)
+        invalidate_player_cache(user_id)
+        player = get_player(user_id)
+
+        class_info = format_class_info(class_id)
+        vk.messages.send(
+            user_id=user_id,
+            message=f"🎓 <b>Наставник:</b>\n\n«Отлично! Теперь ты — {class_id.split()[0]} {class_id.upper()}. Вот твои навыки:\n\n{class_info}\n\n'Запомни: сила класса — в оружии. Меняй оружие — меняется и класс!'»",
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    # Обработка смены класса (явная команда)
+    if dialog_id == "change_class":
+        if player.level < 10:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎓 <b>Наставник:</b>\n\n«Ты ещё слишком слаб для смены класса. Приходи на 10 уровне.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        if not player.equipped_weapon:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎓 <b>Наставник:</b>\n\n«Экипируй оружие, на которое хочешь перейти, и приходи снова.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        from classes import get_class_by_weapon, format_class_info
+        new_class_id = get_class_by_weapon(player.equipped_weapon)
+
+        if not new_class_id:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎓 <b>Наставник:</b>\n\n«Это оружие мне не знакомо. Приходи с другим.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        if new_class_id == player.player_class:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"🎓 <b>Наставник:</b>\n\n«У тебя уже есть класс {player.player_class.upper()}. Экипируй другое оружие для смены.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Проверяем деньги
+        if player.money < CLASS_CHANGE_COST:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"🎓 <b>Наставник:</b>\n\n«Смена класса на {new_class_id.upper()} стоит {CLASS_CHANGE_COST:,} руб.\n\nУ тебя есть {player.money:,} руб. Не хватает {CLASS_CHANGE_COST - player.money:,} руб.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Списываем деньги и меняем класс
+        from player import invalidate_player_cache
+        new_money = player.money - CLASS_CHANGE_COST
+        database.update_user_stats(user_id, money=new_money, player_class=new_class_id)
+        invalidate_player_cache(user_id)
+        player = get_player(user_id)
+
+        class_info = format_class_info(new_class_id)
+        vk.messages.send(
+            user_id=user_id,
+            message=f"💰 <b>Наставник:</b>\n\n«Класс успешно сменён! Списано {CLASS_CHANGE_COST:,} руб.\n\nТеперь ты — {new_class_id.split()[0]} {new_class_id.upper()}.\n\n{class_info}\n\n'Запомни: сила класса — в оружии!'»",
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    # Обработка просмотра своего класса
+    if dialog_id == "my_class":
+        if not player.player_class:
+            vk.messages.send(
+                user_id=user_id,
+                message="🎓 <b>Наставник:</b>\n\n«У тебя ещё нет класса! Приходи, когда достигнешь 10 уровня и экипируй оружие. Я обучу тебя боевому стилю.»",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Показываем текущий класс с учётом уровня игрока
+        class_info = format_class_info(player.player_class, player.level)
+
+        # Также показываем текущий класс, основанный на оружии
+        current_weapon = player.equipped_weapon or "нет"
+        from classes import get_class_by_weapon, format_passive_status
+        current_class = get_class_by_weapon(current_weapon) if current_weapon != "нет" else None
+
+        msg = f"🎓 <b>Наставник:</b>\n\n"
+        msg += f"📌 <b>Твой текущий класс:</b> {player.player_class.upper()}\n"
+        msg += f"🔫 <b>Экипированное оружие:</b> {current_weapon}\n"
+        msg += f"⭐ <b>Твой уровень:</b> {player.level}\n\n"
+
+        if current_class and current_class != player.player_class:
+            msg += f"⚠️ <b>Внимание!</b> Твой экипированный класс: {current_class.upper()}\n"
+            msg += "Класс меняется в зависимости от оружия!\n\n"
+
+        # Показываем статус пассивных навыков
+        passive_status = format_passive_status(player.player_class, player.level)
+        msg += f"{passive_status}\n"
+
+        # Показываем активные навыки
+        msg += f"<b>Информация о классе:</b>\n{class_info}"
+
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
     # Проверяем, не является ли ответ специальной командой (магазин/продажа)
-    if next_stage in ["shop_weapons", "shop_meds", "shop_artifacts", "sell_items", "sell_gear"]:
+    if next_stage in ["shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_artifacts", "sell_items", "sell_gear"]:
         _dialog_state[user_id] = {"npc": npc_id, "stage": next_stage}
         # Перенаправляем в магазин
-        if next_stage == "shop_weapons":
-            show_weapons(player, vk, user_id)
+        if next_stage == "shop_menu":
+            # Меню выбора категорий у военного
+            vk.messages.send(
+                user_id=user_id,
+                message="🎖️ <b>Военный:</b>\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                keyboard=create_kpp_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+        elif next_stage == "shop_weapons":
+            from handlers.inventory import show_soldier_weapons
+            show_soldier_weapons(player, vk, user_id)
+        elif next_stage == "shop_armor":
+            from handlers.inventory import show_soldier_armor
+            show_soldier_armor(player, vk, user_id)
         elif next_stage == "shop_meds":
-            from handlers.inventory import show_other  # Медикаменты и еда в "другое"
-            show_other(player, vk, user_id)
+            from handlers.inventory import show_scientist_shop
+            show_scientist_shop(player, vk, user_id, category='meds')
+        elif next_stage == "shop_food":
+            from handlers.inventory import show_scientist_shop
+            show_scientist_shop(player, vk, user_id, category='food')
         elif next_stage == "shop_artifacts":
             show_artifacts(player, vk, user_id)
         elif next_stage in ["sell_items", "sell_gear"]:
@@ -386,17 +617,39 @@ def normalize_text(text: str) -> str:
 
 def handle_message(event, vk):
     """Обработка входящего сообщения"""
+    import sys
     user_id = event.obj.message['from_id']
     text = normalize_text(event.obj.message.get('text', ''))
     original_text = event.obj.message.get('text', '')
 
-    # ОТЛАДКА
-    import sys
-    print(f"[DEBUG] Получено сообщение. user={user_id}, text='{text}', original='{original_text}'", file=sys.stderr)
-    print(f"[DEBUG] _menu_state={_menu_state}", file=sys.stderr)
+    print(f"[DEBUG] START handle_message. user={user_id}, text='{text}'", file=sys.stderr)
+    print(f"[DEBUG] _dialog_state={_dialog_state}", file=sys.stderr)
 
     player = get_player(user_id)
-    
+
+    # === Специальная обработка для КПП ===
+    # Только если игрок НЕ в диалоге с NPC
+    is_in_dialog = user_id in _dialog_state
+    is_at_kpp = player.current_location_id == 'кпп' or player.previous_location == 'кпп'
+
+    if is_at_kpp and not is_in_dialog and text in ['купить', 'оружие', 'броня']:
+        if text == 'купить':
+            vk.messages.send(
+                user_id=user_id,
+                message="🎖️ <b>Военный:</b>\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                keyboard=create_kpp_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+        elif text == 'оружие':
+            from handlers.inventory import show_soldier_weapons
+            show_soldier_weapons(player, vk, user_id)
+            return
+        elif text == 'броня':
+            from handlers.inventory import show_soldier_armor
+            show_soldier_armor(player, vk, user_id)
+            return
+
     # === Проверка исследования ===
     from handlers.combat import is_researching, get_research_status, cancel_research
 
@@ -439,7 +692,26 @@ def handle_message(event, vk):
         elif text in ['убежать', 'бежать']:
             handle_combat_flee(player, vk, user_id)
             return
-        elif text in ['кпп', 'в кпп', 'назад', 'выйти']:
+        elif text in ['навыки', 'навык', 'скилы', 'скилл']:
+            from handlers.combat import show_skills_in_combat
+            show_skills_in_combat(player, vk, user_id)
+            return
+        elif any(skill_name in text for skill_name in ['двойной выстрел', 'точный выстрел', 'очередь', 'подавление', 'прицельный выстрел', 'незримый', 'шквал огня', 'бронирование', 'клинок в сердце', 'уклонение', 'заградительный огонь']):
+            from handlers.combat import use_skill
+            original_msg = event.obj.message.get('text', '')
+            use_skill(player, vk, user_id, original_msg)
+            return
+        elif text == 'назад':
+            # Возврат в бой
+            from handlers.combat import create_combat_keyboard
+            vk.messages.send(
+                user_id=user_id,
+                message="⚔️ Возвращаемся в бой!",
+                keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
+                random_id=0
+            )
+            return
+        elif text in ['кпп', 'в кпп', 'выйти']:
             del _combat_state[user_id]
             go_to_location(player, 'кпп', vk, user_id)
             return
@@ -450,6 +722,19 @@ def handle_message(event, vk):
                 user_id=user_id,
                 message="⚔️ Ты в бою! Атакуй или убеги!",
                 keyboard=create_combat_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+    # Проверка на взаимодействие с аномалией
+    if user_id in _anomaly_state:
+        if text in ['обойти', 'извлечь', 'отступить']:
+            handle_anomaly_action(player, vk, user_id, text)
+            return
+        else:
+            vk.messages.send(
+                user_id=user_id,
+                message="⚠️ Ты в аномалии! Выбери действие:\n\n• Обойти — попробовать обойти\n• Извлечь — попробовать добыть артефакт\n• Отступить — уйти с уроном",
                 random_id=0
             )
             return
@@ -527,14 +812,63 @@ def handle_message(event, vk):
     
     # === Диалоги с NPC ===
 
+    print(f"[DEBUG] Проверка диалога. user={user_id}, text='{text}', _dialog_state={_dialog_state}", file=sys.stderr)
+
     # Проверяем, находимся ли мы в диалоге с NPC
     if user_id in _dialog_state:
+        dialog_info = _dialog_state[user_id]
+        npc_id = dialog_info.get("npc")
+
+        # Если игрок нажал кнопку меню (Купить, Оружие, Броня и т.д.) - сразу обрабатываем
+        if npc_id == "военный" and text in ["купить", "оружие", "броня"]:
+            if text == "купить":
+                # Обновляем состояние диалога
+                _dialog_state[user_id] = {"npc": npc_id, "stage": "shop_menu"}
+                # Показываем меню магазина
+                vk.messages.send(
+                    user_id=user_id,
+                    message="🎖️ <b>Военный:</b>\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                    keyboard=create_kpp_shop_keyboard().get_keyboard(),
+                    random_id=0
+                )
+                return
+            elif text == "оружие":
+                _dialog_state[user_id] = {"npc": npc_id, "stage": "shop_weapons"}
+                from handlers.inventory import show_soldier_weapons
+                show_soldier_weapons(player, vk, user_id)
+                return
+            elif text == "броня":
+                _dialog_state[user_id] = {"npc": npc_id, "stage": "shop_armor"}
+                from handlers.inventory import show_soldier_armor
+                show_soldier_armor(player, vk, user_id)
+                return
+
+        # Магазин у учёного
+        if npc_id == "ученый" and text in ["купить", "лекарства", "энергетики"]:
+            if text == "купить":
+                _dialog_state[user_id] = {"npc": npc_id, "stage": "shop_menu"}
+                from handlers.inventory import show_scientist_shop
+                show_scientist_shop(player, vk, user_id, category='all')
+                return
+            elif text == "лекарства":
+                _dialog_state[user_id] = {"npc": npc_id, "stage": "shop_meds"}
+                from handlers.inventory import show_scientist_shop
+                show_scientist_shop(player, vk, user_id, category='meds')
+                return
+            elif text == "энергетики":
+                _dialog_state[user_id] = {"npc": npc_id, "stage": "shop_food"}
+                from handlers.inventory import show_scientist_shop
+                show_scientist_shop(player, vk, user_id, category='food')
+                return
         dialog_info = _dialog_state[user_id]
         npc_id = dialog_info.get("npc")
 
         # Обработка "Назад" из диалога
         if text == 'назад' or text == 'к выбору npc':
             if user_id in _dialog_state:
+                # Очищаем кэш магазина при выходе
+                from handlers.inventory import clear_shop_cache
+                clear_shop_cache(user_id)
                 del _dialog_state[user_id]
             # Возвращаемся к выбору NPC
             location_id = player.current_location_id
@@ -553,13 +887,39 @@ def handle_message(event, vk):
 
         # Обработка выбора конкретного вопроса диалога
         npc = get_npc(npc_id)
+        print(f"[DEBUG] Проверка меню. text='{text}', npc={npc_id}", file=sys.stderr)
         if npc:
             menu = npc.get_menu()
+            print(f"[DEBUG] menu={menu}", file=sys.stderr)
             for dialog_id in menu:
                 question = npc.get_question_text(dialog_id)
+                print(f"[DEBUG] dialog_id='{dialog_id}', question='{question}', match={text == question.lower() or text == dialog_id}", file=sys.stderr)
                 if question and (text == question.lower() or text == dialog_id):
                     show_npc_dialog(player, vk, user_id, npc_id, dialog_id)
                     return
+
+        # Обработка "Назад" из магазина у военного
+        if npc_id == "военный" and text == "назад":
+            # Очищаем кэш магазина
+            from handlers.inventory import clear_shop_cache
+            clear_shop_cache(user_id)
+            # Возвращаемся к меню военного
+            show_npc_dialog(player, vk, user_id, npc_id, None)
+            return
+
+        # Обработка "Назад" из магазина у учёного
+        if npc_id == "ученый" and text == "назад":
+            # Очищаем кэш магазина и возвращаемся к меню
+            from handlers.inventory import clear_shop_cache, show_scientist_shop
+            clear_shop_cache(user_id)
+            # Проверяем, из какой категории возвращаемся
+            stage = _dialog_state.get(user_id, {}).get("stage", "")
+            if stage in ["shop_meds", "shop_food"]:
+                # Возвращаемся к меню выбора
+                show_scientist_shop(player, vk, user_id, category='all')
+            else:
+                show_npc_dialog(player, vk, user_id, npc_id, None)
+            return
 
         # Если ввели что-то другое в диалоге - показываем текущее меню
         show_npc_dialog(player, vk, user_id, npc_id, None)
@@ -600,6 +960,9 @@ def handle_message(event, vk):
     elif text == 'местный житель':
         show_npc_dialog(player, vk, user_id, 'местный житель')
         return
+    elif text == 'наставник':
+        show_npc_dialog(player, vk, user_id, 'наставник')
+        return
 
     if text in ['торговля', 'торг', 'магазин', 'торговля']:
         if player.current_location_id == 'кпп':
@@ -612,7 +975,7 @@ def handle_message(event, vk):
         elif player.current_location_id == 'черный рынок':
             vk.messages.send(
                 user_id=user_id,
-                message="👤 <b>Торговец:</b>\n\n«Рад тебя видеть! Вот, выбирай:\n\n🔫 Оружие\n🛡️ Броня\n🎒 Рюкзаки\n🔮 Артефакты\n💊 Медицина»",
+                message="👤 <b>Торговец:</b>\n\n«Рад тебя видеть! Вот, выбирай:\n\n🔫 Оружие\n🛡️ Броня\n🎒 Рюкзаки\n🔮 Артефакты\n💊 Медицина\n📦 Ресурсы»",
                 keyboard=create_shop_keyboard().get_keyboard(),
                 random_id=0
             )
@@ -623,7 +986,10 @@ def handle_message(event, vk):
 
     # === Действия в локациях ===
     
-    if text == 'купить':
+    # Не обрабатываем как общую команду, если игрок в диалоге с NPC
+    in_dialog = user_id in _dialog_state
+
+    if text == 'купить' and not in_dialog:
         vk.messages.send(
             user_id=user_id,
             message="💰 Чтобы купить предмет, напиши 'купить <название предмета>'.\n\nПример: купить нож",
@@ -631,7 +997,7 @@ def handle_message(event, vk):
         )
         return
 
-    if text == 'продать':
+    if text == 'продать' and not in_dialog:
         vk.messages.send(
             user_id=user_id,
             message="💵 Чтобы продать предмет, напиши 'продать <название предмета>'.\n\nПример: продать нож",
@@ -664,32 +1030,36 @@ def handle_message(event, vk):
             if handle_inventory_digit(player, text, vk, user_id):
                 return
         
-        if 'оружие' in text:
+        if 'оружие' in text and not in_dialog:
             show_weapons(player, vk, user_id)
             return
-        elif 'броня' in text:
+        elif 'броня' in text and not in_dialog:
             show_armor(player, vk, user_id)
             return
-        elif 'рюкзаки' in text:
+        elif 'рюкзаки' in text and not in_dialog:
             show_backpacks(player, vk, user_id)
             return
-        elif 'артефакты' in text:
+        elif 'артефакты' in text and not in_dialog:
             show_artifacts(player, vk, user_id)
             return
-        elif 'другое' in text:
+        elif 'ресурсы' in text and not in_dialog:
+            from handlers.inventory import show_resources_shop
+            show_resources_shop(player, vk, user_id)
+            return
+        elif 'другое' in text and not in_dialog:
             show_other(player, vk, user_id)
             return
-        elif 'все' in text:
+        elif 'все' in text and not in_dialog:
             from handlers.inventory import show_all
             show_all(player, vk, user_id)
             return
-        elif 'экипировка' in text:
+        elif 'экипировка' in text and not in_dialog:
             show_equipped_artifacts(player, vk, user_id)
             return
-        elif 'слоты' in text:
+        elif 'слоты' in text and not in_dialog:
             show_artifact_slots(player, vk, user_id)
             return
-        elif 'инструкция' in text:
+        elif 'инструкция' in text and not in_dialog:
             show_artifact_help(player, vk, user_id)
             return
     
@@ -707,10 +1077,37 @@ def handle_message(event, vk):
     
     if text.startswith('купить '):
         item_name = text.replace('купить ', '')
+
         if item_name in ['слот', 'слот артефакта']:
             handle_buy_artifact_slot(player, vk, user_id)
-        else:
-            handle_buy_item(player, item_name, vk, user_id)
+            return
+
+        # Попытка купить по номеру
+        if item_name.isdigit():
+            item_num = int(item_name)
+            # Проверяем, в каком магазине находится игрок
+            if user_id in _dialog_state:
+                dialog_info = _dialog_state[user_id]
+                stage = dialog_info.get("stage", "")
+
+                if stage == "shop_weapons":
+                    from handlers.inventory import _get_shop_items_by_number
+                    item_name = _get_shop_items_by_number(user_id, 'weapons', item_num)
+                    if item_name:
+                        handle_buy_item(player, item_name, vk, user_id)
+                    else:
+                        vk.messages.send(user_id=user_id, message="Нет предмета с таким номером.", random_id=0)
+                    return
+                elif stage == "shop_armor":
+                    from handlers.inventory import _get_shop_items_by_number
+                    item_name = _get_shop_items_by_number(user_id, 'armor', item_num)
+                    if item_name:
+                        handle_buy_item(player, item_name, vk, user_id)
+                    else:
+                        vk.messages.send(user_id=user_id, message="Нет предмета с таким номером.", random_id=0)
+                    return
+
+        handle_buy_item(player, item_name, vk, user_id)
         return
     
     if text.startswith('продать '):
@@ -752,6 +1149,13 @@ def handle_message(event, vk):
             vk.messages.send(user_id=user_id, message=msg, random_id=0)
             return
 
+        # Проверяем устройства (детекторы)
+        device = next((d for d in player.inventory.other if d['name'].lower() == item_name.lower()), None)
+        if device:
+            success, msg = player.equip_device(device['name'])
+            vk.messages.send(user_id=user_id, message=msg, random_id=0)
+            return
+
         vk.messages.send(user_id=user_id, message=f"У тебя нет предмета '{item_name}' в инвентаре.", random_id=0)
         return
     
@@ -769,6 +1173,11 @@ def handle_message(event, vk):
         vk.messages.send(user_id=user_id, message=msg, random_id=0)
         return
 
+    if text == 'снять устройство' or text == 'снять детектор':
+        success, msg = player.equip_device()
+        vk.messages.send(user_id=user_id, message=msg, random_id=0)
+        return
+
     if text == 'снять':
         # Показываем что можно снять
         msg = "Что снять?\n\n"
@@ -778,8 +1187,10 @@ def handle_message(event, vk):
             msg += f"• Броня: {player.equipped_armor} (напиши 'снять броню')\n"
         if player.equipped_backpack:
             msg += f"• Рюкзак: {player.equipped_backpack} (напиши 'снять рюкзак')\n"
+        if player.equipped_device:
+            msg += f"• Устройство: {player.equipped_device} (напиши 'снять устройство')\n"
 
-        if not player.equipped_weapon and not player.equipped_armor and not player.equipped_backpack:
+        if not player.equipped_weapon and not player.equipped_armor and not player.equipped_backpack and not player.equipped_device:
             msg = "У тебя ничего не надето."
 
         vk.messages.send(user_id=user_id, message=msg, random_id=0)

@@ -50,6 +50,12 @@ def release_connection(conn):
 
 def init_db():
     """Инициализация базы данных"""
+    # Очищаем кэш предметов перед инициализацией
+    global _items_cache, _items_by_category_cache, _shop_items_cache
+    _items_cache = {}
+    _items_by_category_cache = {}
+    _shop_items_cache = None
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -90,7 +96,11 @@ def init_db():
             attack INTEGER DEFAULT 0,
             defense INTEGER DEFAULT 0,
             weight REAL DEFAULT 1.0,
-            backpack_bonus INTEGER DEFAULT 0
+            backpack_bonus INTEGER DEFAULT 0,
+            rarity VARCHAR(20) DEFAULT 'common',
+            anomaly_type VARCHAR(30),
+            bonus_type VARCHAR(30),
+            bonus_value INTEGER DEFAULT 0
         )
     """)
 
@@ -107,13 +117,24 @@ def init_db():
 
     # Заполняем базовые предметы, если их нет
     items = [
+        # === ГИЛЬЗЫ (для добычи артефактов) ===
+        ("Гильза", "resources", "Латунная гильза. Используется для добычи артефактов из аномалий.", 1, 0, 0, 0.01),
+        ("Гильзы", "resources", "Связка гильз. Используется для добычи артефактов из аномалий.", 10, 0, 0, 0.1),
+
+        # === МЕШОЧКИ ДЛЯ ГИЛЬЗ ===
+        ("Маленький мешочек", "shells_bag", "Мешочек для гильз. Вмещает до 50 гильз.", 100, 0, 0, 0.2, 50),
+        ("Средний мешочек", "shells_bag", "Мешочек для гильз. Вмещает до 100 гильз.", 250, 0, 0, 0.3, 100),
+        ("Большой мешочек", "shells_bag", "Мешочек для гильз. Вмещает до 300 гильз.", 600, 0, 0, 0.5, 300),
+        ("Профессиональный мешочек", "shells_bag", "Мешочек для гильз. Вмещает до 500 гильз.", 1200, 0, 0, 0.7, 500),
+        ("Легендарный мешочек", "shells_bag", "Мешочек для гильз. Вмещает до 1000 гильз.", 3000, 0, 0, 1.0, 1000),
+
         # Оружие - Пистолеты (attack, defense, weight)
         ("ПМ", "weapons", "Простой пистолет Макарова. Надёжный, но слабый.", 50, 15, 0, 0.8),
         ("ТТ", "weapons", "Пистолет Токарева. Мощнее ПМ, но ненадёжен.", 70, 20, 0, 0.9),
         ("Глок", "weapons", "Австрийский пистолет. Точный и современный.", 120, 25, 0, 0.7),
         ("Удав", "weapons", "Российский пистолет-пулемёт. Компактный и скорострельный.", 180, 22, 0, 0.65),
         ("ПММ", "weapons", "Модернизированный Макаров. Увеличенный магазин.", 90, 18, 0, 0.85),
-        ("Корд", "weapons", "Спортивный пистолет. Высокая точность.", 140, 24, 0, 0.75),
+        ("П-99", "weapons", "Спортивный пистолет. Высокая точность.", 140, 24, 0, 0.75),
         ("П-96", "weapons", "Профессиональный спортивный пистолет.", 200, 28, 0, 0.7),
         ("С-40П", "weapons", "Самозарядный пистолет повышенной мощности.", 250, 32, 0, 0.9),
 
@@ -219,13 +240,41 @@ def init_db():
         ("Пульсатор", "artifacts", "Пульсирующий артефакт. Тёплый на ощупь.", 120, 0, 0, 0.3),
         ("Камень", "artifacts", "Обычный с виду камень. Но что-то в нём есть...", 50, 0, 0, 1.0),
 
-        # Новые артефакты из аномалий
-        ("Грозовая", "artifacts", "Искрящийся артефакт. Увеличивает шанс критического удара. +10% крита.", 1000, 0, 0, 0.3),
-        ("Пустышка", "artifacts", "Пустой артефакт, но обладает полезными свойствами. +5 к удаче.", 500, 0, 0, 0.2),
-        ("Воронка", "artifacts", "Артефакт в форме воронки. +20% к находкам.", 1200, 0, 0, 0.8),
-        ("Слизь", "artifacts", "Скользкий артефакт. Восстанавливает +10 HP.", 400, 0, 0, 0.4),
-        ("Пыль", "artifacts", "Лёгкий артефакт, похожий на пыль. +5% к уклонению.", 550, 0, 0, 0.1),
-        ("Фрагмент", "artifacts", "Осколок аномалии. +5 к силе.", 700, 0, 0, 0.6),
+        # === НОВЫЕ АРТЕФАКТЫ С РЕДКОСТЬЮ И ПРИВЯЗКОЙ К АНОМАЛИЯМ ===
+        # Обычные (common) - легко найти
+        ("Слизь", "artifacts", "Скользкий сгусток из тумана. +10 HP, +5% уклонение.", 400, 0, 0, 0.4, "common", "туман", "health_dodge", 10),
+        ("Пружина", "artifacts", "Упругая пружина из воронки. +8 защиты, +3% уклонения.", 350, 0, 8, 0.3, "common", "воронка", "armor_dodge", 8),
+        ("Пустышка", "artifacts", "Пустой артефакт, но полезный. +5 к удаче.", 500, 0, 0, 0.2, "common", "магнит", "luck", 5),
+        ("Капля", "artifacts", "Капля аномальной жидкости. +8 HP, -5 радиации.", 320, 0, 0, 0.3, "common", "туман", "health_rad", 8),
+        ("Слюда", "artifacts", "Прозрачная пластина. +5% к сопротивлению урону.", 450, 0, 0, 0.25, "common", "жарка", "damage_resist", 5),
+        ("Вспышка", "artifacts", "Мерцающий артефакт. +10% к находкам, +3 к восприятию.", 550, 0, 0, 0.2, "common", "электра", "find_perception", 10),
+        ("Бенгальский огонь", "artifacts", "Яркий искрящийся артефакт. +12% к урону оружия.", 600, 0, 0, 0.25, "common", "электра", "damage_boost", 12),
+        ("Батарейка", "artifacts", "Электрический артефакт. +15 энергии, +3% крита.", 480, 0, 0, 0.2, "common", "электра", "energy_crit", 15),
+        ("Плёнка", "artifacts", "Тонкая плёнка из тумана. +6% уклонения, -3 радиации.", 380, 0, 0, 0.15, "common", "туман", "dodge_rad", 6),
+        ("Ломоть мяса", "artifacts", "Кусок мутировавшей плоти. +12 HP, +8 радиации.", 250, 0, 0, 0.5, "common", "туман", "health", 12),
+
+        # Редкие (rare) - средняя сложность
+        ("Грави", "artifacts", "Тяжёлый артефакт с искажающим полем. +20 к защите.", 2500, 0, 20, 2.0, "rare", "воронка", "armor", 20),
+        ("Выверт", "artifacts", "Нестабильный пси-артефакт. +15% к уклонению.", 1800, 0, 0, 0.3, "rare", "туман", "dodge", 15),
+        ("Слизняк", "artifacts", "Скользкий организм. +15 HP, +8% уклонения.", 1200, 0, 0, 0.5, "rare", "туман", "health_dodge", 15),
+        ("Огненный шар", "artifacts", "Пылающий шар из жарки. +15% к урону, +10 защиты от огня.", 1500, 0, 10, 0.6, "rare", "жарка", "damage_fire", 15),
+        ("Золотая рыбка", "artifacts", "Редкий гравитационный артефакт. +15 к удаче.", 3000, 0, 0, 0.5, "rare", "воронка", "luck", 15),
+        ("Ночная звезда", "artifacts", "Мерцающий гравитационный артефакт. +10 к максимальному весу.", 2200, 0, 0, 0.4, "rare", "воронка", "max_weight", 10),
+        ("Колобок", "artifacts", "Странный пульсирующий шар. +10 HP, +5 к удаче, +5% находки.", 1600, 0, 0, 0.35, "rare", "воронка", "multi", 10),
+        ("Морской ёж", "artifacts", "Острый электрический артефакт. +18% к урону, +8 к защите.", 1400, 0, 8, 0.45, "rare", "электра", "damage_armor", 18),
+        ("Колючка", "artifacts", "Острая игла из магнита. +10 к защите, +5% крита.", 1100, 0, 10, 0.3, "rare", "магнит", "armor_crit", 10),
+        ("Кровь камня", "artifacts", "Тёмно-красный минерал. +20 к защите, +5% сопротивления.", 1800, 0, 20, 0.8, "rare", "жарка", "armor_resist", 20),
+        ("Каменный цветок", "artifacts", "Кристаллическое образование. +12% к сопротивлению урону.", 1700, 0, 0, 0.5, "rare", "жарка", "damage_resist", 12),
+        ("Мамины бусы", "artifacts", "Семейная реликвия из воронки. +20 к удаче, -10 радиации.", 2800, 0, 0, 0.3, "rare", "воронка", "luck_rad", 20),
+        ("Лунный свет", "artifacts", "Светящийся пси-артефакт. +20 к максимальной энергии.", 2800, 0, 0, 0.2, "rare", "воронка", "max_energy", 20),
+
+        # Уникальные (unique) - сложно найти
+        ("Кристальная колючка", "artifacts", "Сверкающий кристалл. +25 к защите, +10% крита, +15% уклонения.", 4500, 0, 25, 0.6, "unique", "магнит", "armor_crit_dodge", 25),
+        ("Кристалл", "artifacts", "Острый кристалл. +20% к критическому удару, +15 к защите.", 4000, 0, 15, 0.5, "unique", "жарка", "crit_armor", 20),
+        ("Медуза", "artifacts", "Светящийся артефакт, напоминающий медузу. +15% к сопротивлению урону.", 3500, 0, 0, 0.5, "unique", "жарка", "damage_resist", 15),
+
+        # Легендарные (legendary) - очень редко
+        ("Душа", "legendary_artifacts", "Артефакт чистой энергии Зоны. +30% ко всему, -30 радиации!", 15000, 0, 0, 0.1, "legendary", "воронка", "all_stats", 30),
 
         # Приборы
         ("Детектор аномалий", "other", "Прибор для обнаружения аномалий. Показывает тип и опасность.", 800, 0, 0, 0.5),
@@ -429,6 +478,18 @@ def init_db():
         ("Ремнабор", "consumables", "Ремкомплект для брони. Восстанавливает 10 защиты.", 60, 0, 0, 0.15),
         ("Антидот", "consumables", "Средство от отравления. -30 радиации.", 70, 0, 0, 0.1),
         ("Боевой стимулятор", "consumables", "Мощный стимулятор. +80 HP, +50 энергии.", 150, 0, 0, 0.08),
+
+        # === ЛЕКАРСТВА (для магазина ученого) ===
+        ("Аптечка", "meds", "Стандартная армейская аптечка. +50 HP.", 60, 0, 0, 0.3),
+        ("Научная аптечка", "meds", "Улучшенная аптечка от учёных. +80 HP.", 120, 0, 0, 0.25),
+        ("Бинт", "meds", "Обычный бинт. +20 HP.", 25, 0, 0, 0.1),
+        ("Стимулятор", "meds", "Военный стимулятор. +50 HP, +20 энергии.", 80, 0, 0, 0.1),
+        ("Боевой стимулятор", "meds", "Мощный стимулятор. +80 HP, +50 энергии.", 150, 0, 0, 0.08),
+
+        # === ЭНЕРГЕТИКИ (для магазина ученого) ===
+        ("Энергетический батончик", "food", "Солдатский паёк. +40 энергии.", 40, 0, 0, 0.15),
+        ("Банка Энергетика", "food", "Энергетический напиток. +60 энергии.", 70, 0, 0, 0.2),
+        ("Чистая вода", "food", "Отфильтрованная вода. +30 HP, -10 радиации.", 50, 0, 0, 0.3),
     ]
 
     # Сначала выполняем миграцию (добавляем новые колонки)
@@ -437,18 +498,35 @@ def init_db():
     for item in items:
         if len(item) == 7:
             name, category, description, price, attack, defense, weight = item
+            # Удаляем старую запись с таким именем и добавляем новую
+            cursor.execute("DELETE FROM items WHERE name = %s", (name,))
             cursor.execute("""
-                INSERT INTO items (name, category, description, price, attack, defense, weight)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (name) DO NOTHING
+                INSERT INTO items (name, category, description, price, attack, defense, weight, rarity, anomaly_type, bonus_type, bonus_value)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
             """, (name, category, description, price, attack, defense, weight))
         elif len(item) == 8:
             name, category, description, price, attack, defense, weight, backpack_bonus = item
             cursor.execute("""
-                INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
                 ON CONFLICT (name) DO NOTHING
             """, (name, category, description, price, attack, defense, weight, backpack_bonus))
+        elif len(item) == 8:
+            # Мешочки для гильз (8 элементов: name, category, desc, price, attack, defense, weight, shells_capacity)
+            name, category, description, price, attack, defense, weight, shells_capacity = item
+            cursor.execute("""
+                INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
+                ON CONFLICT (name) DO NOTHING
+            """, (name, category, description, price, attack, defense, weight, shells_capacity))
+        elif len(item) == 11:
+            # Новый формат с редкостью и бонусами
+            name, category, description, price, attack, defense, weight, rarity, anomaly_type, bonus_type, bonus_value = item
+            cursor.execute("""
+                INSERT INTO items (name, category, description, price, attack, defense, weight, rarity, anomaly_type, bonus_type, bonus_value)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name) DO NOTHING
+            """, (name, category, description, price, attack, defense, weight, rarity, anomaly_type, bonus_type, bonus_value))
 
     conn.commit()
     # Создаём индексы для ускорения запросов
@@ -501,7 +579,10 @@ def migrate_add_new_columns():
     try_add_column("users", "equipped_backpack", "VARCHAR(100)")
     try_add_column("users", "equipped_weapon", "VARCHAR(100)")
     try_add_column("users", "equipped_armor", "VARCHAR(100)")
+    try_add_column("users", "equipped_device", "VARCHAR(100)")
     try_add_column("users", "newbie_kit_received", "INTEGER DEFAULT 0")
+    try_add_column("users", "shells", "INTEGER DEFAULT 0")  # Гильзы для добычи артефактов
+    try_add_column("users", "equipped_shells_bag", "VARCHAR(100)")  # Экипированный мешочек для гильз
     # Артефакты
     try_add_column("users", "artifact_slots", "INTEGER DEFAULT 3")
     try_add_column("users", "equipped_artifact_1", "VARCHAR(100)")
@@ -520,6 +601,10 @@ def migrate_add_new_columns():
     try_add_column("items", "defense", "INTEGER DEFAULT 0")
     try_add_column("items", "weight", "REAL DEFAULT 1.0")
     try_add_column("items", "backpack_bonus", "INTEGER DEFAULT 0")
+    try_add_column("items", "rarity", "VARCHAR(20) DEFAULT 'common'")
+    try_add_column("items", "anomaly_type", "VARCHAR(30)")
+    try_add_column("items", "bonus_type", "VARCHAR(30)")
+    try_add_column("items", "bonus_value", "INTEGER DEFAULT 0")
 
     cursor.close()
     release_connection(conn)
@@ -569,6 +654,8 @@ def _get_cached_items():
                 None: list(_items_cache.values()),
                 'weapons': _items_by_category_cache.get('weapons', []),
                 'armor': _items_by_category_cache.get('armor', []),
+                'resources': _items_by_category_cache.get('resources', []),
+                'shells_bag': _items_by_category_cache.get('shells_bag', []),
             }
 
             logger.info(f"Кэш предметов загружен: {len(_items_cache)} предметов")
@@ -614,7 +701,7 @@ def update_user_location(vk_id: int, location: str):
     release_connection(conn)
 
 
-def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None, equipped_backpack: str = None, equipped_weapon: str = None, equipped_armor: str = None, newbie_kit_received: int = None, artifact_slots: int = None, equipped_artifact_1: str = None, equipped_artifact_2: str = None, equipped_artifact_3: str = None, max_health_bonus: int = None, inventory_section: str = None, previous_location: str = None, menu_state: str = None):
+def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None, equipped_backpack: str = None, equipped_weapon: str = None, equipped_armor: str = None, equipped_device: str = None, newbie_kit_received: int = None, artifact_slots: int = None, equipped_artifact_1: str = None, equipped_artifact_2: str = None, equipped_artifact_3: str = None, max_health_bonus: int = None, inventory_section: str = None, previous_location: str = None, menu_state: str = None, shells: int = None, equipped_shells_bag: str = None):
     """Обновить характеристики пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -666,6 +753,9 @@ def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiat
     if equipped_armor is not None:
         updates.append("equipped_armor = %s")
         params.append(equipped_armor)
+    if equipped_device is not None:
+        updates.append("equipped_device = %s")
+        params.append(equipped_device)
     if newbie_kit_received is not None:
         updates.append("newbie_kit_received = %s")
         params.append(newbie_kit_received)
@@ -700,6 +790,16 @@ def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiat
         updates.append("menu_state = %s")
         params.append(menu_state)
 
+    if shells is not None:
+        updates.append("shells = %s")
+        params.append(shells)
+
+    if equipped_shells_bag == "":
+        updates.append("equipped_shells_bag = NULL")
+    elif equipped_shells_bag is not None:
+        updates.append("equipped_shells_bag = %s")
+        params.append(equipped_shells_bag)
+
     if updates:
         params.append(vk_id)
         import sys
@@ -718,6 +818,12 @@ def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiat
                         cursor.execute("ALTER TABLE users ADD COLUMN menu_state VARCHAR(50)")
                     if "previous_location" in error_msg:
                         cursor.execute("ALTER TABLE users ADD COLUMN previous_location VARCHAR(50)")
+                    if "equipped_device" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_device VARCHAR(100)")
+                    if "shells" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN shells INTEGER DEFAULT 0")
+                    if "equipped_shells_bag" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_shells_bag VARCHAR(100)")
                     conn.commit()
                     # Повторяем запрос
                     cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE vk_id = %s", params)
@@ -733,18 +839,51 @@ def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiat
 
 # Функции для работы с артефактами
 ARTIFACT_BONUSES = {
-    # Обычные артефакты: (бонус, значение, радиация, вес)
+    # Обычные артефакты (common)
+    "Слизь": {"health": 10, "dodge": 5},
+    "Пружина": {"defense": 8, "dodge": 3},
+    "Пустышка": {"luck": 5},
+    "Капля": {"health": 8, "radiation": -5},
+    "Слюда": {"damage_resist": 5},
+    "Вспышка": {"find_chance": 10, "perception": 3},
+    "Бенгальский огонь": {"damage_boost": 12},
+    "Батарейка": {"energy": 15, "crit": 3},
+    "Плёнка": {"dodge": 6, "radiation": -3},
+    "Ломоть мяса": {"health": 12, "radiation": 8},
+
+    # Редкие артефакты (rare)
+    "Грави": {"defense": 20},
+    "Выверт": {"dodge": 15},
+    "Слизняк": {"health": 15, "dodge": 8},
+    "Огненный шар": {"damage_boost": 15, "defense_fire": 10},
+    "Золотая рыбка": {"luck": 15},
+    "Ночная звезда": {"max_weight": 10},
+    "Колобок": {"health": 10, "luck": 5, "find_chance": 5},
+    "Морской ёж": {"damage_boost": 18, "defense": 8},
+    "Колючка": {"defense": 10, "crit": 5},
+    "Кровь камня": {"defense": 20, "damage_resist": 5},
+    "Каменный цветок": {"damage_resist": 12},
+    "Мамины бусы": {"luck": 20, "radiation": -10},
+    "Лунный свет": {"max_energy": 20},
+
+    # Уникальные артефакты (unique)
+    "Кристальная колючка": {"defense": 25, "crit": 10, "dodge": 15},
+    "Кристалл": {"crit": 20, "defense": 15},
+    "Медуза": {"damage_resist": 15},
+
+    # Легендарные артефакты (legendary)
+    "Душа": {"all_stats": 30, "radiation": -30},
+
+    # Старые артефакты
     "Огненник": {"defense_fire": 5, "radiation": 5},
     "Электра": {"energy": 10, "health": -5},
     "Слеза": {"radiation": -15},
     "Вихревик": {"dodge": 5, "defense": -5},
-    "Кристалл": {"crit": 3, "radiation": 10},
     "Тень": {"find_chance": 10, "defense": -10},
     "Холод": {"radiation": -10, "health": -10},
     "Пульсар": {"energy": 15},
     "Щит": {"defense": 8, "weight": 1},
     "Светляк": {"find_chance": 5, "radiation": 3},
-    # Редкие артефакты
     "Мечта": {"crit": 15, "find_chance": 10, "radiation": -20},
     "Грааль": {"full_heal": True, "radiation": -50},
     "Феникс": {"defense": 20, "fire_immune": True},
@@ -1013,6 +1152,12 @@ def get_items_by_category(category: str) -> list[dict]:
     return by_category.get(category, [])
 
 
+def get_all_items() -> list[dict]:
+    """Получить все предметы (из кэша)"""
+    all_items, _, _ = _get_cached_items()
+    return list(all_items.values())
+
+
 def get_shop_items(category: str = None) -> list[dict]:
     """Получить предметы для продажи (из кэша)"""
     _, _, shop_items = _get_cached_items()
@@ -1170,5 +1315,259 @@ def get_loot_from_mutant(player_luck: int = 5) -> list[dict]:
         loot.append(random.choice(consumables))
 
     return loot
+
+
+# ==========================================
+# ФУНКЦИИ ДЛЯ РАБОТЫ С ГИЛЬЗАМИ И МЕШОЧКАМИ
+# ==========================================
+
+# Вместимость мешочков для гильз
+SHELLS_BAG_CAPACITY = {
+    "Маленький мешочек": 50,
+    "Средний мешочек": 100,
+    "Большой мешочек": 300,
+    "Профессиональный мешочек": 500,
+    "Легендарный мешочек": 1000,
+}
+
+
+def get_shells_bag_capacity(vk_id: int) -> int:
+    """Получить вместимость мешочка для гильз игрока"""
+    user = get_user_by_vk(vk_id)
+    if not user:
+        return 20  # Базовая вместимость без мешочка
+
+    equipped_bag = user.get('equipped_shells_bag')
+    if not equipped_bag:
+        return 20  # Базовая вместимость без мешочка
+
+    return SHELLS_BAG_CAPACITY.get(equipped_bag, 20)
+
+
+def get_user_shells(vk_id: int) -> int:
+    """Получить количество гильз у игрока"""
+    user = get_user_by_vk(vk_id)
+    if not user:
+        return 0
+    return user.get('shells', 0)
+
+
+def get_shells_info(vk_id: int) -> dict:
+    """Получить полную информацию о гильзах игрока"""
+    current = get_user_shells(vk_id)
+    capacity = get_shells_bag_capacity(vk_id)
+    user = get_user_by_vk(vk_id)
+    equipped_bag = user.get('equipped_shells_bag') if user else None
+
+    return {
+        "current": current,
+        "capacity": capacity,
+        "equipped_bag": equipped_bag,
+        "free_space": max(0, capacity - current)
+    }
+
+
+def add_shells(vk_id: int, amount: int) -> tuple[bool, str]:
+    """Добавить гильзы игроку. Возвращает (успех, сообщение)."""
+    if amount <= 0:
+        return False, "Некорректное количество"
+
+    current = get_user_shells(vk_id)
+    capacity = get_shells_bag_capacity(vk_id)
+
+    # Проверяем, хватит ли места
+    free_space = capacity - current
+    if free_space <= 0:
+        return False, f"Мешочек полный! Нет места для {amount} гильз"
+
+    # Ограничиваем количество
+    actual_amount = min(amount, free_space)
+    update_user_stats(vk_id, shells=current + actual_amount)
+
+    if actual_amount < amount:
+        return True, f"Добавлено {actual_amount} гильз из {amount} (мешочек переполнился)"
+    return True, f"Добавлено {actual_amount} гильз"
+
+
+def remove_shells(vk_id: int, amount: int) -> bool:
+    """Потратить гильзы. Возвращает True если хватило."""
+    if amount <= 0:
+        return True
+    current = get_user_shells(vk_id)
+    if current < amount:
+        return False
+    update_user_stats(vk_id, shells=current - amount)
+    return True
+
+
+def equip_shells_bag(vk_id: int, bag_name: str) -> dict:
+    """Экипировать мешочек для гильз"""
+    user = get_user_by_vk(vk_id)
+    if not user:
+        return {"success": False, "message": "Пользователь не найден"}
+
+    # Проверяем, есть ли мешочек в инвентаре
+    inventory = get_user_inventory(vk_id)
+    bags = [i for i in inventory if i['category'] == 'shells_bag']
+
+    bag = next((b for b in bags if b['name'] == bag_name), None)
+    if not bag:
+        return {"success": False, "message": "Мешочек не найден в инвентаре"}
+
+    # Экипируем
+    update_user_stats(vk_id, equipped_shells_bag=bag_name)
+    capacity = SHELLS_BAG_CAPACITY.get(bag_name, 20)
+
+    return {"success": True, "message": f"✅ Экипирован {bag_name}! Вместимость: {capacity} гильз"}
+
+
+def unequip_shells_bag(vk_id: int) -> dict:
+    """Снять мешочек для гильз"""
+    user = get_user_by_vk(vk_id)
+    if not user:
+        return {"success": False, "message": "Пользователь не найден"}
+
+    equipped_bag = user.get('equipped_shells_bag')
+    if not equipped_bag:
+        return {"success": False, "message": "Мешочек не экипирован"}
+
+    # Снимаем
+    update_user_stats(vk_id, equipped_shells_bag="")
+
+    # Проверяем, не превышает ли текущее количество базовую вместимость
+    current = get_user_shells(vk_id)
+    if current > 20:
+        update_user_stats(vk_id, shells=20)
+        return {"success": True, "message": f"✅ Мешочек снят! Гильз: 20 (избыток потерян)"}
+
+    return {"success": True, "message": "✅ Мешочек снят!"}
+
+
+# ==========================================
+# АРТЕФАКТЫ ПО РЕДКОСТИ (для добычи гильзами)
+# ==========================================
+
+ARTIFACT_RARITY_CHANCES = {
+    "common": 60,    # 60% - обычные
+    "rare": 30,      # 30% - редкие
+    "unique": 9,     # 9% - уникальные
+    "legendary": 1,  # 1% - легендарные
+}
+
+# Артефакты по редкости (из базы данных)
+ARTIFACTS_BY_RARITY = {
+    "common": [
+        "Слизь", "Пружина", "Пустышка", "Капля", "Слюда",
+        "Вспышка", "Бенгальский огонь", "Батарейка", "Плёнка", "Ломоть мяса"
+    ],
+    "rare": [
+        "Грави", "Выверт", "Слизняк", "Огненный шар", "Золотая рыбка",
+        "Ночная звезда", "Колобок", "Морской ёж", "Колючка", "Кровь камня",
+        "Каменный цветок", "Мамины бусы", "Лунный свет"
+    ],
+    "unique": [
+        "Кристальная колючка", "Кристалл", "Медуза"
+    ],
+    "legendary": [
+        "Душа"
+    ]
+}
+
+# Привязка артефактов к аномалиям
+ARTIFACT_ANOMALY_MAP = {
+    # Туман
+    "Слизь": "туман", "Капля": "туман", "Плёнка": "туман", "Ломоть мяса": "туман",
+    "Слизняк": "туман", "Выверт": "туман",
+    # Воронка
+    "Пружина": "воронка", "Золотая рыбка": "воронка", "Ночная звезда": "воронка",
+    "Мамины бусы": "воронка", "Лунный свет": "воронка", "Колобок": "воронка", "Грави": "воронка",
+    # Жарка
+    "Слюда": "жарка", "Огненный шар": "жарка", "Кровь камня": "жарка",
+    "Каменный цветок": "жарка", "Кристалл": "жарка", "Медуза": "жарка",
+    # Электра
+    "Бенгальский огонь": "электра", "Вспышка": "электра", "Батарейка": "электра", "Морской ёж": "электра",
+    # Магнит
+    "Пустышка": "магнит", "Колючка": "магнит", "Кристальная колючка": "магнит",
+}
+
+
+def get_artifact_for_anomaly(anomaly_type: str) -> str | None:
+    """Получить случайный артефакт для указанной аномалии"""
+    import random
+
+    # Фильтруем артефакты по аномалии
+    valid_artifacts = [a for a, anom in ARTIFACT_ANOMALY_MAP.items() if anom == anomaly_type]
+
+    if not valid_artifacts:
+        return None
+
+    return random.choice(valid_artifacts)
+
+
+def roll_artifact_from_anomaly(anomaly_type: str, player_luck: int = 5, detector_bonus: int = 0) -> dict | None:
+    """
+    Бросить гильзу в аномалию и попытаться получить артефакт.
+
+    Параметры:
+        anomaly_type: тип аномалии (жарка, электра, воронка, туман, магнит)
+        player_luck: удача игрока (влияет на шанс)
+        detector_bonus: бонус детектора к шансу артефакта
+
+    Возвращает:
+        dict с информацией об артефакте или None если не повезло
+    """
+    import random
+
+    # Базовый шанс выпадения артефакта (25%)
+    base_chance = 25
+
+    # Бонус от удачи: +1% за каждый пункт удачи свыше 5
+    luck_bonus = max(0, player_luck - 5)
+
+    # Итоговый шанс = базовый + удача + детектор
+    total_chance = base_chance + luck_bonus + detector_bonus
+
+    # Проверяем, выпал ли артефакт
+    roll = random.randint(1, 100)
+
+    if roll > total_chance:
+        # Не повезло - артефакт не выпал
+        return None
+
+    # Артефакт выпал! Определяем редкость
+    rarity_roll = random.randint(1, 100)
+
+    if rarity_roll <= 60:
+        rarity = "common"
+    elif rarity_roll <= 90:
+        rarity = "rare"
+    elif rarity_roll <= 99:
+        rarity = "unique"
+    else:
+        rarity = "legendary"
+
+    # Получаем артефакт нужной редкости для данной аномалии
+    valid_artifacts = [a for a in ARTIFACTS_BY_RARITY.get(rarity, [])
+                       if ARTIFACT_ANOMALY_MAP.get(a) == anomaly_type]
+
+    # Если нет артефактов нужной редкости для этой аномалии - пробуем любую редкость
+    if not valid_artifacts:
+        valid_artifacts = [a for a in ARTIFACTS_BY_RARITY.get(rarity, [])]
+
+    # Если всё ещё нет - берём любой артефакт для аномалии
+    if not valid_artifacts:
+        valid_artifacts = [a for a, anom in ARTIFACT_ANOMALY_MAP.items() if anom == anomaly_type]
+
+    if not valid_artifacts:
+        return None
+
+    artifact_name = random.choice(valid_artifacts)
+
+    return {
+        "name": artifact_name,
+        "rarity": rarity,
+        "anomaly": anomaly_type,
+        "message": f"✨ <b>АРТЕФАКТ!</b> ✨\n\n{artifact_name} ({rarity})"
+    }
 
 

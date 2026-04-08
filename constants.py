@@ -5,7 +5,7 @@ from enum import Enum
 
 
 # === Локации ===
-class Location(Enum):
+class LocationType(Enum):
     CITY = "город"
     KPP = "кпп"
     HOSPITAL = "больница"
@@ -121,15 +121,15 @@ COMMANDS = {
 
 # === Исследовательские локации ===
 RESEARCH_LOCATIONS = [
-    Location.MILITARY_ROAD.value,
-    Location.NII_ROAD.value,
-    Location.INFECTED_FOREST.value,
+    LocationType.MILITARY_ROAD.value,
+    LocationType.NII_ROAD.value,
+    LocationType.INFECTED_FOREST.value,
 ]
 
 
 # === NPC-локации ===
 NPC_LOCATIONS = {
-    'кпп': ['военный'],
-    'убежище': ['сидорович'],
-    'черный рынок': ['торговец'],
+    'кпп': ['военный', 'ученый', 'барыга'],
+    'убежище': ['местный житель', 'наставник'],
+    'черный рынок': ['барыга'],
 }
