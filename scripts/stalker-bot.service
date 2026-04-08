@@ -1,0 +1,17 @@
+[Unit]
+Description=Stalker Bot service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/stalker_bot
+EnvironmentFile=-/opt/stalker_bot/.env
+ExecStart=/opt/stalker_bot/.venv/bin/python /opt/stalker_bot/main.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

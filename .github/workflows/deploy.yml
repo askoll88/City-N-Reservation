@@ -1,0 +1,71 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REMOTE_PATH: /opt/stalker_bot
+  SSH_PORT: ${{ secrets.STALKER_SSH_PORT || '22' }}
+
+jobs:
+  check:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pip
+        run: python -m pip install --upgrade pip
+
+      - name: Verify Python syntax
+        run: python -m compileall .
+
+  deploy:
+    name: Deploy to server
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Sync code to remote server
+        env:
+          SSH_PASSWORD: ${{ secrets.STALKER_SSH_PASSWORD }}
+          SSH_HOST: ${{ secrets.STALKER_SSH_HOST }}
+          SSH_USER: ${{ secrets.STALKER_SSH_USERNAME }}
+          SSH_PORT: ${{ env.SSH_PORT }}
+          REMOTE_PATH: ${{ env.REMOTE_PATH }}
+        run: |
+          sshpass -p "$SSH_PASSWORD" rsync -avz --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.env' \
+            --exclude 'tests' \
+            --exclude '__pycache__' \
+            -e "ssh -p $SSH_PORT -o StrictHostKeyChecking=no" \
+            ./ "$SSH_USER@$SSH_HOST:$REMOTE_PATH/"
+
+      - name: Run remote deploy script
+        env:
+          SSH_PASSWORD: ${{ secrets.STALKER_SSH_PASSWORD }}
+          SSH_HOST: ${{ secrets.STALKER_SSH_HOST }}
+          SSH_USER: ${{ secrets.STALKER_SSH_USERNAME }}
+          SSH_PORT: ${{ env.SSH_PORT }}
+          REMOTE_PATH: ${{ env.REMOTE_PATH }}
+        run: |
+          sshpass -p "$SSH_PASSWORD" ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" <<'EOF'
+            set -euo pipefail
+            chmod +x /opt/stalker_bot/scripts/deploy.sh
+            /opt/stalker_bot/scripts/deploy.sh
+          EOF
