@@ -199,9 +199,14 @@ NPCS = {
                 "next": None
             },
             "продатьартефакты": {
+                "question": "Продать артефакты",
+                "answer": "sell_artifacts",
+                "next": "sell_artifacts"
+            },
+            "купитьартефакты": {
                 "question": "Купить артефакты",
-                "answer": "shop_artifacts",
-                "next": "shop_artifacts"
+                "answer": "buy_artifacts",
+                "next": "buy_artifacts"
             },
             "уйти": {
                 "question": "Поговорим позже",
@@ -213,7 +218,7 @@ NPCS = {
                 "next": "end"
             }
         },
-        "menu": ["артефакты", "оружие", "информация", "продатьартефакты", "уйти"]
+        "menu": ["артефакты", "оружие", "информация", "купитьартефакты", "продатьартефакты", "уйти"]
     },
 
     # НПС Убежища

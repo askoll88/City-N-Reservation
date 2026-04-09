@@ -223,8 +223,18 @@ class Player:
     def find_chance(self) -> int:
         """Шанс что-либо найти (%)"""
         base = self.perception * 3  # 3% за каждый пункт восприятия
-        bonus = self._artifact_bonuses.get('find_chance', 0)
-        return min(100, base + bonus)
+        artifact_bonus = self._artifact_bonuses.get('find_chance', 0)
+
+        # Бонус от детектора
+        detector_bonus = 0
+        if self.equipped_device:
+            try:
+                from anomalies import get_detector_bonus
+                detector_bonus = get_detector_bonus(self)
+            except:
+                pass
+
+        return min(100, base + artifact_bonus + detector_bonus)
 
     @property
     def crit_chance(self) -> int:
@@ -263,8 +273,8 @@ class Player:
 
     @property
     def max_health(self) -> int:
-        """Максимальное здоровье"""
-        return 100 + self.max_health_bonus
+        """Максимальное здоровье: 25 HP за единицу выносливости"""
+        return self.stamina * 25 + self.max_health_bonus
 
     @property
     def total_defense(self) -> int:
@@ -337,6 +347,10 @@ class Player:
             self.health = user_data.get('health', 100)
             self.energy = user_data.get('energy', 100)
             self.radiation = user_data.get('radiation', 0)
+            self.equipped_armor = user_data.get('equipped_armor')
+            self.equipped_weapon = user_data.get('equipped_weapon')
+            self.equipped_backpack = user_data.get('equipped_backpack')
+            self.equipped_device = user_data.get('equipped_device')
 
         loc = self.location
         exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[20])
@@ -378,23 +392,59 @@ class Player:
         if self.equipped_weapon:
             weapon_item = database.get_item_by_name(self.equipped_weapon)
             attack = weapon_item.get('attack', 0) if weapon_item else 0
-            equip_parts.append(f"Оружие: {self.equipped_weapon} ({attack})")
+            equip_parts.append(f"🔫 Оружие: {self.equipped_weapon} ({attack})")
         else:
-            equip_parts.append("Оружие: нет")
+            equip_parts.append("🔫 Оружие: нет")
 
-        if self.equipped_armor:
-            armor_item = database.get_item_by_name(self.equipped_armor)
-            defense = armor_item.get('defense', 0) if armor_item else 0
-            equip_parts.append(f"Броня: {self.equipped_armor} ({defense})")
+        # Показываем всю броню по частям тела
+        armor_parts = []
+
+        # Загружаем данные из БД для всех слотов брони
+        if user_data:
+            head = user_data.get('equipped_armor_head')
+            body = user_data.get('equipped_armor_body')
+            legs = user_data.get('equipped_armor_legs')
+            hands = user_data.get('equipped_armor_hands')
+            feet = user_data.get('equipped_armor_feet')
+
+            if head:
+                item = database.get_item_by_name(head)
+                def_val = item.get('defense', 0) if item else 0
+                armor_parts.append(f"🧢 {head} ({def_val})")
+            if body:
+                item = database.get_item_by_name(body)
+                def_val = item.get('defense', 0) if item else 0
+                armor_parts.append(f"🧥 {body} ({def_val})")
+            if legs:
+                item = database.get_item_by_name(legs)
+                def_val = item.get('defense', 0) if item else 0
+                armor_parts.append(f"👖 {legs} ({def_val})")
+            if hands:
+                item = database.get_item_by_name(hands)
+                def_val = item.get('defense', 0) if item else 0
+                armor_parts.append(f"🧤 {hands} ({def_val})")
+            if feet:
+                item = database.get_item_by_name(feet)
+                def_val = item.get('defense', 0) if item else 0
+                armor_parts.append(f"👟 {feet} ({def_val})")
+
+        if armor_parts:
+            equip_parts.append(f"🛡️ Броня:\n   " + "\n   ".join(armor_parts))
         else:
-            equip_parts.append("Броня: нет")
+            equip_parts.append("🛡️ Броня: нет")
 
         if self.equipped_backpack:
             bp_item = database.get_item_by_name(self.equipped_backpack)
             bp_bonus = bp_item.get('backpack_bonus', 0) if bp_item else 0
-            equip_parts.append(f"Рюкзак: {self.equipped_backpack} (+{bp_bonus}кг)")
+            equip_parts.append(f"🎒 Рюкзак: {self.equipped_backpack} (+{bp_bonus}кг)")
         else:
-            equip_parts.append("Рюкзак: нет")
+            equip_parts.append("🎒 Рюкзак: нет")
+
+        # Детектор
+        if self.equipped_device:
+            equip_parts.append(f"📡 Детектор: {self.equipped_device}")
+        else:
+            equip_parts.append("📡 Детектор: нет")
 
         # Защита: броня + артефакты
         artifact_def = self._get_artifact_bonuses().get('defense', 0)
@@ -656,12 +706,63 @@ class Player:
         if not armor:
             return False, f"У тебя нет брони '{armor_name}' в инвентаре."
 
-        self.equipped_armor = armor_name
         defense = armor.get('defense', 0)
-        self.armor_defense = defense
-        database.update_user_stats(self.user_id, equipped_armor=armor_name, armor_defense=defense)
+        armor_type = database.get_armor_type(armor_name)
 
-        return True, f"Надета броня: {armor_name} ({defense})"
+        print(f"[DEBUG] equip_armor: name={armor_name}, type={armor_type}")
+
+        # Определяем, в какой слот надевать
+        if armor_type == 'head':
+            database.update_user_stats(self.user_id, equipped_armor_head=armor_name)
+        elif armor_type == 'body':
+            database.update_user_stats(self.user_id, equipped_armor_body=armor_name)
+        elif armor_type == 'legs':
+            database.update_user_stats(self.user_id, equipped_armor_legs=armor_name)
+        elif armor_type == 'hands':
+            database.update_user_stats(self.user_id, equipped_armor_hands=armor_name)
+        elif armor_type == 'feet':
+            database.update_user_stats(self.user_id, equipped_armor_feet=armor_name)
+        else:
+            # Для старой брони - в основной слот
+            database.update_user_stats(self.user_id, equipped_armor=armor_name, armor_defense=defense)
+            self.equipped_armor = armor_name
+            self.armor_defense = defense
+            return True, f"Надета броня: {armor_name} ({defense})"
+
+        # Пересчитываем общую защиту
+        self._recalc_armor_defense()
+
+        # Обновляем old-style поле для совместимости
+        self.equipped_armor = armor_name
+
+        return True, f"Надета броня: {armor_name}! Защита: +{self.armor_defense}"
+
+    def _recalc_armor_defense(self):
+        """Пересчитать общую защиту от всей надетой брони"""
+        user_data = database.get_user_by_vk(self.user_id)
+        if not user_data:
+            return
+
+        total_defense = 0
+
+        # Список всех слотов брони
+        armor_slots = [
+            user_data.get('equipped_armor'),
+            user_data.get('equipped_armor_head'),
+            user_data.get('equipped_armor_body'),
+            user_data.get('equipped_armor_legs'),
+            user_data.get('equipped_armor_hands'),
+            user_data.get('equipped_armor_feet'),
+        ]
+
+        for armor_name in armor_slots:
+            if armor_name:
+                item = database.get_item_by_name(armor_name)
+                if item:
+                    total_defense += item.get('defense', 0)
+
+        self.armor_defense = total_defense
+        database.update_user_stats(self.user_id, armor_defense=total_defense)
 
     def equip_device(self, device_name: str = None) -> tuple[bool, str]:
         """Надеть или снять устройство (детектор аномалий)"""

@@ -1,15 +1,49 @@
 """
 База данных для игры "Город N: Запретная Зона"
-PostgreSQL с пулом соединений
+PostgreSQL с пулом соединений и retry-логикой
 """
 import logging
+import time
 import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
+from psycopg2 import OperationalError, DatabaseError
 import config
 import threading
+from functools import wraps
 
 logger = logging.getLogger(__name__)
+
+
+# === Retry-логика ===
+def with_retry(max_retries: int = None, delay: float = None):
+    """Декоратор для повторных попыток при ошибках БД"""
+    if max_retries is None:
+        max_retries = config.DB_MAX_RETRIES
+    if delay is None:
+        delay = config.DB_RETRY_DELAY
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (OperationalError, DatabaseError) as e:
+                    last_exception = e
+                    logger.warning(f"БД ошибка в {func.__name__}, попытка {attempt + 1}/{max_retries}: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(delay * (attempt + 1))  # Экспоненциальная задержка
+                    else:
+                        logger.error(f"БД ошибка после {max_retries} попыток в {func.__name__}: {e}")
+                except Exception as e:
+                    # Не повторяем другие ошибки
+                    raise
+            raise last_exception
+        return wrapper
+    return decorator
+
 
 # Пул соединений (создаётся один раз)
 _connection_pool = None
@@ -72,10 +106,10 @@ def init_db():
             money INTEGER DEFAULT 100,
             level INTEGER DEFAULT 1,
             experience INTEGER DEFAULT 0,
-            strength INTEGER DEFAULT 5,
-            stamina INTEGER DEFAULT 5,
-            perception INTEGER DEFAULT 5,
-            luck INTEGER DEFAULT 5,
+            strength INTEGER DEFAULT 4,
+            stamina INTEGER DEFAULT 4,
+            perception INTEGER DEFAULT 4,
+            luck INTEGER DEFAULT 4,
             armor_defense INTEGER DEFAULT 0,
             equipped_weapon VARCHAR(100),
             equipped_armor VARCHAR(100),
@@ -194,9 +228,10 @@ def init_db():
         ("Тактический шлем", "armor", "Лёгкий тактический шлем с креплением для附件.", 280, 0, 28, 1.4),
         ("Десантный шлем", "armor", "Шлем десантника. Прочный и практичный.", 200, 0, 24, 1.6),
         ("Шлем спецназа", "armor", "Профессиональный шлем для спецопераций.", 350, 0, 32, 1.8),
+        ("Кепка", "armor", "Лёгкая кепка. Минимальная защита головы.", 8, 0, 2, 0.15),
 
         # Броня - Броня
-        ("Кожаная куртка", "armor", "Стандартная кожаная куртка. Минимальная защита.", 30, 0, 5, 1.5),
+        ("Кожаная куртка", "armor", "Стандартная кожаная куртка. Минимальная защита.", 30, 0, 2, 1.5),
         ("Бронежилет", "armor", "Армейский бронежилет. Средняя защита.", 100, 0, 18, 3.0),
         ("Комбинезон сталкера", "armor", "Спецкостюм для работы в Зоне. Хорошая защита.", 300, 0, 35, 5.0),
         ("Экзоскелет", "armor", "Тяжёлая броня с приводом. Максимальная защита.", 600, 0, 55, 15.0),
@@ -206,7 +241,7 @@ def init_db():
         ("Штурмовой костюм", "armor", "Костюм для штурмовых операций.", 420, 0, 42, 6.5),
 
         # Броня - Штаны
-        ("Джинсы", "armor", "Обычные джинсы. Никакой защиты.", 10, 0, 2, 0.5),
+        ("Джинсы", "armor", "Обычные джинсы. Базовая защита ног.", 10, 0, 2, 0.5),
         ("Камуфляжные штаны", "armor", "Военные штаны с карманами. Немного защиты.", 40, 0, 8, 0.8),
         ("Боевой костюм", "armor", "Штаны от боевого костюма. Хорошая защита.", 120, 0, 20, 1.5),
         ("Бронештаны", "armor", "Штаны с бронепластинами.", 180, 0, 25, 2.0),
@@ -217,6 +252,7 @@ def init_db():
 
         # Броня - Перчатки
         ("Тканевые перчатки", "armor", "Простые перчатки. От царапин.", 5, 0, 2, 0.1),
+        ("Перчатки без пальцев", "armor", "Перчатки с открытыми пальцами. Лёгкая защита.", 8, 0, 2, 0.1),
         ("Кожаные перчатки", "armor", "Кожаные перчатки. Чуть лучше.", 20, 0, 4, 0.2),
         ("Боевые перчатки", "armor", "Бронеперчатки с защитой кистей.", 60, 0, 8, 0.4),
         ("Тактические перчатки", "armor", "Перчатки с противоударной защитой.", 80, 0, 10, 0.45),
@@ -226,7 +262,8 @@ def init_db():
         ("Огнестойкие перчатки", "armor", "Перчатки с защитой от огня.", 90, 0, 11, 0.48),
 
         # Броня - Ботинки
-        ("Кроссовки", "armor", "Удобные, но не защищают.", 10, 0, 2, 0.4),
+        ("Кроссовки", "armor", "Удобные кроссовки. Базовая защита.", 10, 0, 2, 0.4),
+        ("Кеды", "armor", "Простые кеды. Лёгкая защита ног.", 12, 0, 2, 0.35),
         ("Армейские ботинки", "armor", "Прочные армейские ботинки. Защита ног.", 40, 0, 8, 0.8),
         ("Боевые ботинки", "armor", "Бронированные ботинки. Максимум защиты.", 80, 0, 15, 1.2),
         ("Тактические ботинки", "armor", "Ботинки для тактических операций.", 120, 0, 18, 1.4),
@@ -495,6 +532,20 @@ def init_db():
     # Сначала выполняем миграцию (добавляем новые колонки)
     migrate_add_new_columns()
 
+    # Миграция характеристик для существующих пользователей (было 5, стало 4)
+    try:
+        cursor.execute("""
+            UPDATE users 
+            SET strength = 4, stamina = 4, perception = 4, luck = 4 
+            WHERE strength > 4 OR stamina > 4 OR perception > 4 OR luck > 4
+        """)
+        if cursor.rowcount > 0:
+            logger.info(f"Обновлено характеристик для {cursor.rowcount} пользователей")
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Не удалось обновить характеристики: {e}")
+        conn.rollback()
+
     for item in items:
         if len(item) == 7:
             name, category, description, price, attack, defense, weight = item
@@ -505,20 +556,22 @@ def init_db():
                 VALUES (%s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
             """, (name, category, description, price, attack, defense, weight))
         elif len(item) == 8:
-            name, category, description, price, attack, defense, weight, backpack_bonus = item
-            cursor.execute("""
-                INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
-                ON CONFLICT (name) DO NOTHING
-            """, (name, category, description, price, attack, defense, weight, backpack_bonus))
-        elif len(item) == 8:
-            # Мешочки для гильз (8 элементов: name, category, desc, price, attack, defense, weight, shells_capacity)
-            name, category, description, price, attack, defense, weight, shells_capacity = item
-            cursor.execute("""
-                INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
-                ON CONFLICT (name) DO NOTHING
-            """, (name, category, description, price, attack, defense, weight, shells_capacity))
+            name, category, description, price, attack, defense, weight, bonus = item
+            # Различаем по категории: backpacks использует backpack_bonus, shells_bag использует shells_capacity
+            if category == 'shells_bag':
+                # Мешочки для гильз
+                cursor.execute("""
+                    INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
+                    ON CONFLICT (name) DO NOTHING
+                """, (name, category, description, price, attack, defense, weight, bonus))
+            else:
+                # Рюкзаки и другие предметы с бонусом к весу
+                cursor.execute("""
+                    INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
+                    ON CONFLICT (name) DO NOTHING
+                """, (name, category, description, price, attack, defense, weight, bonus))
         elif len(item) == 11:
             # Новый формат с редкостью и бонусами
             name, category, description, price, attack, defense, weight, rarity, anomaly_type, bonus_type, bonus_value = item
@@ -570,15 +623,20 @@ def migrate_add_new_columns():
     # Миграция для users
     try_add_column("users", "level", "INTEGER DEFAULT 1")
     try_add_column("users", "experience", "INTEGER DEFAULT 0")
-    try_add_column("users", "strength", "INTEGER DEFAULT 5")
-    try_add_column("users", "stamina", "INTEGER DEFAULT 5")
-    try_add_column("users", "perception", "INTEGER DEFAULT 5")
-    try_add_column("users", "luck", "INTEGER DEFAULT 5")
+    try_add_column("users", "strength", "INTEGER DEFAULT 4")
+    try_add_column("users", "stamina", "INTEGER DEFAULT 4")
+    try_add_column("users", "perception", "INTEGER DEFAULT 4")
+    try_add_column("users", "luck", "INTEGER DEFAULT 4")
     try_add_column("users", "armor_defense", "INTEGER DEFAULT 0")
     try_add_column("users", "max_weight", "INTEGER DEFAULT 20")
     try_add_column("users", "equipped_backpack", "VARCHAR(100)")
     try_add_column("users", "equipped_weapon", "VARCHAR(100)")
     try_add_column("users", "equipped_armor", "VARCHAR(100)")
+    try_add_column("users", "equipped_armor_head", "VARCHAR(100)")  # Шлем/кепка
+    try_add_column("users", "equipped_armor_body", "VARCHAR(100)")  # Куртка/броня
+    try_add_column("users", "equipped_armor_legs", "VARCHAR(100)")  # Штаны
+    try_add_column("users", "equipped_armor_hands", "VARCHAR(100)")  # Перчатки
+    try_add_column("users", "equipped_armor_feet", "VARCHAR(100)")  # Ботинки/кеды
     try_add_column("users", "equipped_device", "VARCHAR(100)")
     try_add_column("users", "newbie_kit_received", "INTEGER DEFAULT 0")
     try_add_column("users", "shells", "INTEGER DEFAULT 0")  # Гильзы для добычи артефактов
@@ -595,6 +653,8 @@ def migrate_add_new_columns():
     try_add_column("users", "previous_location", "VARCHAR(50)")
     # Состояние меню (для возврата из статуса и других меню)
     try_add_column("users", "menu_state", "VARCHAR(50)")
+    # Счетчик лечений в больнице
+    try_add_column("users", "hospital_treatments", "INTEGER DEFAULT 0")
 
     # Миграция для items
     try_add_column("items", "attack", "INTEGER DEFAULT 0")
@@ -681,9 +741,9 @@ def create_user(vk_id: int, name: str) -> dict:
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO users (vk_id, name, location, health, energy, radiation, money, level, experience, strength, stamina, perception, luck, armor_defense, max_weight)
-        VALUES (%s, %s, 'город', 100, 100, 0, 100, 1, 0, 5, 5, 5, 5, 0, 20)
+        VALUES (%s, %s, 'город', 100, 100, 0, %s, 1, 0, 4, 4, 4, 4, 0, 20)
         RETURNING *
-    """, (vk_id, name))
+    """, (vk_id, name, config.START_MONEY))
     conn.commit()
     row = cursor.fetchone()
     cursor.close()
@@ -701,7 +761,7 @@ def update_user_location(vk_id: int, location: str):
     release_connection(conn)
 
 
-def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None, equipped_backpack: str = None, equipped_weapon: str = None, equipped_armor: str = None, equipped_device: str = None, newbie_kit_received: int = None, artifact_slots: int = None, equipped_artifact_1: str = None, equipped_artifact_2: str = None, equipped_artifact_3: str = None, max_health_bonus: int = None, inventory_section: str = None, previous_location: str = None, menu_state: str = None, shells: int = None, equipped_shells_bag: str = None):
+def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None, equipped_backpack: str = None, equipped_weapon: str = None, equipped_armor: str = None, equipped_device: str = None, newbie_kit_received: int = None, artifact_slots: int = None, equipped_artifact_1: str = None, equipped_artifact_2: str = None, equipped_artifact_3: str = None, max_health_bonus: int = None, inventory_section: str = None, previous_location: str = None, menu_state: str = None, shells: int = None, equipped_shells_bag: str = None, equipped_armor_head: str = None, equipped_armor_body: str = None, equipped_armor_legs: str = None, equipped_armor_hands: str = None, equipped_armor_feet: str = None, hospital_treatments: int = None):
     """Обновить характеристики пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -800,6 +860,23 @@ def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiat
         updates.append("equipped_shells_bag = %s")
         params.append(equipped_shells_bag)
 
+    # Новая броня по слотам
+    if equipped_armor_head is not None:
+        updates.append("equipped_armor_head = %s")
+        params.append(equipped_armor_head)
+    if equipped_armor_body is not None:
+        updates.append("equipped_armor_body = %s")
+        params.append(equipped_armor_body)
+    if equipped_armor_legs is not None:
+        updates.append("equipped_armor_legs = %s")
+        params.append(equipped_armor_legs)
+    if equipped_armor_hands is not None:
+        updates.append("equipped_armor_hands = %s")
+        params.append(equipped_armor_hands)
+    if equipped_armor_feet is not None:
+        updates.append("equipped_armor_feet = %s")
+        params.append(equipped_armor_feet)
+
     if updates:
         params.append(vk_id)
         import sys
@@ -824,6 +901,16 @@ def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiat
                         cursor.execute("ALTER TABLE users ADD COLUMN shells INTEGER DEFAULT 0")
                     if "equipped_shells_bag" in error_msg:
                         cursor.execute("ALTER TABLE users ADD COLUMN equipped_shells_bag VARCHAR(100)")
+                    if "equipped_armor_head" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_head VARCHAR(100)")
+                    if "equipped_armor_body" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_body VARCHAR(100)")
+                    if "equipped_armor_legs" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_legs VARCHAR(100)")
+                    if "equipped_armor_hands" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_hands VARCHAR(100)")
+                    if "equipped_armor_feet" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_feet VARCHAR(100)")
                     conn.commit()
                     # Повторяем запрос
                     cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE vk_id = %s", params)
@@ -1146,10 +1233,72 @@ def get_item_by_name(item_name: str) -> dict | None:
     return items.get(item_name)
 
 
+def get_armor_type(item_name: str) -> str | None:
+    """Определить тип брони по названию предмета.
+
+    Возвращает:
+        'head' - шлем/кепка
+        'body' - куртка/броня
+        'legs' - штаны
+        'hands' - перчатки
+        'feet' - ботинки/кеды
+        None - если не броня
+    """
+    name_lower = item_name.lower()
+
+    # Голова
+    head_keywords = ['кепка', 'шлем', 'каска', 'шапка', 'берет', 'маска']
+    if any(kw in name_lower for kw in head_keywords):
+        return 'head'
+
+    # Тело
+    body_keywords = ['куртка', 'броня', 'жилет', 'костюм', 'плащ', 'рубашка']
+    if any(kw in name_lower for kw in body_keywords):
+        return 'body'
+
+    # Ноги
+    legs_keywords = ['джинсы', 'штаны', 'брюки', 'юбка']
+    if any(kw in name_lower for kw in legs_keywords):
+        return 'legs'
+
+    # Руки
+    hands_keywords = ['перчатк', 'рукавич']
+    if any(kw in name_lower for kw in hands_keywords):
+        return 'hands'
+
+    # Ноги (ботинки)
+    feet_keywords = ['ботинк', 'кед', 'туфл', 'сапог', 'сандал']
+    if any(kw in name_lower for kw in feet_keywords):
+        return 'feet'
+
+    return None
+
+
 def get_items_by_category(category: str) -> list[dict]:
     """Получить все предметы категории (из кэша)"""
     _, by_category, _ = _get_cached_items()
     return by_category.get(category, [])
+
+
+def get_items_by_rarity(rarity: str) -> list[dict]:
+    """Получить все предметы с указанной редкостью"""
+    all_items, _, _ = _get_cached_items()
+    return [item for item in all_items.values() if item.get('rarity') == rarity]
+
+
+def get_artifacts_by_rarity(rarity: str) -> list[dict]:
+    """Получить все артефакты с указанной редкостью"""
+    all_items, by_category, _ = _get_cached_items()
+
+    # Категории артефактов
+    artifact_categories = {'artifacts', 'rare_artifacts', 'unique', 'legendary_artifacts'}
+
+    artifacts = []
+    for item in all_items.values():
+        if item.get('rarity') == rarity and item.get('category') in artifact_categories:
+            artifacts.append(item)
+
+    return artifacts
 
 
 def get_all_items() -> list[dict]:
@@ -1244,6 +1393,11 @@ def give_newbie_kit(vk_id: int) -> dict:
     newbie_items = [
         ("ПМ", 1),
         ("Кожаная куртка", 1),
+        ("Джинсы", 1),
+        ("Перчатки без пальцев", 1),
+        ("Кеды", 1),
+        ("Кепка", 1),
+        ("Детектор аномалий", 1),
         ("Аптечка", 2),
         ("Бинт", 2),
         ("Хлеб", 1),
