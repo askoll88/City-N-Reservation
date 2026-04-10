@@ -668,37 +668,49 @@ def get_user_by_vk(vk_id: int) -> dict | None:
     """Получить пользователя по VK ID"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
-    row = cursor.fetchone()
-    cursor.close()
-    release_connection(conn)
-    return dict(row) if row else None
+    try:
+        cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        cursor.close()
+        release_connection(conn)
 
 
 def create_user(vk_id: int, name: str) -> dict:
     """Создать нового пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO users (vk_id, name, location, health, energy, radiation, money, level, experience, strength, stamina, perception, luck, armor_defense, max_weight)
-        VALUES (%s, %s, 'город', 100, 100, 0, 100, 1, 0, 5, 5, 5, 5, 0, 20)
-        RETURNING *
-    """, (vk_id, name))
-    conn.commit()
-    row = cursor.fetchone()
-    cursor.close()
-    release_connection(conn)
-    return get_user_by_vk(vk_id)
+    try:
+        cursor.execute("""
+            INSERT INTO users (vk_id, name, location, health, energy, radiation, money, level, experience, strength, stamina, perception, luck, armor_defense, max_weight)
+            VALUES (%s, %s, 'город', 100, 100, 0, 100, 1, 0, 5, 5, 5, 5, 0, 20)
+            RETURNING *
+        """, (vk_id, name))
+        conn.commit()
+        row = cursor.fetchone()
+        return get_user_by_vk(vk_id)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        release_connection(conn)
 
 
 def update_user_location(vk_id: int, location: str):
     """Обновить локацию пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET location = %s WHERE vk_id = %s", (location, vk_id))
-    conn.commit()
-    cursor.close()
-    release_connection(conn)
+    try:
+        cursor.execute("UPDATE users SET location = %s WHERE vk_id = %s", (location, vk_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        release_connection(conn)
 
 
 def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None, equipped_backpack: str = None, equipped_weapon: str = None, equipped_armor: str = None, equipped_device: str = None, newbie_kit_received: int = None, artifact_slots: int = None, equipped_artifact_1: str = None, equipped_artifact_2: str = None, equipped_artifact_3: str = None, max_health_bonus: int = None, inventory_section: str = None, previous_location: str = None, menu_state: str = None, shells: int = None, equipped_shells_bag: str = None):
@@ -1062,82 +1074,83 @@ def add_item_to_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool
 
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Получаем id пользователя и предмета
-    cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
-    user_row = cursor.fetchone()
-    if not user_row:
-        logger.warning(f"[ADD_ITEM] User not found: vk_id={vk_id}")
-        cursor.close()
-        release_connection(conn)
-        return False
-    
-    cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
-    item_row = cursor.fetchone()
-    if not item_row:
-        logger.warning(f"[ADD_ITEM] Item not found: '{item_name}'")
-        cursor.close()
-        release_connection(conn)
-        return False
-    
-    user_id = user_row['id']
-    item_id = item_row['id']
-    logger.info(f"[ADD_ITEM] Adding item_id={item_id} ({item_name}) to user_id={user_id}, qty={quantity}")
+    try:
+        # Получаем id пользователя и предмета
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user_row = cursor.fetchone()
+        if not user_row:
+            logger.warning(f"[ADD_ITEM] User not found: vk_id={vk_id}")
+            return False
+        
+        cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+        item_row = cursor.fetchone()
+        if not item_row:
+            logger.warning(f"[ADD_ITEM] Item not found: '{item_name}'")
+            return False
+        
+        user_id = user_row['id']
+        item_id = item_row['id']
+        logger.info(f"[ADD_ITEM] Adding item_id={item_id} ({item_name}) to user_id={user_id}, qty={quantity}")
 
-    # Добавляем или обновляем количество
-    cursor.execute("""
-        INSERT INTO user_inventory (user_id, item_id, quantity)
-        VALUES (%s, %s, %s)
-        ON CONFLICT(user_id, item_id) 
-        DO UPDATE SET quantity = user_inventory.quantity + %s
-    """, (user_id, item_id, quantity, quantity))
-    
-    conn.commit()
-    logger.info(f"[ADD_ITEM] Committed successfully")
-    cursor.close()
-    release_connection(conn)
-    return True
+        # Добавляем или обновляем количество
+        cursor.execute("""
+            INSERT INTO user_inventory (user_id, item_id, quantity)
+            VALUES (%s, %s, %s)
+            ON CONFLICT(user_id, item_id) 
+            DO UPDATE SET quantity = user_inventory.quantity + %s
+        """, (user_id, item_id, quantity, quantity))
+        conn.commit()
+        logger.info(f"[ADD_ITEM] Committed successfully")
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        release_connection(conn)
 
 
 def remove_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
     """Удалить предмет из инвентаря"""
     conn = get_connection()
     cursor = conn.cursor()
-    
-    cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
-    user_row = cursor.fetchone()
-    if not user_row:
+    try:
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user_row = cursor.fetchone()
+        if not user_row:
+            return False
+        
+        cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+        item_row = cursor.fetchone()
+        if not item_row:
+            return False
+        
+        user_id = user_row['id']
+        item_id = item_row['id']
+        
+        # Уменьшаем количество
+        cursor.execute("""
+            UPDATE user_inventory 
+            SET quantity = quantity - %s
+            WHERE user_id = %s AND item_id = %s AND quantity >= %s
+        """, (quantity, user_id, item_id, quantity))
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return False
+        
+        # Удаляем запись если количество стало 0
+        cursor.execute("""
+            DELETE FROM user_inventory 
+            WHERE user_id = %s AND item_id = %s AND quantity <= 0
+        """, (user_id, item_id))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         cursor.close()
         release_connection(conn)
-        return False
-    
-    cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
-    item_row = cursor.fetchone()
-    if not item_row:
-        cursor.close()
-        release_connection(conn)
-        return False
-    
-    user_id = user_row['id']
-    item_id = item_row['id']
-    
-    # Уменьшаем количество
-    cursor.execute("""
-        UPDATE user_inventory 
-        SET quantity = quantity - %s
-        WHERE user_id = %s AND item_id = %s AND quantity >= %s
-    """, (quantity, user_id, item_id, quantity))
-    
-    # Удаляем запись если количество стало 0
-    cursor.execute("""
-        DELETE FROM user_inventory 
-        WHERE user_id = %s AND item_id = %s AND quantity <= 0
-    """, (user_id, item_id))
-    
-    conn.commit()
-    cursor.close()
-    release_connection(conn)
-    return True
 
 
 def get_item_by_name(item_name: str) -> dict | None:
