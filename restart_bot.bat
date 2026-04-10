@@ -7,11 +7,11 @@ echo     STALKER VK Bot - Restart
 echo ========================================
 echo.
 
-echo [STEP 1] Stopping bot...
+echo [STEP 1] Stopping bot....
 call stop_bot.bat
 
 echo.
-echo [STEP 2] Waiting 3 seconds...
+echo [STEP 2] Waiting 3 seconds....
 timeout /t 3 /nobreak >nul
 
 echo.
