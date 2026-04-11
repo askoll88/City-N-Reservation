@@ -68,14 +68,13 @@ def _equip_armor(player, index: int, vk, user_id: int) -> bool:
     
     armor = armor_items[index]
     armor_name = armor['name']
-    armor_defense = armor.get('defense', 0)
-    
-    player.armor_defense = armor_defense
-    database.update_user_stats(user_id, equipped_armor=armor_name, armor_defense=armor_defense)
-    
+
+    # Используем функцию игрока для правильного определения типа брони
+    success, msg = player.equip_armor(armor_name)
+
     vk.messages.send(
         user_id=user_id,
-        message=f"Надета броня: {armor_name}! Защита: +{armor_defense}",
+        message=msg,
         random_id=0
     )
     return True
@@ -111,7 +110,18 @@ def _use_item(player, index: int, vk, user_id: int) -> bool:
     
     item = other_items[index]
     item_name = item['name']
-    
+
+    # Проверяем, не детектор ли это
+    if 'детектор' in item_name.lower():
+        success, msg = player.equip_device(item_name)
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
     success, msg = player.use_item(item_name)
     vk.messages.send(
         user_id=user_id,
@@ -144,6 +154,7 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
         
         if result['success']:
             player._artifact_bonuses = player._get_artifact_bonuses()
+            player.max_health_bonus = player._artifact_bonuses.get('max_health_bonus', 0)
             player.inventory.reload()
             msg = f"Артефакт {artifact_name} снят!"
         else:
@@ -158,6 +169,7 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
         
         if result['success']:
             player._artifact_bonuses = player._get_artifact_bonuses()
+            player.max_health_bonus = player._artifact_bonuses.get('max_health_bonus', 0)
             player.inventory.reload()
             msg = f"{result['message']}\n\n"
 
@@ -174,6 +186,8 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
                 msg += f"Защита: +{bonuses['defense']}%\n"
             if bonuses.get('dodge'):
                 msg += f"Уклонение: +{bonuses['dodge']}%"
+            if bonuses.get('max_health_bonus'):
+                msg += f"\nЗдоровье: +{bonuses['max_health_bonus']} HP"
         else:
             msg = f"{result['message']}"
 
@@ -193,11 +207,12 @@ def show_weapons(player, vk, user_id: int):
     
     items = player.inventory.weapons
     if items:
-        msg = "Оружие:\n" + "\n".join(
-            f"{idx}. {item['name']} x{item['quantity']} УРН:{item.get('attack', 0)} ВЕС:{item.get('weight', 1.0)}кг"
-            for idx, item in enumerate(items, 1)
-        )
-        msg += "\n\nНажми цифру чтобы надеть"
+        msg = "Оружие:\n"
+        for idx, item in enumerate(items, 1):
+            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_weapon else ""
+            msg += f"{idx}. {item['name']} x{item['quantity']} УРН:{item.get('attack', 0)} ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
+        msg += "\nНажми цифру чтобы надеть"
+        msg += "\nНапиши 'выбросить <название>' чтобы выкинуть"
     else:
         msg = "Оружие: Пусто"
 
@@ -213,11 +228,22 @@ def show_armor(player, vk, user_id: int):
     
     items = player.inventory.armor
     if items:
-        msg = "Броня:\n" + "\n".join(
-            f"{idx}. {item['name']} x{item['quantity']} ЗАЩ:{item.get('defense', 0)} ВЕС:{item.get('weight', 1.0)}кг"
-            for idx, item in enumerate(items, 1)
-        )
-        msg += "\n\nНажми цифру чтобы надеть"
+        msg = "Броня:\n"
+        for idx, item in enumerate(items, 1):
+            equipped_mark = ""
+            item_name = item['name']
+            # Проверяем, экипирована ли броня в любом слоте
+            if item_name in [
+                player.equipped_armor_head,
+                player.equipped_armor_body,
+                player.equipped_armor_legs,
+                player.equipped_armor_hands,
+                player.equipped_armor_feet
+            ]:
+                equipped_mark = "⚡ [ЭКИП]"
+            msg += f"{idx}. {item_name} x{item['quantity']} ЗАЩ:{item.get('defense', 0)} ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
+        msg += "\nНажми цифру чтобы надеть"
+        msg += "\nНапиши 'выбросить <название>' чтобы выкинуть"
     else:
         msg = "Броня: Пусто"
 
@@ -232,11 +258,12 @@ def show_backpacks(player, vk, user_id: int):
     player.inventory_section = 'backpacks'
     
     if player.inventory.backpacks:
-        backpack_list = "\n".join(
-            f"{idx}. {b['name']} +{b.get('backpack_bonus', 0)}кг ВЕС:{b.get('weight', 1.0)}кг"
-            for idx, b in enumerate(player.inventory.backpacks, 1)
-        )
+        backpack_list = ""
+        for idx, b in enumerate(player.inventory.backpacks, 1):
+            equipped_mark = "⚡ [ЭКИП]" if b['name'] == player.equipped_backpack else ""
+            backpack_list += f"{idx}. {b['name']} +{b.get('backpack_bonus', 0)}кг ВЕС:{b.get('weight', 1.0)}кг {equipped_mark}\n"
         current = f"\n\nНадето: {player.equipped_backpack or 'нет'}\nНажми цифру чтобы надеть"
+        current += "\nНапиши 'выбросить <название>' чтобы выкинуть"
         msg = f"Рюкзаки:\n\n{backpack_list}{current}"
     else:
         msg = "Рюкзаки: Пусто"
@@ -299,6 +326,7 @@ def show_artifacts(player, vk, user_id: int):
             weight = art.get('weight', 0.5)
             msg += f"{idx}. {art['name']} {bonus_str} ВЕС:{weight}кг\n"
         msg += "\nНажми цифру чтобы надеть/снять"
+        msg += "\nНапиши 'выбросить <название>' чтобы выкинуть"
     elif not equipped:
         msg = "Артефакты: Пусто"
 
@@ -314,11 +342,12 @@ def show_other(player, vk, user_id: int):
 
     items = player.inventory.other
     if items:
-        msg = "Другое:\n" + "\n".join(
-            f"{idx}. {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг"
-            for idx, item in enumerate(items, 1)
-        )
-        msg += "\n\nНажми цифру чтобы использовать"
+        msg = "Другое:\n"
+        for idx, item in enumerate(items, 1):
+            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_device else ""
+            msg += f"{idx}. {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг {equipped_mark}\n"
+        msg += "\nНажми цифру чтобы использовать"
+        msg += "\nНапиши 'выбросить <название>' чтобы выкинуть"
     else:
         msg = "Другое: Пусто"
 
@@ -374,48 +403,62 @@ def show_resources_shop(player, vk, user_id: int):
 def show_all(player, vk, user_id: int):
     """Показать весь инвентарь"""
     from main import create_inventory_keyboard
+    import database as db
 
     player.inventory.reload()
 
     msg = "Весь инвентарь:\n\n"
 
     if player.inventory.weapons:
-        msg += "Оружие:\n" + "\n".join(
-            f"- {item['name']} x{item['quantity']} УРН:{item.get('attack', 0)} ВЕС:{item.get('weight', 1.0)}кг"
-            for item in player.inventory.weapons
-        ) + "\n\n"
+        msg += "Оружие:\n"
+        for item in player.inventory.weapons:
+            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_weapon else ""
+            msg += f"- {item['name']} x{item['quantity']} УРН:{item.get('attack', 0)} ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
+        msg += "\n"
     else:
         msg += "Оружие: пусто\n\n"
 
     if player.inventory.armor:
-        msg += "Броня:\n" + "\n".join(
-            f"- {item['name']} x{item['quantity']} ЗАЩ:{item.get('defense', 0)} ВЕС:{item.get('weight', 1.0)}кг"
-            for item in player.inventory.armor
-        ) + "\n\n"
+        msg += "Броня:\n"
+        for item in player.inventory.armor:
+            equipped_mark = ""
+            item_name = item['name']
+            if item_name in [
+                player.equipped_armor_head,
+                player.equipped_armor_body,
+                player.equipped_armor_legs,
+                player.equipped_armor_hands,
+                player.equipped_armor_feet
+            ]:
+                equipped_mark = "⚡ [ЭКИП]"
+            msg += f"- {item_name} x{item['quantity']} ЗАЩ:{item.get('defense', 0)} ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
+        msg += "\n"
     else:
         msg += "Броня: пусто\n\n"
 
     if player.inventory.backpacks:
-        msg += "Рюкзаки:\n" + "\n".join(
-            f"- {item['name']} +{item.get('backpack_bonus', 0)}кг ВЕС:{item.get('weight', 1.0)}кг"
-            for item in player.inventory.backpacks
-        ) + "\n\n"
+        msg += "Рюкзаки:\n"
+        for item in player.inventory.backpacks:
+            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_backpack else ""
+            msg += f"- {item['name']} +{item.get('backpack_bonus', 0)}кг ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
+        msg += "\n"
     else:
         msg += "Рюкзаки: пусто\n\n"
 
     if player.inventory.artifacts:
-        msg += "Артефакты:\n" + "\n".join(
-            f"- {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг"
-            for item in player.inventory.artifacts
-        ) + "\n\n"
+        msg += "Артефакты:\n"
+        for item in player.inventory.artifacts:
+            equipped_mark = "⚡ [ЭКИП]" if item['name'] in player.equipped_artifacts else ""
+            msg += f"- {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг {equipped_mark}\n"
+        msg += "\n"
     else:
         msg += "Артефакты: пусто\n\n"
 
     if player.inventory.other:
-        msg += "Другое:\n" + "\n".join(
-            f"- {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг"
-            for item in player.inventory.other
-        )
+        msg += "Другое:\n"
+        for item in player.inventory.other:
+            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_device else ""
+            msg += f"- {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг {equipped_mark}\n"
     else:
         msg += "Другое: пусто"
 
@@ -591,27 +634,44 @@ def handle_sell_item(player, item_name: str, vk, user_id: int):
 def handle_buy_artifact_slot(player, vk, user_id: int):
     """Купить слот для артефакта"""
     from main import create_inventory_keyboard
+    import config
 
     max_slots = player.artifact_slots
-    next_slot_cost = 500 + (max_slots - 3) * 250
+    cost = config.ARTIFACT_SLOT_COSTS.get(max_slots + 1)
 
-    if max_slots >= 10:
+    if max_slots >= config.MAX_ARTIFACT_SLOTS:
         vk.messages.send(
             user_id=user_id,
-            message="Нельзя купить больше слотов. Максимум: 10.",
+            message=f"Нельзя купить больше слотов. Максимум: {config.MAX_ARTIFACT_SLOTS}.",
             random_id=0
         )
         return
 
-    if player.money < next_slot_cost:
+    if not cost:
         vk.messages.send(
             user_id=user_id,
-            message=f"Не хватает денег! Нужно: {next_slot_cost} руб., у тебя: {player.money} руб.",
+            message="Нельзя купить больше слотов.",
             random_id=0
         )
         return
 
-    player.money -= next_slot_cost
+    if player.level < config.MIN_LEVEL_FOR_ARTIFACT_SLOT:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"Нужен {config.MIN_LEVEL_FOR_ARTIFACT_SLOT} уровень для покупки слотов.",
+            random_id=0
+        )
+        return
+
+    if player.money < cost:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"Не хватает денег! Нужно: {cost} руб., у тебя: {player.money} руб.",
+            random_id=0
+        )
+        return
+
+    player.money -= cost
     player.artifact_slots += 1
 
     database.update_user_stats(
@@ -622,7 +682,7 @@ def handle_buy_artifact_slot(player, vk, user_id: int):
 
     vk.messages.send(
         user_id=user_id,
-        message=f"Куплен слот для артефакта!\nТеперь у тебя {player.artifact_slots} слотов.\nПотрачено: {next_slot_cost} руб.",
+        message=f"Куплен слот для артефакта!\nТеперь у тебя {player.artifact_slots} слотов.\nПотрачено: {cost} руб.",
         random_id=0
     )
 
@@ -631,6 +691,30 @@ def handle_use_item(player, item_name: str, vk, user_id: int):
     """Использовать предмет"""
     from main import create_location_keyboard
 
+    # Проверяем, не детектор ли это
+    item_lower = item_name.lower()
+    if 'детектор' in item_lower:
+        # Ищем детектор в инвентаре
+        player.inventory.reload()
+        for item in player.inventory.other:
+            if 'детектор' in item['name'].lower():
+                success, msg = player.equip_device(item['name'])
+                vk.messages.send(
+                    user_id=user_id,
+                    message=msg,
+                    keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                    random_id=0
+                )
+                return
+
+        vk.messages.send(
+            user_id=user_id,
+            message="📡 У тебя нет детектора в инвентаре.",
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
     success, msg = player.use_item(item_name)
     vk.messages.send(
         user_id=user_id,
@@ -638,6 +722,218 @@ def handle_use_item(player, item_name: str, vk, user_id: int):
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
         random_id=0
     )
+
+
+def handle_drop_item(player, item_name: str, vk, user_id: int):
+    """Выбросить предмет"""
+    from main import create_inventory_keyboard
+
+    player.inventory.reload()
+
+    # Проверяем, есть ли предмет в инвентаре
+    all_items = (
+        player.inventory.weapons +
+        player.inventory.armor +
+        player.inventory.artifacts +
+        player.inventory.backpacks +
+        player.inventory.other
+    )
+
+    item = next((i for i in all_items if i['name'].lower() == item_name.lower()), None)
+
+    if not item:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ У тебя нет предмета '{item_name}'.",
+            keyboard=create_inventory_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    # Проверяем, не экипирован ли предмет
+    if item['name'] == player.equipped_weapon:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Сначала сними оружие: {item['name']}",
+            keyboard=create_inventory_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    if item['name'] == player.equipped_backpack:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Сначала сними рюкзак: {item['name']}",
+            keyboard=create_inventory_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    # Проверяем, не экипирована ли броня
+    equipped_armor = [
+        player.equipped_armor_head,
+        player.equipped_armor_body,
+        player.equipped_armor_legs,
+        player.equipped_armor_hands,
+        player.equipped_armor_feet
+    ]
+    if item['name'] in equipped_armor:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Сначала сними броню: {item['name']}",
+            keyboard=create_inventory_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    # Проверяем, не экипирован ли артефакт
+    if item['name'] in player.equipped_artifacts:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Сначала сними артефакт: {item['name']}",
+            keyboard=create_inventory_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    # Выбрасываем предмет
+    result = database.drop_item_from_inventory(user_id, item['name'], 1)
+
+    player.inventory.reload()
+
+    vk.messages.send(
+        user_id=user_id,
+        message=result['message'],
+        keyboard=create_inventory_keyboard().get_keyboard(),
+        random_id=0
+    )
+
+
+def handle_drop_item_by_index(player, index: int, vk, user_id: int):
+    """Выбросить предмет по номеру в текущем разделе"""
+    from main import create_inventory_keyboard
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        player.inventory.reload()
+
+        section = player.inventory_section or 'other'
+
+        # Получаем предметы из текущего раздела
+        if section == 'weapons':
+            items = player.inventory.weapons
+        elif section == 'armor':
+            items = player.inventory.armor
+        elif section == 'backpacks':
+            items = player.inventory.backpacks
+        elif section == 'artifacts':
+            items = player.inventory.artifacts
+        elif section == 'other':
+            items = player.inventory.other
+        else:
+            items = player.inventory.other
+
+        logger.info(f"[DROP] section={section}, index={index}, items_count={len(items)}")
+
+        if index < 1 or index > len(items):
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ Нет предмета с номером {index}.",
+                keyboard=create_inventory_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        item = items[index - 1]
+        item_name = item['name']
+
+        logger.info(f"[DROP] item_name={item_name}")
+
+        # Проверяем, не экипирован ли предмет
+        if item_name == player.equipped_weapon:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ Сначала сними оружие: {item_name}",
+                keyboard=create_inventory_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        if item_name == player.equipped_backpack:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ Сначала сними рюкзак: {item_name}",
+                keyboard=create_inventory_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        equipped_armor = [
+            player.equipped_armor_head,
+            player.equipped_armor_body,
+            player.equipped_armor_legs,
+            player.equipped_armor_hands,
+            player.equipped_armor_feet
+        ]
+        if item_name in equipped_armor:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ Сначала сними броню: {item_name}",
+                keyboard=create_inventory_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        if item_name in player.equipped_artifacts:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ Сначала сними артефакт: {item_name}",
+                keyboard=create_inventory_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Выбрасываем предмет
+        result = database.drop_item_from_inventory(user_id, item_name, 1)
+
+        logger.info(f"[DROP] result={result}")
+
+        # Сохраняем вес для оповещения
+        item_weight = item.get('weight', 0.5)
+
+        player.inventory.reload()
+
+        # Обновляем отображение раздела
+        if section == 'weapons':
+            show_weapons(player, vk, user_id)
+        elif section == 'armor':
+            show_armor(player, vk, user_id)
+        elif section == 'backpacks':
+            show_backpacks(player, vk, user_id)
+        elif section == 'artifacts':
+            show_artifacts(player, vk, user_id)
+        else:
+            show_other(player, vk, user_id)
+
+        # Оповещение о выбрасывании
+        drop_message = (
+            f"🗑️ <b>Предмет выброшен!</b>\n\n"
+            f"Ты выбросил: {item_name}\n"
+            f"⚖️ Освобождено: {item_weight}кг\n\n"
+            f"Вещь навсегда исчезла в Зоне..."
+        )
+        vk.messages.send(user_id=user_id, message=drop_message, random_id=0)
+
+    except Exception as e:
+        logger.error(f"[DROP] Ошибка: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при выбрасывании: {e}",
+            random_id=0
+        )
 
 
 # === Магазин у военного на КПП ===
@@ -921,5 +1217,380 @@ def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
             message=f"❌ Ошибка при загрузке магазина: {e}",
             random_id=0
         )
+
+
+# === Магазин артефактов на Черном рынке ===
+
+def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
+    """Показать артефакты в магазине"""
+    from handlers.keyboards import create_artifact_shop_keyboard
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        clear_shop_cache(user_id)
+
+        # Категории артефактов - используем редкость вместо категории
+        rarity_map = {
+            'common': ('common', 'ОБЫЧНЫЕ'),
+            'rare': ('rare', 'РЕДКИЕ'),
+            'unique': ('unique', 'УНИКАЛЬНЫЕ'),
+            'legendary': ('legendary', 'ЛЕГЕНДАРНЫЕ'),
+        }
+
+        # Показать меню выбора
+        if not rarity:
+            vk.messages.send(
+                user_id=user_id,
+                message="🔮 <b>АРТЕФАКТЫ</b>\n\nВыбери редкость:\n\n"
+                        "🔹 Обычные — Медуза, Камень, Пульсатор и др.\n"
+                        "🔹 Редкие — Метеорит, Огненный камень и др.\n"
+                        "🔹 Уникальные — Вечный, Феникс и др.\n"
+                        "🔹 Легендарные — Душа, Мечта и др.",
+                keyboard=create_artifact_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Получаем категорию и название
+        rarity_key, title = rarity_map.get(rarity, ('common', 'ОБЫЧНЫЕ'))
+        items = database.get_artifacts_by_rarity(rarity_key)[:10]
+
+        if not items:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"🔮 <b>Артефакты {title}</b>\n\nНет в наличии.",
+                keyboard=create_artifact_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
+        _shop_cache[user_id] = {'artifacts': items, 'rarity': rarity}
+
+        msg = f"🔮 <b>АРТЕФАКТЫ — {title}</b>\n\n"
+        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+
+        for idx, item in enumerate(items, 1):
+            name = item['name']
+            price = item.get('price', 0)
+            weight = item.get('weight', 0.1)
+            desc = item.get('description', '')[:35]
+
+            # Показываем бонусы
+            bonuses = []
+            if item.get('crit_bonus'):
+                bonuses.append(f"крит:+{item['crit_bonus']}%")
+            if item.get('find_bonus'):
+                bonuses.append(f"находка:+{item['find_bonus']}%")
+            if item.get('radiation'):
+                bonuses.append(f"рад:{item['radiation']}")
+            if item.get('energy_bonus'):
+                bonuses.append(f"энергия:+{item['energy_bonus']}")
+            if item.get('defense_bonus'):
+                bonuses.append(f"защита:+{item['defense_bonus']}%")
+            if item.get('dodge_bonus'):
+                bonuses.append(f"уклон:+{item['dodge_bonus']}%")
+
+            bonus_str = f" ({', '.join(bonuses)})" if bonuses else ""
+
+            msg += f"{idx}. {name}{bonus_str}\n"
+            msg += f"   📝 {desc}\n"
+            msg += f"   💵 Цена: {price} руб. | Вес: {weight}кг\n\n"
+
+        msg += "Напиши 'купить <номер>' или 'купить <название>'\n"
+        msg += "\nНажми 'Назад' для выбора редкости"
+
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_artifact_shop_keyboard().get_keyboard(),
+            random_id=0
+        )
+    except Exception as e:
+        logger.error(f"[ARTIFACT_SHOP] Ошибка: {e}")
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при загрузке артефактов: {e}",
+            random_id=0
+        )
+
+
+def show_sell_artifacts(player, vk, user_id: int):
+    """Показать артефакты игрока для продажи"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        player.inventory.reload()
+        artifacts = player.inventory.artifacts
+
+        if not artifacts:
+            vk.messages.send(
+                user_id=user_id,
+                message="💰 <b>ПРОДАЖА АРТЕФАКТОВ</b>\n\nУ тебя нет артефактов для продажи.\n\n"
+                        "Артефакты можно найти в аномалиях на дорогах.",
+                random_id=0
+            )
+            return
+
+        # Сохраняем в кэш для продажи по номеру
+        _shop_cache[user_id] = {'sell_artifacts': artifacts}
+
+        msg = "💰 <b>ПРОДАЖА АРТЕФАКТОВ</b>\n\n"
+        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+
+        for idx, art in enumerate(artifacts, 1):
+            name = art['name']
+            item_info = database.get_item_by_name(name)
+            base_price = item_info.get('price', 100) // 2 if item_info else 50
+            weight = art.get('weight', 0.1)
+
+            bonuses = []
+            if item_info:
+                if item_info.get('crit_bonus'):
+                    bonuses.append(f"крит:+{item_info['crit_bonus']}%")
+                if item_info.get('find_bonus'):
+                    bonuses.append(f"находка:+{item_info['find_bonus']}%")
+                if item_info.get('radiation'):
+                    bonuses.append(f"рад:{item_info['radiation']}")
+
+            bonus_str = f" ({', '.join(bonuses)})" if bonuses else ""
+            msg += f"{idx}. {name}{bonus_str}\n"
+            msg += f"   💵 Продам за: ~{base_price} руб.\n"
+            msg += f"   ⚖️ Вес: {weight}кг\n\n"
+
+        msg += "Напиши 'продать <номер>' или 'продать <название>'\n"
+        msg += "\nНажми 'Назад' для возврата в магазин"
+
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            random_id=0
+        )
+    except Exception as e:
+        logger.error(f"[SELL_ARTIFACTS] Ошибка: {e}")
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка: {e}",
+            random_id=0
+        )
+
+
+def handle_sell_artifact_by_number(player, vk, user_id: int, item_num: str) -> bool:
+    """Продать артефакт по номеру"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        shop_data = _shop_cache.get(user_id, {})
+        artifacts = shop_data.get('sell_artifacts', [])
+
+        if not artifacts:
+            return False
+
+        try:
+            idx = int(item_num) - 1
+            if 0 <= idx < len(artifacts):
+                artifact = artifacts[idx]
+                artifact_name = artifact['name']
+                return handle_sell_artifact(player, artifact_name, vk, user_id)
+            else:
+                vk.messages.send(user_id=user_id, message="Нет артефакта с таким номером.", random_id=0)
+                return True
+        except ValueError:
+            return False
+
+    except Exception as e:
+        logger.error(f"[SELL_ARTIFACT_BY_NUMBER] Ошибка: {e}")
+        return False
+
+
+def handle_sell_artifact(player, artifact_name: str, vk, user_id: int) -> bool:
+    """Продать артефакт по названию"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        player.inventory.reload()
+        artifacts = player.inventory.artifacts
+
+        # Ищем артефакт
+        artifact = None
+        for art in artifacts:
+            if art['name'].lower() == artifact_name.lower():
+                artifact = art
+                break
+            if artifact_name.lower() in art['name'].lower():
+                artifact = art
+                break
+
+        if not artifact:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ У тебя нет артефакта '{artifact_name}'.",
+                random_id=0
+            )
+            return True
+
+        artifact_name = artifact['name']
+        item_info = database.get_item_by_name(artifact_name)
+
+        if not item_info:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ Информация об артефакте не найдена.",
+                random_id=0
+            )
+            return True
+
+        base_price = item_info.get('price', 100) // 2
+        sell_price = int(base_price * player.sell_bonus)
+
+        # Продаем
+        success, msg = player.sell_item(artifact_name)
+
+        if success:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"💰 <b>Артефакт продан!</b>\n\n"
+                        f"🔮 {artifact_name}\n"
+                        f"💵 Получено: {sell_price} руб.\n\n"
+                        f"💰 Баланс: {player.money} руб.",
+                random_id=0
+            )
+
+            # Показываем снова список артефактов
+            show_sell_artifacts(player, vk, user_id)
+        else:
+            vk.messages.send(user_id=user_id, message=msg, random_id=0)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"[SELL_ARTIFACT] Ошибка: {e}")
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при продаже: {e}",
+            random_id=0
+        )
+        return True
+
+
+# === Покупка артефактов ===
+
+def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
+    """Купить артефакт"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Ищем артефакт в кэше магазина
+        shop_data = _shop_cache.get(user_id, {})
+        artifacts = shop_data.get('artifacts', [])
+
+        artifact = None
+
+        # Если передано число - ищем по номеру
+        if item_name.isdigit():
+            idx = int(item_name) - 1
+            if 0 <= idx < len(artifacts):
+                artifact = artifacts[idx]
+        else:
+            # Ищем по названию
+            for art in artifacts:
+                if art['name'].lower() == item_name.lower():
+                    artifact = art
+                    break
+            # Частичное совпадение
+            if not artifact:
+                for art in artifacts:
+                    if item_name.lower() in art['name'].lower():
+                        artifact = art
+                        break
+
+        if not artifact:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ Артефакт '{item_name}' не найден в магазине.",
+                random_id=0
+            )
+            return True
+
+        price = artifact.get('price', 0)
+        weight = artifact.get('weight', 0.1)
+        artifact_name = artifact['name']
+
+        # Проверяем деньги
+        if player.money < price:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"💸 <b>Недостаточно денег!</b>\n\n"
+                        f"Цена: {price} руб.\n"
+                        f"У тебя: {player.money} руб.\n"
+                        f"Не хватает: {price - player.money} руб.",
+                random_id=0
+            )
+            return True
+
+        # Проверяем вес
+        current_weight = player.inventory.total_weight
+        max_weight = player.max_carry_weight
+        if current_weight + weight > max_weight:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"🎒 <b>Не хватает места!</b>\n\n"
+                        f"Текущий вес: {current_weight:.1f} / {max_weight} кг\n"
+                        f"Вес артефакта: {weight} кг",
+                random_id=0
+            )
+            return True
+
+        # Проверяем слоты для артефактов
+        if len(player.equipped_artifacts) >= player.max_artifact_slots:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"🔮 <b>Нет слотов для артефактов!</b>\n\n"
+                        f"У тебя {player.max_artifact_slots} слотов.\n"
+                        f"Освободи слот: 'снять артефакт'",
+                random_id=0
+            )
+            return True
+
+        # Покупаем
+        success, msg = player.buy_item(artifact_name)
+
+        if success:
+            # Добавляем в инвентарь как артефакт
+            database.add_item_to_inventory(user_id, artifact_name, 1)
+            player.inventory.reload()
+
+            vk.messages.send(
+                user_id=user_id,
+                message=f"✅ <b>Артефакт куплен!</b>\n\n"
+                        f"🔮 {artifact_name}\n"
+                        f"💵 Потрачено: {price} руб.\n"
+                        f"⚖️ Вес: {weight} кг\n\n"
+                        f"💰 Остаток: {player.money} руб.",
+                random_id=0
+            )
+
+            # Показываем артефакты снова
+            rarity = shop_data.get('rarity')
+            show_artifact_shop(player, vk, user_id, rarity)
+        else:
+            vk.messages.send(user_id=user_id, message=msg, random_id=0)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"[BUY_ARTIFACT] Ошибка: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при покупке: {e}",
+            random_id=0
+        )
+        return True
 
 

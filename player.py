@@ -138,7 +138,7 @@ class Player:
         self.armor_defense = self._data['armor_defense']  # Защита брони
         self.equipped_backpack = self._data.get('equipped_backpack')  # Надетый рюкзак
         self.equipped_weapon = self._data.get('equipped_weapon')  # Надетое оружие
-        self.equipped_armor = self._data.get('equipped_armor')  # Надетая броня
+        self.equipped_armor = self._data.get('equipped_armor')  # Надетая броня (старый формат)
         self.equipped_device = self._data.get('equipped_device')  # Экипированное устройство (детектор)
         self.newbie_kit_received = self._data.get('newbie_kit_received', 0)  # Получил набор новичка
         self.max_weight = self._data['max_weight']   # Максимальный переносимый вес
@@ -147,6 +147,13 @@ class Player:
         self.inventory_section = self._data.get('inventory_section')  # Текущий раздел инвентаря
         self.previous_location = self._data.get('previous_location')  # Предыдущая локация для возврата
         self.player_class = self._data.get('player_class')  # Класс персонажа
+
+        # Слоты брони (новый формат)
+        self.equipped_armor_head = self._data.get('equipped_armor_head')
+        self.equipped_armor_body = self._data.get('equipped_armor_body')
+        self.equipped_armor_legs = self._data.get('equipped_armor_legs')
+        self.equipped_armor_hands = self._data.get('equipped_armor_hands')
+        self.equipped_armor_feet = self._data.get('equipped_armor_feet')
 
         # Экипированные артефакты
         self.equipped_artifact_1 = self._data.get('equipped_artifact_1')
@@ -195,6 +202,13 @@ class Player:
             self.newbie_kit_received = self._data.get('newbie_kit_received', 0)
             self.inventory_section = self._data.get('inventory_section')
             self.previous_location = self._data.get('previous_location')
+            # Слоты брони (новый формат)
+            self.equipped_armor_head = self._data.get('equipped_armor_head')
+            self.equipped_armor_body = self._data.get('equipped_armor_body')
+            self.equipped_armor_legs = self._data.get('equipped_armor_legs')
+            self.equipped_armor_hands = self._data.get('equipped_armor_hands')
+            self.equipped_armor_feet = self._data.get('equipped_armor_feet')
+
             # max_weight с учётом пассивных навыков
             passive = self._get_passive_bonuses()
             passive_weight_bonus = passive.get('max_weight', 0)
@@ -204,6 +218,11 @@ class Player:
                 backpack = next((b for b in self.inventory.backpacks if b['name'] == self.equipped_backpack), None)
                 if backpack:
                     self.max_weight += backpack.get('backpack_bonus', 0)
+
+            # Обновляем бонусы от артефактов И max_health_bonus
+            self._artifact_bonuses = self._get_artifact_bonuses()
+            self.max_health_bonus = self._artifact_bonuses.get('max_health_bonus', 0)
+
             self.inventory.reload()
 
     @property
@@ -357,47 +376,71 @@ class Player:
         current_weight = self.inventory.total_weight
         weight_status = "ОК" if current_weight <= self.max_weight else "ПЕРЕГРУЗ"
 
-        # Функция для определения цвета полоски по уровню
-        def get_bar_color(current, max_val):
-            percent = (current / max_val) * 100
-            if percent >= 70:
-                return "[+]"  # Зелёный
-            elif percent >= 30:
-                return "[~]"  # Жёлтый
+        # ═══════════════════════════════════════════════════
+        # КРАСИВЫЕ ПРОГРЕСС-БАРЫ
+        # ═══════════════════════════════════════════════════
+        def create_bar(current: int, max_val: int, length: int = 10) -> str:
+            """Создать красивый прогресс-бар"""
+            percent = current / max_val
+            filled = int(percent * length)
+
+            # Символы для бара
+            if percent >= 0.7:
+                fill_char = "🟩"  # Зелёный
+            elif percent >= 0.3:
+                fill_char = "🟨"  # Жёлтый
             else:
-                return "[-]"  # Красный
+                fill_char = "🟥"  # Красный
 
-        # Прогресс-бар HP (10 символов)
-        hp_filled = int(self.health / 10)
-        hp_color = get_bar_color(self.health, self.max_health)
-        hp_bar = hp_color * hp_filled + "[ ]" * (10 - hp_filled)
+            empty_char = "⬜"  # Пустой
+            return fill_char * filled + empty_char * (length - filled)
 
-        # Прогресс-бар энергии (10 символов)
-        energy_filled = int(self.energy / 10)
-        energy_color = get_bar_color(self.energy, 100)
-        energy_bar = energy_color * energy_filled + "[ ]" * (10 - energy_filled)
+        def create_rad_bar(current: int, max_val: int = 100, length: int = 10) -> str:
+            """Прогресс-бар радиации (инвертированный)"""
+            percent = current / max_val
+            filled = int(percent * length)
 
-        # Прогресс-бар опыта (10 символов)
-        exp_percent = self.experience / max(1, exp_needed)
-        exp_filled = int(exp_percent * 10)
-        exp_bar = "[*]" * exp_filled + "[ ]" * (10 - exp_filled)
+            # Для радиации: зелёный → жёлтый → красный
+            if percent <= 0.3:
+                fill_char = "🟩"  # Мало радиации
+            elif percent <= 0.7:
+                fill_char = "🟨"  # Средне
+            else:
+                fill_char = "🟥"  # Опасно
 
-        # Прогресс-бар радиации (10 символов)
-        rad_filled = int(self.radiation / 10)
-        rad_color = "[-]" if self.radiation >= 70 else "[~]" if self.radiation >= 30 else "[+]"
-        rad_bar = rad_color * rad_filled + "[ ]" * (10 - rad_filled)
+            empty_char = "⬜"
+            return fill_char * filled + empty_char * (length - filled)
+
+        def create_exp_bar(current: int, max_val: int, length: int = 10) -> str:
+            """Прогресс-бар опыта (синий)"""
+            percent = current / max_val
+            filled = int(percent * length)
+            fill_char = "🔵"  # Синий для опыта
+            empty_char = "⬜"
+            return fill_char * filled + empty_char * (length - filled)
+
+        # Прогресс-бары
+        hp_bar = create_bar(self.health, self.max_health)
+        energy_bar = create_bar(self.energy, 100)
+        rad_bar = create_rad_bar(self.radiation)
+        exp_bar = create_exp_bar(self.experience, exp_needed)
 
         # Формируем строку экипировки
         equip_parts = []
+
+        # Оружие с общей атакой
+        total_attack = 0
         if self.equipped_weapon:
             weapon_item = database.get_item_by_name(self.equipped_weapon)
             attack = weapon_item.get('attack', 0) if weapon_item else 0
-            equip_parts.append(f"🔫 Оружие: {self.equipped_weapon} ({attack})")
+            total_attack = attack
+            equip_parts.append(f"🔫 Оружие: {self.equipped_weapon} (атака {attack})")
         else:
             equip_parts.append("🔫 Оружие: нет")
 
-        # Показываем всю броню по частям тела
+        # Броня с общей защитой
         armor_parts = []
+        total_armor = 0
 
         # Загружаем данные из БД для всех слотов брони
         if user_data:
@@ -410,28 +453,67 @@ class Player:
             if head:
                 item = database.get_item_by_name(head)
                 def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"🧢 {head} ({def_val})")
+                armor_parts.append(f"   🧢 {head} (броня {def_val})")
+                total_armor += def_val
             if body:
                 item = database.get_item_by_name(body)
                 def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"🧥 {body} ({def_val})")
+                armor_parts.append(f"   🧥 {body} (броня {def_val})")
+                total_armor += def_val
             if legs:
                 item = database.get_item_by_name(legs)
                 def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"👖 {legs} ({def_val})")
+                armor_parts.append(f"   👖 {legs} (броня {def_val})")
+                total_armor += def_val
             if hands:
                 item = database.get_item_by_name(hands)
                 def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"🧤 {hands} ({def_val})")
+                armor_parts.append(f"   🧤 {hands} (броня {def_val})")
+                total_armor += def_val
             if feet:
                 item = database.get_item_by_name(feet)
                 def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"👟 {feet} ({def_val})")
+                armor_parts.append(f"   👟 {feet} (броня {def_val})")
+                total_armor += def_val
 
         if armor_parts:
-            equip_parts.append(f"🛡️ Броня:\n   " + "\n   ".join(armor_parts))
+            armor_text = "\n".join(armor_parts)
+            equip_parts.append(f"🛡️ Броня:\n{armor_text}\n   ────────\n📊 Всего брони: {total_armor}")
         else:
-            equip_parts.append("🛡️ Броня: нет")
+            equip_parts.append("🛡️ Броня: нет\n📊 Всего брони: 0")
+
+        # Добавляем итоговую атаку
+        equip_parts.append(f"📊 Всего атаки: {total_attack}")
+
+        # Артефакты
+        equipped_artifacts_count = len(self.equipped_artifacts)
+        if equipped_artifacts_count > 0:
+            artifact_list = []
+            for art_name in self.equipped_artifacts:
+                art_item = database.get_item_by_name(art_name)
+                if art_item:
+                    bonuses = []
+                    if art_item.get('crit_bonus'):
+                        bonuses.append(f"крит:+{art_item['crit_bonus']}%")
+                    if art_item.get('find_bonus'):
+                        bonuses.append(f"находка:+{art_item['find_bonus']}%")
+                    if art_item.get('radiation'):
+                        bonuses.append(f"рад:{art_item['radiation']}")
+                    if art_item.get('energy_bonus'):
+                        bonuses.append(f"энергия:+{art_item['energy_bonus']}")
+                    if art_item.get('defense_bonus'):
+                        bonuses.append(f"защита:+{art_item['defense_bonus']}%")
+                    if art_item.get('dodge_bonus'):
+                        bonuses.append(f"уклон:+{art_item['dodge_bonus']}%")
+
+                    bonus_str = f" ({', '.join(bonuses)})" if bonuses else ""
+                    artifact_list.append(f"   🔮 {art_name}{bonus_str}")
+
+            artifacts_text = "\n".join(artifact_list)
+            equip_parts.append(f"🔮 Артефакты ({equipped_artifacts_count}/{self.artifact_slots}):")
+            equip_parts.append(artifacts_text)
+        else:
+            equip_parts.append(f"🔮 Артефакты: 0/{self.artifact_slots}")
 
         if self.equipped_backpack:
             bp_item = database.get_item_by_name(self.equipped_backpack)
@@ -496,23 +578,23 @@ class Player:
 
         return (
             f"📊 СТАТУС ПЕРСОНАЖА{class_info}\n\n"
-            f"HP {hp_bar} {self.health}/{self.max_health}\n"
-            f"Энергия {energy_bar} {self.energy}/100\n"
-            f"Радиация {rad_bar} {self.radiation}%\n\n"
-            f"Деньги: {self.money} руб.\n"
-            f"Уровень: {self.level} | Опыт: {self.experience}/{exp_needed}\n"
-            f"   {exp_bar}\n\n"
-            f"Экипировка:\n{equip_text}\n\n"
-            f"Характеристики:\n"
-            f"- Сила: {self.strength} (урон: {self.melee_damage}, +{self.strength * 2}кг)\n"
-            f"- Выносливость: {self.stamina} (HP: {self.max_health})\n"
-            f"- Восприятие: {self.perception} (находка: {self.find_chance}%)\n"
-            f"- Удача: {self.luck} (крит: {self.crit_chance}%, редкое: {self.rare_find_chance}%)\n"
-            f"- Уклонение: {self.dodge_chance}%\n{passive_info}\n\n"
-            f"Груз:\n"
-            f"- Защита: {defense_info}\n"
-            f"- Вес: {current_weight}/{self.max_weight}кг {weight_status}\n\n"
-            f"🎯 {shells_text}"
+            f"❤️ HP:        {hp_bar} {self.health}/{self.max_health}\n"
+            f"⚡ Энергия:    {energy_bar} {self.energy}/100\n"
+            f"☢️ Радиация:  {rad_bar} {self.radiation}%\n\n"
+            f"💰 Деньги: {self.money} руб.\n"
+            f"🎯 Уровень: {self.level} | Опыт: {self.experience}/{exp_needed}\n"
+            f"           {exp_bar}\n\n"
+            f"🎒 Экипировка:\n{equip_text}\n\n"
+            f"💪 Характеристики:\n"
+            f"   • Сила: {self.strength} (урон: {self.melee_damage}, +{self.strength * 2}кг)\n"
+            f"   • Выносливость: {self.stamina} (HP: {self.max_health})\n"
+            f"   • Восприятие: {self.perception} (находка: {self.find_chance}%)\n"
+            f"   • Удача: {self.luck} (крит: {self.crit_chance}%, редкое: {self.rare_find_chance}%)\n"
+            f"   • Уклонение: {self.dodge_chance}%{passive_info}\n\n"
+            f"📦 Груз:\n"
+            f"   • Защита: {defense_info}\n"
+            f"   • Вес: {current_weight}/{self.max_weight}кг {weight_status}\n\n"
+            f"🎯 Гильзы: {shells_text}"
         )
 
     def update_stats(self, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None):
@@ -574,22 +656,89 @@ class Player:
 
     def _handle_death(self):
         """Обработка смерти персонажа"""
-        self.health = 0
+        # Штрафы при смерти
+        old_money = self.money
+        old_experience = self.experience
+
+        # Теряем 10% денег
+        self.money = max(0, self.money - int(self.money * 0.1))
+        money_lost = old_money - self.money
+
+        # Теряем 25% опыта, но не ниже порога текущего уровня
+        exp_loss = int(old_experience * 0.25)
+        exp_needed_current = self.LEVELS.get(self.level, 0)
+        exp_needed_next = self.LEVELS.get(self.level + 1, self.LEVELS[20])
+
+        # Минимальный опыт для сохранения текущего уровня
+        min_exp = exp_needed_current
+
+        # Новый опыт не может быть ниже порога текущего уровня
+        self.experience = max(min_exp, old_experience - exp_loss)
+
+        # Дополнительно проверяем: если опыт был ниже следующего уровня, не опускаем ниже текущего
+        if old_experience < exp_needed_next:
+            self.experience = max(min_exp, self.experience)
+
+        experience_lost = old_experience - self.experience
+
+        # Восстановление после смерти
+        self.health = self.max_health // 2  # 50% здоровья
+        self.energy = 50  # 50% энергии
         self.radiation = 0
-        self.money = max(0, self.money // 2)
-        self.experience = max(0, self.experience - self.experience // 4)
-        self.health = self.max_health // 2
-        self.energy = 50
-        database.update_user_stats(self.user_id, health=self.health, energy=50, radiation=0, money=self.money, experience=self.experience)
+
+        database.update_user_stats(
+            self.user_id,
+            health=self.health,
+            energy=self.energy,
+            radiation=0,
+            money=self.money,
+            experience=self.experience
+        )
+
+        logger.info(f"Игрок {self.user_id} умер. Потеряно: денег={money_lost}, опыта={experience_lost}. HP={self.health}, Energy={self.energy}")
 
     def _handle_radiation_death(self):
         """Обработка смерти от радиации"""
+        # Штрафы при смерти от радиации
+        old_money = self.money
+        old_experience = self.experience
+
+        # Теряем 10% денег
+        self.money = max(0, self.money - int(self.money * 0.1))
+        money_lost = old_money - self.money
+
+        # Теряем 25% опыта, но не ниже порога текущего уровня
+        exp_loss = int(old_experience * 0.25)
+        exp_needed_current = self.LEVELS.get(self.level, 0)
+        exp_needed_next = self.LEVELS.get(self.level + 1, self.LEVELS[20])
+
+        # Минимальный опыт для сохранения текущего уровня
+        min_exp = exp_needed_current
+
+        # Новый опыт не может быть ниже порога текущего уровня
+        self.experience = max(min_exp, old_experience - exp_loss)
+
+        # Дополнительно проверяем: если опыт был ниже следующего уровня, не опускаем ниже текущего
+        if old_experience < exp_needed_next:
+            self.experience = max(min_exp, self.experience)
+
+        experience_lost = old_experience - self.experience
+
+        # Восстановление после смерти
         self.radiation = 0
-        self.money = max(0, self.money // 2)
-        self.experience = max(0, self.experience - self.experience // 4)
-        self.health = self.max_health // 3
-        self.energy = 30
-        database.update_user_stats(self.user_id, health=self.health, energy=30, radiation=0, money=self.money, experience=self.experience)
+        self.health = self.max_health // 2  # 50% здоровья
+        self.energy = 50  # 50% энергии
+
+        database.update_user_stats(
+            self.user_id,
+            health=self.health,
+            energy=self.energy,
+            radiation=0,
+            money=self.money,
+            experience=self.experience
+        )
+
+        logger.info(f"Игрок {self.user_id} умер от радиации. Потеряно: денег={money_lost}, опыта={experience_lost}. HP={self.health}, Energy={self.energy}")
 
     def _check_level_up(self) -> str | None:
         """Проверить повышение уровня. Возвращает сообщение о повышении или None"""
@@ -708,8 +857,6 @@ class Player:
 
         defense = armor.get('defense', 0)
         armor_type = database.get_armor_type(armor_name)
-
-        print(f"[DEBUG] equip_armor: name={armor_name}, type={armor_type}")
 
         # Определяем, в какой слот надевать
         if armor_type == 'head':
@@ -870,6 +1017,24 @@ class Player:
             database.update_user_stats(self.user_id, energy=self.energy)
             msg = f"Вода выпита. Энергия: {old_energy} -> {self.energy}"
             used = True
+        elif item_name.lower() == 'хлеб':
+            old_energy = self.energy
+            self.energy = min(100, self.energy + 15)
+            database.update_user_stats(self.user_id, energy=self.energy)
+            msg = f"Хлеб съеден. Энергия: {old_energy} -> {self.energy}"
+            used = True
+        elif item_name.lower() == 'колбаса':
+            old_energy = self.energy
+            self.energy = min(100, self.energy + 20)
+            database.update_user_stats(self.user_id, energy=self.energy)
+            msg = f"Колбаса съедена. Энергия: {old_energy} -> {self.energy}"
+            used = True
+        elif item_name.lower() == 'консервы':
+            old_energy = self.energy
+            self.energy = min(100, self.energy + 25)
+            database.update_user_stats(self.user_id, energy=self.energy)
+            msg = f"Консервы съедены. Энергия: {old_energy} -> {self.energy}"
+            used = True
         else:
             return False, f"Предмет '{item_name}' нельзя использовать."
 
@@ -965,8 +1130,8 @@ _CACHE_TTL = 60  # Время жизни кэша в секундах
 def get_player(user_id: int) -> Player:
     """Получить игрока (с кэшированием)"""
     global _player_cache
-
     import time
+
     current_time = time.time()
 
     with _cache_lock:
@@ -976,6 +1141,7 @@ def get_player(user_id: int) -> Player:
             return cached['_player']
 
         player = Player(user_id)
+
         _player_cache[user_id] = {
             '_player': player,
             '_timestamp': current_time
