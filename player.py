@@ -1063,9 +1063,11 @@ class Player:
         if current_weight + weight > self.max_weight:
             return False, f"Не хватает места в рюкзаке. Вес: {current_weight}/{self.max_weight}кг"
 
-        self.money -= price
-        db.add_item_to_inventory(self.user_id, item_name, 1)
-        db.update_user_stats(self.user_id, money=self.money)
+        result = db.buy_item_transaction(self.user_id, item_name)
+        if not result.get('success'):
+            return False, result.get('message', 'Ошибка покупки.')
+
+        self.money = result.get('remaining_money', self.money - price)
 
         self.inventory.reload()
 
@@ -1090,24 +1092,17 @@ class Player:
         if not item:
             return False, f"У тебя нет предмета '{item_name}'."
 
-        item_info = db.get_item_by_name(item_name)
-        if not item_info:
-            return False, "Ошибка продажи."
-
-        base_sell_price = item_info.get('price', 0) // 2
-
-        # Применяем бонус к продаже от пассивных навыков
         sell_bonus = self.sell_bonus
-        if sell_bonus > 0:
-            bonus_amount = int(base_sell_price * (sell_bonus / 100))
-            sell_price = base_sell_price + bonus_amount
-        else:
-            sell_price = base_sell_price
+        result = db.sell_item_transaction(
+            self.user_id,
+            item['name'],
+            sell_bonus_pct=sell_bonus
+        )
+        if not result.get('success'):
+            return False, result.get('message', 'Ошибка продажи.')
 
-        db.remove_item_from_inventory(self.user_id, item_name, 1)
-
-        self.money += sell_price
-        db.update_user_stats(self.user_id, money=self.money)
+        sell_price = result.get('sell_price', 0)
+        self.money = result.get('remaining_money', self.money + sell_price)
 
         self.inventory.reload()
 

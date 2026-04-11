@@ -201,8 +201,7 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
 def show_weapons(player, vk, user_id: int):
     """Показать оружие"""
     from main import create_inventory_keyboard
-    
-    database.update_user_stats(user_id, inventory_section='weapons')
+
     player.inventory_section = 'weapons'
     
     items = player.inventory.weapons
@@ -222,8 +221,7 @@ def show_weapons(player, vk, user_id: int):
 def show_armor(player, vk, user_id: int):
     """Показать броню"""
     from main import create_inventory_keyboard
-    
-    database.update_user_stats(user_id, inventory_section='armor')
+
     player.inventory_section = 'armor'
     
     items = player.inventory.armor
@@ -253,8 +251,7 @@ def show_armor(player, vk, user_id: int):
 def show_backpacks(player, vk, user_id: int):
     """Показать рюкзаки"""
     from main import create_inventory_keyboard
-    
-    database.update_user_stats(user_id, inventory_section='backpacks')
+
     player.inventory_section = 'backpacks'
     
     if player.inventory.backpacks:
@@ -275,7 +272,6 @@ def show_artifacts(player, vk, user_id: int):
     """Показать артефакты"""
     from main import create_inventory_keyboard
 
-    database.update_user_stats(user_id, inventory_section='artifacts')
     player.inventory_section = 'artifacts'
 
     equipped = player.equipped_artifacts
@@ -337,7 +333,6 @@ def show_other(player, vk, user_id: int):
     """Показать другие предметы"""
     from main import create_inventory_keyboard
 
-    database.update_user_stats(user_id, inventory_section='other')
     player.inventory_section = 'other'
 
     items = player.inventory.other
@@ -1592,5 +1587,4 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
             random_id=0
         )
         return True
-
 
