@@ -6,30 +6,24 @@ import os
 import sys
 import traceback
 
-from pathlib import Path
-from dotenv import load_dotenv
+import vk_api
+from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 
-# Загружаем .env из директории проекта (как в config.py)
-env_path = Path(__file__).parent / '.env'
-load_dotenv(env_path)
+import config
+import database
+import player as player_module
 
 # Настройка логирования
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO if not config.DEBUG else logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
-import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
-
-import database
-import player as player_module
-
 # === Настройки VK ===
-TOKEN = os.getenv('VK_TOKEN', '')
-GROUP_ID = os.getenv('GROUP_ID', '')
+TOKEN = config.VK_TOKEN
+GROUP_ID = config.GROUP_ID
 
 # === Импорт обработчиков ===
 from handlers.commands import (
@@ -48,6 +42,7 @@ from handlers.commands import (
     handle_blackmarket_commands,
     handle_dialog_commands,
     handle_buy_sell_commands,
+    handle_class_commands,
     handle_unknown_command,
     normalize_text,
     get_welcome_message,
@@ -91,8 +86,6 @@ def handle_message(event, vk):
     text = normalize_text(event.obj.message.get('text', ''))
     original_text = event.obj.message.get('text', '')
 
-    print(f"[DEBUG] START handle_message. user={user_id}, text='{text}'", file=sys.stderr)
-
     # Получаем игрока
     player = get_player(user_id)
 
@@ -134,11 +127,31 @@ def handle_message(event, vk):
         handle_status_command(player, vk, user_id)
         return
     
+    # Класс персонажа
+    if text in ['класс', 'мой класс', 'получить класс', 'мои навыки', 'навыки']:
+        from handlers.commands import handle_class_commands
+        handle_class_commands(player, vk, user_id, text)
+        return
+
     # Инвентарь
     if 'инвентарь' in text or 'инвентар' in text:
         handle_inventory_command(player, vk, user_id)
         return
     
+    # Назад (возврат в предыдущую локацию)
+    if text in ['назад', '⬅️ назад', 'назад в город', 'назад⬅️', 'back']:
+        prev_loc = player.previous_location
+        if prev_loc and prev_loc not in ['город', 'кпп', 'инвентарь']:
+            go_to_location(player, prev_loc, vk, user_id)
+            return
+        elif prev_loc == 'кпп':
+            go_to_location(player, 'кпп', vk, user_id)
+            return
+        else:
+            # Возврат в город по умолчанию
+            go_to_location(player, 'город', vk, user_id)
+            return
+
     # Действия в локации (лечение)
     if handle_location_actions(player, vk, user_id, text):
         return
@@ -181,7 +194,7 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         handle_inventory_digit, handle_use_item,
         handle_buy_item, handle_sell_item,
         handle_buy_artifact_slot,
-        handle_unequip_backpack,
+        handle_unequip_backpack, handle_drop_item, handle_drop_item_by_index,
         show_weapons, show_armor, show_backpacks,
         show_artifacts, show_other, show_resources_shop,
         show_all, show_equipped_artifacts,
@@ -205,15 +218,16 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
     # Инвентарь - цифры
     if player.current_location_id == "инвентарь":
         if text == 'назад':
-            prev_loc = player.previous_location or 'кпп'
-            go_to_location(player, prev_loc, vk, user_id)
+            prev_loc = player.previous_location
+            # Возвращаемся в предыдущую локацию, если она есть и это не инвентарь
+            if prev_loc and prev_loc != "инвентарь":
+                go_to_location(player, prev_loc, vk, user_id)
+            else:
+                # Если previous_location не установлен, возвращаемся на КПП
+                go_to_location(player, 'кпп', vk, user_id)
             return True
 
-        if text.isdigit() and 1 <= int(text) <= 9:
-            if handle_inventory_digit(player, text, vk, user_id):
-                return True
-
-        # Категории инвентаря
+        # Категории инвентаря в режиме инвентаря
         if 'оружие' in text:
             show_weapons(player, vk, user_id)
             return True
@@ -226,24 +240,17 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         elif 'артефакты' in text:
             show_artifacts(player, vk, user_id)
             return True
-        elif 'ресурсы' in text:
-            show_resources_shop(player, vk, user_id)
-            return True
         elif 'другое' in text:
             show_other(player, vk, user_id)
             return True
         elif 'все' in text:
             show_all(player, vk, user_id)
             return True
-        elif 'экипировка' in text:
-            show_equipped_artifacts(player, vk, user_id)
-            return True
-        elif 'слоты' in text:
-            show_artifact_slots(player, vk, user_id)
-            return True
-        elif 'инструкция' in text:
-            show_artifact_help(player, vk, user_id)
-            return True
+
+        # Цифры для выбора предмета
+        if text.isdigit() and 1 <= int(text) <= 9:
+            if handle_inventory_digit(player, text, vk, user_id):
+                return True
 
     # Использовать предмет
     if text.startswith(('использовать ', 'выпить ', 'съесть ')):
@@ -366,6 +373,17 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
             msg = _get_unequip_list(player)
             vk.messages.send(user_id=user_id, message=msg, random_id=0)
             return True
+
+    # Выбросить предмет
+    if text.startswith('выбросить '):
+        item_name = text.replace('выбросить ', '').strip()
+
+        # Если указана цифра - выбрасываем по номеру в текущем разделе
+        if item_name.isdigit():
+            handle_drop_item_by_index(player, int(item_name), vk, user_id)
+        else:
+            handle_drop_item(player, item_name, vk, user_id)
+        return True
 
     return False
 
@@ -507,6 +525,40 @@ def main():
                         )
                     except:
                         pass
+
+        elif event.type == VkBotEventType.MESSAGE_EVENT:
+            # Обработка callback кнопок
+            try:
+                user_id = event.obj.user_id
+                payload = event.obj.payload
+
+                if payload and payload.get("command") == "back":
+                    # Обрабатываем "Назад"
+                    player = get_player(user_id)
+
+                    # Используем location из payload или previous_location
+                    return_location = payload.get("location") or player.previous_location or 'город'
+
+                    # Показываем клавиатуру локации
+                    vk.messages.send(
+                        user_id=user_id,
+                        message=f"↩️ Возвращаемся в {return_location}...",
+                        keyboard=create_location_keyboard(return_location, player.level).get_keyboard(),
+                        random_id=0
+                    )
+
+                    # Обновляем текущую локацию
+                    player.current_location_id = return_location
+                    database.update_user_location(user_id, return_location)
+
+                # Отправляем OK ответ
+                vk.messages.send_message_event_answer(
+                    event_id=event.obj.event_id,
+                    user_id=event.obj.user_id,
+                    peer_id=event.obj.peer_id,
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при обработке callback: {e}")
 
 
 if __name__ == '__main__':

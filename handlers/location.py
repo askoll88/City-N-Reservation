@@ -31,6 +31,11 @@ def go_to_location(player, location_id: str, vk, user_id: int):
             )
             return
 
+    # Сохраняем предыдущую локацию перед переходом (кроме инвентаря)
+    if player.current_location_id not in ["инвентарь"]:
+        player.previous_location = player.current_location_id
+        database.update_user_stats(user_id, previous_location=player.current_location_id)
+
     player.current_location_id = location_id
     database.update_user_location(user_id, location_id)
     
@@ -57,8 +62,8 @@ def go_to_inventory(player, vk, user_id: int):
     from main import create_inventory_keyboard
     from handlers.inventory import show_all
 
-    # Сохраняем предыдущую локацию (не город и не кпп)
-    if player.current_location_id not in ["город", "кпп", "инвентарь"]:
+    # Сохраняем текущую локацию как предыдущую (для возврата из инвентаря)
+    if player.current_location_id not in ["инвентарь"]:
         player.previous_location = player.current_location_id
         database.update_user_stats(user_id, previous_location=player.current_location_id)
 
@@ -126,13 +131,56 @@ def handle_sleep(player, vk, user_id: int):
 def handle_heal(player, vk, user_id: int):
     """Лечиться в больнице"""
     from main import create_location_keyboard
-    
+    import database
+
     if player.current_location_id == "больница":
+        user_data = database.get_user_by_vk(user_id)
+        treatment_count = user_data.get('hospital_treatments', 0) if user_data else 0
+
+        # Рассчитываем цену: 1-е бесплатно, 2-е = 100, 3-е = 300, 4-е = 900 и т.д.
+        if treatment_count == 0:
+            price = 0
+        else:
+            price = 100 * (3 ** treatment_count)
+
+        # Проверяем, хватает ли денег
+        if player.money < price:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"💸 Лечение стоит {price} руб., а у тебя {player.money} руб.\n\nСначала заработай деньги!",
+                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        # Лечим полностью здоровье и восстанавливаем энергию
+        player.health = player.max_health
+        player.energy = 100
+        database.update_user_stats(user_id, health=player.health, energy=player.energy)
+
+        # Списываем деньги и увеличиваем счетчик лечений
+        new_money = player.money - price
+        new_treatment_count = treatment_count + 1
+        database.update_user_stats(user_id, money=new_money, hospital_treatments=new_treatment_count)
+
+        # Формируем сообщение
+        if price == 0:
+            price_text = "бесплатно"
+        else:
+            price_text = f"{price} руб."
+
         message = (
-            "Ты нашёл аптечку в ржавом ящике...\n\n"
-            "Перевязал раны, выпил таблетки.\n"
-            "Состояние улучшилось."
+            f"🏥 <b>ЛЕЧЕНИЕ В БОЛЬНИЦЕ</b>\n\n"
+            f"Врач осмотрел тебя, перевязал раны, сделал уколы.\n\n"
+            f"✅ <b>ЗДОРОВЬЕ ПОЛНОСТЬЮ ВОССТАНОВЛЕНО!</b>\n"
+            f"   HP: {player.health}/{player.max_health}\n\n"
+            f"⚡ <b>ЭНЕРГИЯ ВОССТАНОВЛЕНА!</b>\n"
+            f"   Энергия: {player.energy}/100\n\n"
+            f"💰 Оплата: {price_text}\n"
+            f"   Осталось денег: {new_money} руб.\n\n"
+            f"📊 Всего лечений: {new_treatment_count}"
         )
+
         vk.messages.send(
             user_id=user_id,
             message=message,
@@ -150,7 +198,6 @@ def handle_heal(player, vk, user_id: int):
 
 def get_status(player, vk, user_id: int):
     """Показать статус персонажа"""
-    # Просто показываем статус как информационное сообщение
     vk.messages.send(
         user_id=user_id,
         message=player.get_status(),
@@ -160,7 +207,8 @@ def get_status(player, vk, user_id: int):
 
 def show_welcome(vk, user_id: int):
     """Показать приветственное сообщение"""
-    from main import create_main_keyboard, get_welcome_message, create_location_keyboard
+    from handlers.keyboards import create_main_keyboard, create_location_keyboard
+    from handlers.commands import get_welcome_message
     from locations import get_location
     import database
 

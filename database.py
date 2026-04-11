@@ -1,15 +1,49 @@
 """
 База данных для игры "Город N: Запретная Зона"
-PostgreSQL с пулом соединений
+PostgreSQL с пулом соединений и retry-логикой
 """
 import logging
+import time
 import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
+from psycopg2 import OperationalError, DatabaseError
 import config
 import threading
+from functools import wraps
 
 logger = logging.getLogger(__name__)
+
+
+# === Retry-логика ===
+def with_retry(max_retries: int = None, delay: float = None):
+    """Декоратор для повторных попыток при ошибках БД"""
+    if max_retries is None:
+        max_retries = config.DB_MAX_RETRIES
+    if delay is None:
+        delay = config.DB_RETRY_DELAY
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (OperationalError, DatabaseError) as e:
+                    last_exception = e
+                    logger.warning(f"БД ошибка в {func.__name__}, попытка {attempt + 1}/{max_retries}: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(delay * (attempt + 1))  # Экспоненциальная задержка
+                    else:
+                        logger.error(f"БД ошибка после {max_retries} попыток в {func.__name__}: {e}")
+                except Exception as e:
+                    # Не повторяем другие ошибки
+                    raise
+            raise last_exception
+        return wrapper
+    return decorator
+
 
 # Пул соединений (создаётся один раз)
 _connection_pool = None
@@ -72,10 +106,10 @@ def init_db():
             money INTEGER DEFAULT 100,
             level INTEGER DEFAULT 1,
             experience INTEGER DEFAULT 0,
-            strength INTEGER DEFAULT 5,
-            stamina INTEGER DEFAULT 5,
-            perception INTEGER DEFAULT 5,
-            luck INTEGER DEFAULT 5,
+            strength INTEGER DEFAULT 4,
+            stamina INTEGER DEFAULT 4,
+            perception INTEGER DEFAULT 4,
+            luck INTEGER DEFAULT 4,
             armor_defense INTEGER DEFAULT 0,
             equipped_weapon VARCHAR(100),
             equipped_armor VARCHAR(100),
@@ -194,9 +228,10 @@ def init_db():
         ("Тактический шлем", "armor", "Лёгкий тактический шлем с креплением для附件.", 280, 0, 28, 1.4),
         ("Десантный шлем", "armor", "Шлем десантника. Прочный и практичный.", 200, 0, 24, 1.6),
         ("Шлем спецназа", "armor", "Профессиональный шлем для спецопераций.", 350, 0, 32, 1.8),
+        ("Кепка", "armor", "Лёгкая кепка. Минимальная защита головы.", 8, 0, 2, 0.15),
 
         # Броня - Броня
-        ("Кожаная куртка", "armor", "Стандартная кожаная куртка. Минимальная защита.", 30, 0, 5, 1.5),
+        ("Кожаная куртка", "armor", "Стандартная кожаная куртка. Минимальная защита.", 30, 0, 2, 1.5),
         ("Бронежилет", "armor", "Армейский бронежилет. Средняя защита.", 100, 0, 18, 3.0),
         ("Комбинезон сталкера", "armor", "Спецкостюм для работы в Зоне. Хорошая защита.", 300, 0, 35, 5.0),
         ("Экзоскелет", "armor", "Тяжёлая броня с приводом. Максимальная защита.", 600, 0, 55, 15.0),
@@ -206,7 +241,7 @@ def init_db():
         ("Штурмовой костюм", "armor", "Костюм для штурмовых операций.", 420, 0, 42, 6.5),
 
         # Броня - Штаны
-        ("Джинсы", "armor", "Обычные джинсы. Никакой защиты.", 10, 0, 2, 0.5),
+        ("Джинсы", "armor", "Обычные джинсы. Базовая защита ног.", 10, 0, 2, 0.5),
         ("Камуфляжные штаны", "armor", "Военные штаны с карманами. Немного защиты.", 40, 0, 8, 0.8),
         ("Боевой костюм", "armor", "Штаны от боевого костюма. Хорошая защита.", 120, 0, 20, 1.5),
         ("Бронештаны", "armor", "Штаны с бронепластинами.", 180, 0, 25, 2.0),
@@ -217,6 +252,7 @@ def init_db():
 
         # Броня - Перчатки
         ("Тканевые перчатки", "armor", "Простые перчатки. От царапин.", 5, 0, 2, 0.1),
+        ("Перчатки без пальцев", "armor", "Перчатки с открытыми пальцами. Лёгкая защита.", 8, 0, 2, 0.1),
         ("Кожаные перчатки", "armor", "Кожаные перчатки. Чуть лучше.", 20, 0, 4, 0.2),
         ("Боевые перчатки", "armor", "Бронеперчатки с защитой кистей.", 60, 0, 8, 0.4),
         ("Тактические перчатки", "armor", "Перчатки с противоударной защитой.", 80, 0, 10, 0.45),
@@ -226,7 +262,8 @@ def init_db():
         ("Огнестойкие перчатки", "armor", "Перчатки с защитой от огня.", 90, 0, 11, 0.48),
 
         # Броня - Ботинки
-        ("Кроссовки", "armor", "Удобные, но не защищают.", 10, 0, 2, 0.4),
+        ("Кроссовки", "armor", "Удобные кроссовки. Базовая защита.", 10, 0, 2, 0.4),
+        ("Кеды", "armor", "Простые кеды. Лёгкая защита ног.", 12, 0, 2, 0.35),
         ("Армейские ботинки", "armor", "Прочные армейские ботинки. Защита ног.", 40, 0, 8, 0.8),
         ("Боевые ботинки", "armor", "Бронированные ботинки. Максимум защиты.", 80, 0, 15, 1.2),
         ("Тактические ботинки", "armor", "Ботинки для тактических операций.", 120, 0, 18, 1.4),
@@ -495,30 +532,52 @@ def init_db():
     # Сначала выполняем миграцию (добавляем новые колонки)
     migrate_add_new_columns()
 
+    # Миграция характеристик для существующих пользователей (было 5, стало 4)
+    try:
+        cursor.execute("""
+            UPDATE users 
+            SET strength = 4, stamina = 4, perception = 4, luck = 4 
+            WHERE strength > 4 OR stamina > 4 OR perception > 4 OR luck > 4
+        """)
+        if cursor.rowcount > 0:
+            logger.info(f"Обновлено характеристик для {cursor.rowcount} пользователей")
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Не удалось обновить характеристики: {e}")
+        conn.rollback()
+
     for item in items:
         if len(item) == 7:
             name, category, description, price, attack, defense, weight = item
-            # Удаляем старую запись с таким именем и добавляем новую
-            cursor.execute("DELETE FROM items WHERE name = %s", (name,))
+            # Используем ON CONFLICT DO UPDATE чтобы сохранить ID
             cursor.execute("""
                 INSERT INTO items (name, category, description, price, attack, defense, weight, rarity, anomaly_type, bonus_type, bonus_value)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
+                ON CONFLICT (name) DO UPDATE SET
+                    category = EXCLUDED.category,
+                    description = EXCLUDED.description,
+                    price = EXCLUDED.price,
+                    attack = EXCLUDED.attack,
+                    defense = EXCLUDED.defense,
+                    weight = EXCLUDED.weight
             """, (name, category, description, price, attack, defense, weight))
         elif len(item) == 8:
-            name, category, description, price, attack, defense, weight, backpack_bonus = item
-            cursor.execute("""
-                INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
-                ON CONFLICT (name) DO NOTHING
-            """, (name, category, description, price, attack, defense, weight, backpack_bonus))
-        elif len(item) == 8:
-            # Мешочки для гильз (8 элементов: name, category, desc, price, attack, defense, weight, shells_capacity)
-            name, category, description, price, attack, defense, weight, shells_capacity = item
-            cursor.execute("""
-                INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
-                ON CONFLICT (name) DO NOTHING
-            """, (name, category, description, price, attack, defense, weight, shells_capacity))
+            name, category, description, price, attack, defense, weight, bonus = item
+            # Различаем по категории: backpacks использует backpack_bonus, shells_bag использует shells_capacity
+            if category == 'shells_bag':
+                # Мешочки для гильз
+                cursor.execute("""
+                    INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
+                    ON CONFLICT (name) DO NOTHING
+                """, (name, category, description, price, attack, defense, weight, bonus))
+            else:
+                # Рюкзаки и другие предметы с бонусом к весу
+                cursor.execute("""
+                    INSERT INTO items (name, category, description, price, attack, defense, weight, backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'common', NULL, NULL, 0)
+                    ON CONFLICT (name) DO NOTHING
+                """, (name, category, description, price, attack, defense, weight, bonus))
         elif len(item) == 11:
             # Новый формат с редкостью и бонусами
             name, category, description, price, attack, defense, weight, rarity, anomaly_type, bonus_type, bonus_value = item
@@ -570,15 +629,20 @@ def migrate_add_new_columns():
     # Миграция для users
     try_add_column("users", "level", "INTEGER DEFAULT 1")
     try_add_column("users", "experience", "INTEGER DEFAULT 0")
-    try_add_column("users", "strength", "INTEGER DEFAULT 5")
-    try_add_column("users", "stamina", "INTEGER DEFAULT 5")
-    try_add_column("users", "perception", "INTEGER DEFAULT 5")
-    try_add_column("users", "luck", "INTEGER DEFAULT 5")
+    try_add_column("users", "strength", "INTEGER DEFAULT 4")
+    try_add_column("users", "stamina", "INTEGER DEFAULT 4")
+    try_add_column("users", "perception", "INTEGER DEFAULT 4")
+    try_add_column("users", "luck", "INTEGER DEFAULT 4")
     try_add_column("users", "armor_defense", "INTEGER DEFAULT 0")
     try_add_column("users", "max_weight", "INTEGER DEFAULT 20")
     try_add_column("users", "equipped_backpack", "VARCHAR(100)")
     try_add_column("users", "equipped_weapon", "VARCHAR(100)")
     try_add_column("users", "equipped_armor", "VARCHAR(100)")
+    try_add_column("users", "equipped_armor_head", "VARCHAR(100)")  # Шлем/кепка
+    try_add_column("users", "equipped_armor_body", "VARCHAR(100)")  # Куртка/броня
+    try_add_column("users", "equipped_armor_legs", "VARCHAR(100)")  # Штаны
+    try_add_column("users", "equipped_armor_hands", "VARCHAR(100)")  # Перчатки
+    try_add_column("users", "equipped_armor_feet", "VARCHAR(100)")  # Ботинки/кеды
     try_add_column("users", "equipped_device", "VARCHAR(100)")
     try_add_column("users", "newbie_kit_received", "INTEGER DEFAULT 0")
     try_add_column("users", "shells", "INTEGER DEFAULT 0")  # Гильзы для добычи артефактов
@@ -595,6 +659,8 @@ def migrate_add_new_columns():
     try_add_column("users", "previous_location", "VARCHAR(50)")
     # Состояние меню (для возврата из статуса и других меню)
     try_add_column("users", "menu_state", "VARCHAR(50)")
+    # Счетчик лечений в больнице
+    try_add_column("users", "hospital_treatments", "INTEGER DEFAULT 0")
 
     # Миграция для items
     try_add_column("items", "attack", "INTEGER DEFAULT 0")
@@ -628,6 +694,7 @@ _cache_lock = threading.Lock()
 def _get_cached_items():
     """Получить кэшированные предметы (вызывается один раз при инициализации)"""
     global _items_cache, _items_by_category_cache, _shop_items_cache
+    import sys
 
     with _cache_lock:
         if not _items_cache:
@@ -681,21 +748,16 @@ def create_user(vk_id: int, name: str) -> dict:
     """Создать нового пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            INSERT INTO users (vk_id, name, location, health, energy, radiation, money, level, experience, strength, stamina, perception, luck, armor_defense, max_weight)
-            VALUES (%s, %s, 'город', 100, 100, 0, 100, 1, 0, 5, 5, 5, 5, 0, 20)
-            RETURNING *
-        """, (vk_id, name))
-        conn.commit()
-        row = cursor.fetchone()
-        return get_user_by_vk(vk_id)
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        cursor.close()
-        release_connection(conn)
+    cursor.execute("""
+        INSERT INTO users (vk_id, name, location, health, energy, radiation, money, level, experience, strength, stamina, perception, luck, armor_defense, max_weight)
+        VALUES (%s, %s, 'город', 100, 100, 0, %s, 1, 0, 4, 4, 4, 4, 0, 20)
+        RETURNING *
+    """, (vk_id, name, config.START_MONEY))
+    conn.commit()
+    row = cursor.fetchone()
+    cursor.close()
+    release_connection(conn)
+    return get_user_by_vk(vk_id)
 
 
 def update_user_location(vk_id: int, location: str):
@@ -713,7 +775,7 @@ def update_user_location(vk_id: int, location: str):
         release_connection(conn)
 
 
-def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None, equipped_backpack: str = None, equipped_weapon: str = None, equipped_armor: str = None, equipped_device: str = None, newbie_kit_received: int = None, artifact_slots: int = None, equipped_artifact_1: str = None, equipped_artifact_2: str = None, equipped_artifact_3: str = None, max_health_bonus: int = None, inventory_section: str = None, previous_location: str = None, menu_state: str = None, shells: int = None, equipped_shells_bag: str = None):
+def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None, equipped_backpack: str = None, equipped_weapon: str = None, equipped_armor: str = None, equipped_device: str = None, newbie_kit_received: int = None, artifact_slots: int = None, equipped_artifact_1: str = None, equipped_artifact_2: str = None, equipped_artifact_3: str = None, max_health_bonus: int = None, inventory_section: str = None, previous_location: str = None, menu_state: str = None, shells: int = None, equipped_shells_bag: str = None, equipped_armor_head: str = None, equipped_armor_body: str = None, equipped_armor_legs: str = None, equipped_armor_hands: str = None, equipped_armor_feet: str = None, hospital_treatments: int = None):
     """Обновить характеристики пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -812,15 +874,28 @@ def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiat
         updates.append("equipped_shells_bag = %s")
         params.append(equipped_shells_bag)
 
+    # Новая броня по слотам
+    if equipped_armor_head is not None:
+        updates.append("equipped_armor_head = %s")
+        params.append(equipped_armor_head)
+    if equipped_armor_body is not None:
+        updates.append("equipped_armor_body = %s")
+        params.append(equipped_armor_body)
+    if equipped_armor_legs is not None:
+        updates.append("equipped_armor_legs = %s")
+        params.append(equipped_armor_legs)
+    if equipped_armor_hands is not None:
+        updates.append("equipped_armor_hands = %s")
+        params.append(equipped_armor_hands)
+    if equipped_armor_feet is not None:
+        updates.append("equipped_armor_feet = %s")
+        params.append(equipped_armor_feet)
+
     if updates:
         params.append(vk_id)
-        import sys
-        print(f"[DB_UPDATE] SQL: UPDATE users SET {', '.join(updates)}", file=sys.stderr)
-        print(f"[DB_UPDATE] params: {params}", file=sys.stderr)
         try:
             cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE vk_id = %s", params)
             conn.commit()
-            print(f"[DB_UPDATE] Committed successfully", file=sys.stderr)
         except Exception as e:
             error_msg = str(e)
             # Если ошибка из-за отсутствия колонки - добавляем её и повторяем
@@ -836,6 +911,16 @@ def update_user_stats(vk_id: int, health: int = None, energy: int = None, radiat
                         cursor.execute("ALTER TABLE users ADD COLUMN shells INTEGER DEFAULT 0")
                     if "equipped_shells_bag" in error_msg:
                         cursor.execute("ALTER TABLE users ADD COLUMN equipped_shells_bag VARCHAR(100)")
+                    if "equipped_armor_head" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_head VARCHAR(100)")
+                    if "equipped_armor_body" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_body VARCHAR(100)")
+                    if "equipped_armor_legs" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_legs VARCHAR(100)")
+                    if "equipped_armor_hands" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_hands VARCHAR(100)")
+                    if "equipped_armor_feet" in error_msg:
+                        cursor.execute("ALTER TABLE users ADD COLUMN equipped_armor_feet VARCHAR(100)")
                     conn.commit()
                     # Повторяем запрос
                     cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE vk_id = %s", params)
@@ -903,12 +988,6 @@ ARTIFACT_BONUSES = {
     "Золото": {"find_chance": 20, "crit": 15},
     "Призрак": {"dodge": 15},
     "Бездна": {"radiation": -25, "energy": 20},
-}
-
-ARTIFACT_SLOT_COSTS = {
-    4: 1000,  # 4 слота = 1000 руб.
-    5: 2500,  # 5 слотов = 2500 руб.
-    6: 5000,  # 6 слотов = 5000 руб.
 }
 
 
@@ -1028,15 +1107,15 @@ def buy_artifact_slot(vk_id: int) -> dict:
     if not user:
         return {"success": False, "message": "Пользователь не найден"}
 
-    current_slots = user.get('artifact_slots', 3)
+    current_slots = user.get('artifact_slots', config.BASE_ARTIFACT_SLOTS)
 
-    if current_slots >= 6:
-        return {"success": False, "message": "Достигнут максимум слотов (6)"}
+    if current_slots >= config.MAX_ARTIFACT_SLOTS:
+        return {"success": False, "message": f"Достигнут максимум слотов ({config.MAX_ARTIFACT_SLOTS})"}
 
-    if current_slots < 25:
-        return {"success": False, "message": "Нужен 25 уровень для покупки слотов"}
+    if user.get('level', 1) < config.MIN_LEVEL_FOR_ARTIFACT_SLOT:
+        return {"success": False, "message": f"Нужен {config.MIN_LEVEL_FOR_ARTIFACT_SLOT} уровень для покупки слотов"}
 
-    cost = ARTIFACT_SLOT_COSTS.get(current_slots + 1)
+    cost = config.ARTIFACT_SLOT_COSTS.get(current_slots + 1)
     if not cost:
         return {"success": False, "message": "Нельзя купить больше слотов"}
 
@@ -1054,14 +1133,27 @@ def get_user_inventory(vk_id: int) -> list[dict]:
     """Получить инвентарь пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Сначала получаем user_id по vk_id
+    cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+    user_row = cursor.fetchone()
+
+    if not user_row:
+        cursor.close()
+        release_connection(conn)
+        return []
+
+    user_internal_id = user_row['id']
+
+    # Теперь получаем инвентарь по internal user_id
     cursor.execute("""
         SELECT i.name, i.category, i.description, i.price, i.attack, i.defense, i.weight, i.backpack_bonus, ui.quantity
         FROM user_inventory ui
         JOIN items i ON ui.item_id = i.id
-        JOIN users u ON ui.user_id = u.id
-        WHERE u.vk_id = %s
-    """, (vk_id,))
+        WHERE ui.user_id = %s
+    """, (user_internal_id,))
     rows = cursor.fetchall()
+
     cursor.close()
     release_connection(conn)
     return [dict(row) for row in rows]
@@ -1069,88 +1161,147 @@ def get_user_inventory(vk_id: int) -> list[dict]:
 
 def add_item_to_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
     """Добавить предмет в инвентарь"""
-    import logging
-    logger = logging.getLogger(__name__)
-
     conn = get_connection()
     cursor = conn.cursor()
-    try:
-        # Получаем id пользователя и предмета
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
-        user_row = cursor.fetchone()
-        if not user_row:
-            logger.warning(f"[ADD_ITEM] User not found: vk_id={vk_id}")
-            return False
-        
-        cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
-        item_row = cursor.fetchone()
-        if not item_row:
-            logger.warning(f"[ADD_ITEM] Item not found: '{item_name}'")
-            return False
-        
-        user_id = user_row['id']
-        item_id = item_row['id']
-        logger.info(f"[ADD_ITEM] Adding item_id={item_id} ({item_name}) to user_id={user_id}, qty={quantity}")
-
-        # Добавляем или обновляем количество
-        cursor.execute("""
-            INSERT INTO user_inventory (user_id, item_id, quantity)
-            VALUES (%s, %s, %s)
-            ON CONFLICT(user_id, item_id) 
-            DO UPDATE SET quantity = user_inventory.quantity + %s
-        """, (user_id, item_id, quantity, quantity))
-        conn.commit()
-        logger.info(f"[ADD_ITEM] Committed successfully")
-        return True
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
+    
+    # Получаем id пользователя и предмета
+    cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+    user_row = cursor.fetchone()
+    if not user_row:
         cursor.close()
         release_connection(conn)
+        return False
+    
+    cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+    item_row = cursor.fetchone()
+    if not item_row:
+        cursor.close()
+        release_connection(conn)
+        return False
+    
+    user_id = user_row['id']
+    item_id = item_row['id']
+
+    # Добавляем или обновляем количество
+    cursor.execute("""
+        INSERT INTO user_inventory (user_id, item_id, quantity)
+        VALUES (%s, %s, %s)
+        ON CONFLICT(user_id, item_id) 
+        DO UPDATE SET quantity = user_inventory.quantity + %s
+    """, (user_id, item_id, quantity, quantity))
+    
+    conn.commit()
+    cursor.close()
+    release_connection(conn)
+    return True
 
 
 def remove_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
     """Удалить предмет из инвентаря"""
     conn = get_connection()
     cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
-        user_row = cursor.fetchone()
-        if not user_row:
-            return False
-        
-        cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
-        item_row = cursor.fetchone()
-        if not item_row:
-            return False
-        
-        user_id = user_row['id']
-        item_id = item_row['id']
-        
-        # Уменьшаем количество
+    
+    cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+    user_row = cursor.fetchone()
+    if not user_row:
+        cursor.close()
+        release_connection(conn)
+        return False
+    
+    cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+    item_row = cursor.fetchone()
+    if not item_row:
+        cursor.close()
+        release_connection(conn)
+        return False
+    
+    user_id = user_row['id']
+    item_id = item_row['id']
+    
+    # Уменьшаем количество
+    cursor.execute("""
+        UPDATE user_inventory 
+        SET quantity = quantity - %s
+        WHERE user_id = %s AND item_id = %s AND quantity >= %s
+    """, (quantity, user_id, item_id, quantity))
+    
+    # Удаляем запись если количество стало 0
+    cursor.execute("""
+        DELETE FROM user_inventory 
+        WHERE user_id = %s AND item_id = %s AND quantity <= 0
+    """, (user_id, item_id))
+    
+    conn.commit()
+    cursor.close()
+    release_connection(conn)
+    return True
+
+
+def drop_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> dict:
+    """Выбросить предмет из инвентаря
+
+    Возвращает:
+        dict с результатом операции
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Получаем user_id
+    cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+    user_row = cursor.fetchone()
+    if not user_row:
+        cursor.close()
+        release_connection(conn)
+        return {"success": False, "message": "Пользователь не найден"}
+
+    # Получаем item_id
+    cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+    item_row = cursor.fetchone()
+    if not item_row:
+        cursor.close()
+        release_connection(conn)
+        return {"success": False, "message": f"Предмет '{item_name}' не найден"}
+
+    user_id = user_row['id']
+    item_id = item_row['id']
+
+    # Проверяем количество предмета у игрока
+    cursor.execute("""
+        SELECT quantity FROM user_inventory 
+        WHERE user_id = %s AND item_id = %s
+    """, (user_id, item_id))
+    inv_row = cursor.fetchone()
+
+    if not inv_row:
+        cursor.close()
+        release_connection(conn)
+        return {"success": False, "message": f"У тебя нет предмета '{item_name}'"}
+
+    current_qty = inv_row['quantity']
+
+    if current_qty < quantity:
+        cursor.close()
+        release_connection(conn)
+        return {"success": False, "message": f"У тебя только {current_qty} шт. '{item_name}'"}
+
+    # Выбрасываем предмет (уменьшаем количество или удаляем)
+    if current_qty == quantity:
+        cursor.execute("""
+            DELETE FROM user_inventory 
+            WHERE user_id = %s AND item_id = %s
+        """, (user_id, item_id))
+    else:
         cursor.execute("""
             UPDATE user_inventory 
             SET quantity = quantity - %s
-            WHERE user_id = %s AND item_id = %s AND quantity >= %s
-        """, (quantity, user_id, item_id, quantity))
-        if cursor.rowcount == 0:
-            conn.rollback()
-            return False
-        
-        # Удаляем запись если количество стало 0
-        cursor.execute("""
-            DELETE FROM user_inventory 
-            WHERE user_id = %s AND item_id = %s AND quantity <= 0
-        """, (user_id, item_id))
-        conn.commit()
-        return True
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        cursor.close()
-        release_connection(conn)
+            WHERE user_id = %s AND item_id = %s
+        """, (quantity, user_id, item_id))
+
+    conn.commit()
+    cursor.close()
+    release_connection(conn)
+
+    return {"success": True, "message": f"✅ Ты выбросил {quantity} шт. '{item_name}'"}
 
 
 def get_item_by_name(item_name: str) -> dict | None:
@@ -1159,10 +1310,72 @@ def get_item_by_name(item_name: str) -> dict | None:
     return items.get(item_name)
 
 
+def get_armor_type(item_name: str) -> str | None:
+    """Определить тип брони по названию предмета.
+
+    Возвращает:
+        'head' - шлем/кепка
+        'body' - куртка/броня
+        'legs' - штаны
+        'hands' - перчатки
+        'feet' - ботинки/кеды
+        None - если не броня
+    """
+    name_lower = item_name.lower()
+
+    # Голова
+    head_keywords = ['кепка', 'шлем', 'каска', 'шапка', 'берет', 'маска']
+    if any(kw in name_lower for kw in head_keywords):
+        return 'head'
+
+    # Тело
+    body_keywords = ['куртка', 'броня', 'жилет', 'костюм', 'плащ', 'рубашка']
+    if any(kw in name_lower for kw in body_keywords):
+        return 'body'
+
+    # Ноги
+    legs_keywords = ['джинсы', 'штаны', 'брюки', 'юбка']
+    if any(kw in name_lower for kw in legs_keywords):
+        return 'legs'
+
+    # Руки
+    hands_keywords = ['перчатк', 'рукавич']
+    if any(kw in name_lower for kw in hands_keywords):
+        return 'hands'
+
+    # Ноги (ботинки)
+    feet_keywords = ['ботинк', 'кед', 'туфл', 'сапог', 'сандал']
+    if any(kw in name_lower for kw in feet_keywords):
+        return 'feet'
+
+    return None
+
+
 def get_items_by_category(category: str) -> list[dict]:
     """Получить все предметы категории (из кэша)"""
     _, by_category, _ = _get_cached_items()
     return by_category.get(category, [])
+
+
+def get_items_by_rarity(rarity: str) -> list[dict]:
+    """Получить все предметы с указанной редкостью"""
+    all_items, _, _ = _get_cached_items()
+    return [item for item in all_items.values() if item.get('rarity') == rarity]
+
+
+def get_artifacts_by_rarity(rarity: str) -> list[dict]:
+    """Получить все артефакты с указанной редкостью"""
+    all_items, by_category, _ = _get_cached_items()
+
+    # Категории артефактов
+    artifact_categories = {'artifacts', 'rare_artifacts', 'unique', 'legendary_artifacts'}
+
+    artifacts = []
+    for item in all_items.values():
+        if item.get('rarity') == rarity and item.get('category') in artifact_categories:
+            artifacts.append(item)
+
+    return artifacts
 
 
 def get_all_items() -> list[dict]:
@@ -1250,18 +1463,24 @@ def give_newbie_kit(vk_id: int) -> dict:
     Возвращает:
         dict с информацией о выданных предметах или None при ошибке
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     # Предметы набора новичка
     newbie_items = [
         ("ПМ", 1),
         ("Кожаная куртка", 1),
+        ("Джинсы", 1),
+        ("Перчатки без пальцев", 1),
+        ("Кеды", 1),
+        ("Кепка", 1),
+        ("Детектор аномалий", 1),
+        ("Маленький мешочек", 1),
         ("Аптечка", 2),
         ("Бинт", 2),
         ("Хлеб", 1),
         ("Вода", 1),
     ]
+
+    # Выдаём гильзы для добычи артефактов
+    SHELLS_AMOUNT = 50
 
     # Проверяем, не получал ли уже игрок набор
     conn = get_connection()
@@ -1269,10 +1488,8 @@ def give_newbie_kit(vk_id: int) -> dict:
 
     cursor.execute("SELECT newbie_kit_received FROM users WHERE vk_id = %s", (vk_id,))
     row = cursor.fetchone()
-    logger.info(f"[NEWBIE_KIT] User {vk_id}, row: {row}")
 
     if not row or row['newbie_kit_received'] == 1:
-        logger.info(f"[NEWBIE_KIT] Already received or user not found")
         cursor.close()
         release_connection(conn)
         return None
@@ -1280,16 +1497,12 @@ def give_newbie_kit(vk_id: int) -> dict:
     # Выдаём предметы
     success_items = []
     for item_name, quantity in newbie_items:
-        logger.info(f"[NEWBIE_KIT] Adding item: {item_name} x{quantity}")
         result = add_item_to_inventory(vk_id, item_name, quantity)
-        logger.info(f"[NEWBIE_KIT] Result for {item_name}: {result}")
         if result:
             success_items.append((item_name, quantity))
 
-    logger.info(f"[NEWBIE_KIT] Success items: {success_items}")
-
-    # Устанавливаем флаг, что набор получен и выдаём деньги
-    update_user_stats(vk_id, newbie_kit_received=1, money=10000)
+    # Устанавливаем флаг, что набор получен и выдаём деньги + гильзы + экипируем мешочек
+    update_user_stats(vk_id, newbie_kit_received=1, money=10000, shells=SHELLS_AMOUNT, equipped_shells_bag="Маленький мешочек")
 
     cursor.close()
     release_connection(conn)

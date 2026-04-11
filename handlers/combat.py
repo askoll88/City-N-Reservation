@@ -7,10 +7,7 @@ import threading
 import database
 import enemies
 from constants import RESEARCH_LOCATIONS
-
-
-# === Глобальное состояние ===
-_combat_state = {}  # Хранит состояние боя для каждого пользователя
+from state_manager import _combat_state, set_combat_state, is_in_combat, get_combat_data
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
 _active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
@@ -119,7 +116,8 @@ RESEARCH_ENERGY_COST = {
 def _get_main_imports():
     """Ленивый импорт для избежания циклической зависимости"""
     import main
-    return _combat_state, main.create_location_keyboard, main.VkKeyboard, main.VkKeyboardColor
+    from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+    return _combat_state, main.create_location_keyboard, VkKeyboard, VkKeyboardColor
 
 
 def _create_hp_bar(current: int, max_val: int, bar_length: int = 10) -> str:
@@ -319,12 +317,15 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
     timer.start()
 
     # Отправляем сообщение о начале исследования
+    current_energy = player.energy
+    remaining_energy = current_energy - energy_cost
+
     vk.messages.send(
         user_id=user_id,
         message=(
-            f"ИССЛЕДОВАНИЕ НАЧАТО\n\n"
-            f"Время: {time_sec} секунд\n"
-            f"Потрачено энергии: {energy_cost}\n\n"
+            f"🔍 <b>ИССЛЕДОВАНИЕ НАЧАТО</b>\n\n"
+            f"⏱️ Время: {time_sec} секунд\n"
+            f"⚡ Энергия: {current_energy} → {remaining_energy} (-{energy_cost})\n\n"
             f"Сканирование территории...\n"
             f"Результат придёт автоматически."
         ),
@@ -376,10 +377,14 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
                 if backpack_item:
                     base_max_weight += backpack_item.get('backpack_bonus', 0)
 
+            # Получаем данные детектора
+            equipped_device = user_data.get('equipped_device') if user_data else None
+
             self.current_location_id = location_id
             self.find_chance = find_chance
             self.rare_find_chance = rare_find_chance
             self.energy = remaining_energy
+            self.equipped_device = equipped_device  # Добавляем детектор
             self.health = 100  # Для обработки урона
             self.radiation = 0
             self.money = 0
@@ -968,10 +973,6 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None):
         'enemy_description': enemy['description'],
         'location_id': player.current_location_id
     }
-    
-    # Отладочный вывод
-    import sys
-    print(f"[DEBUG] Spawned enemy for user {user_id}: {enemy['name']}, combat state: {_combat_state.get(user_id)}", file=sys.stderr)
 
     message = (
         f"ОПАСНОСТЬ!\n\n"
@@ -1637,17 +1638,25 @@ def handle_combat_attack(player, vk, user_id: int):
         damage_details.append(f"Оружие {weapon_name}: {weapon_damage}")
     damage_details.append(f"Рукопашный: {melee}")
 
-    message = f"Ты атакуешь {combat['enemy_name']}!\n\n"
+    # Добавляем информацию о характеристиках
+    crit_chance = player.crit_chance
+    dodge_chance = player.dodge_chance
+    total_defense = player.total_defense
+
+    message = f"⚔️ <b>ТЫ АТАКУЕШЬ {combat['enemy_name'].upper()}</b>\n\n"
+    message += f"🎯 Шанс крита: {crit_chance}% | 💨 Уклонение: {dodge_chance}%\n"
+    message += f"🛡️ Твоя защита: {total_defense}\n"
+
     if is_crit:
-        message += f"КРИТИЧЕСКИЙ УДАР! x1.5\n"
-    message += f"Нанесён урон: {total_damage}\n"
-    message += f"({' | '.join(damage_details)})\n"
+        message += f"\n🔥 <b>КРИТИЧЕСКИЙ УДАР! x1.5</b>\n"
+    message += f"Нанесён урон: <b>{total_damage}</b>\n"
+    message += f"({(' | '.join(damage_details))})\n"
 
     # Сообщение о кровотечении
     if bleed_applied:
-        message += f"КРОВОТЕЧЕНИЕ! Враг истекает кровью!\n"
+        message += f"\n🩸 <b>КРОВОТЕЧЕНИЕ!</b> Враг истекает кровью!\n"
     if bleed_damage > 0:
-        message += f"Кровотечение наносит {bleed_damage} урона!\n"
+        message += f"🩸 Кровотечение наносит {bleed_damage} урона!\n"
 
     # Определяем какую клавиатуру показывать
     keyboard = None
@@ -1660,12 +1669,12 @@ def handle_combat_attack(player, vk, user_id: int):
         
         # === Проверяем perfect_dodge (навык Уклонение) ===
         if "perfect_dodge" in active_effects:
-            message += "💨 Ты уклонился от атаки (навык Уклонение)!\n"
+            message += "\n💨 <b>УКЛОНЕНИЕ!</b> (навык Уклонение)\n"
             del _active_skill_effects[user_id]["perfect_dodge"]
         else:
             is_dodged = random.randint(1, 100) <= player.dodge_chance
             if is_dodged:
-                message += f"\nТы уклонился от атаки!"
+                message += f"\n💨 <b>УКЛОНЕНИЕ!</b> (шанс: {player.dodge_chance}%)\n"
             else:
                 total_defense = player.total_defense
 
@@ -1673,24 +1682,26 @@ def handle_combat_attack(player, vk, user_id: int):
                 if "temp_defense_active" in active_effects:
                     temp_def = active_effects.get("temp_defense", 0)
                     total_defense += temp_def
-                    message += f"🛡️ Бронирование: +{temp_def} защиты!\n"
+                    message += f"🛡️ <b>БРОНИРОВАНИЕ:</b> +{temp_def} защиты!\n"
 
                 # === Применяем incoming_damage_reduction (Незримый) ===
                 if "incoming_damage_reduction" in active_effects:
                     reduction = active_effects["incoming_damage_reduction"]
                     enemy_damage = int(enemy_damage * (1 - reduction))
-                    message += f"👻 Незримый: урон уменьшен на {int(reduction*100)}%!\n"
+                    message += f"👻 <b>НЕЗРИМЫЙ:</b> урон уменьшен на {int(reduction*100)}%!\n"
                     del _active_skill_effects[user_id]["incoming_damage_reduction"]
 
                 # === Применяем enemy_damage_reduction (Подавление) ===
                 if "enemy_damage_reduction" in active_effects:
                     reduction = active_effects["enemy_damage_reduction"]
                     enemy_damage = int(enemy_damage * (1 - reduction))
-                    message += f"🔥 Подавление: враг ослаблен на {int(reduction*100)}%!\n"
+                    message += f"🔥 <b>ПОДАВЛЕНИЕ:</b> враг ослаблен на {int(reduction*100)}%!\n"
                     del _active_skill_effects[user_id]["enemy_damage_reduction"]
 
                 final_damage = max(1, enemy_damage - total_defense)
                 player.health -= final_damage
+                message += f"\n⚔️ <b>{combat['enemy_name']} АТАКУЕТ!</b>\n"
+                message += f"Урон врага: {enemy_damage} → Получено: <b>{final_damage}</b> (защита: {total_defense})\n"
 
             # Проверка на смерть
             if player.health <= 0:
@@ -1701,21 +1712,27 @@ def handle_combat_attack(player, vk, user_id: int):
                 return
 
             database.update_user_stats(user_id, health=player.health)
-            message += f"\n{combat['enemy_name']} атакует!\nПолучен урон: {final_damage}"
 
         # Показываем состояние кровотечения
         if combat.get('bleed_turns', 0) > 0:
-            message += f"\nКровотечение: {combat['bleed_turns']} ходов"
+            message += f"\n🩸 Кровотечение врага: {combat['bleed_turns']} ходов"
 
-        # Прогресс-бары HP
+        # Прогресс-бары HP + энергия
         enemy_hp_bar = _create_hp_bar(combat['enemy_hp'], combat['enemy_max_hp'])
         player_hp_bar = _create_hp_bar(player.health, player.max_health)
 
         message += (
-            f"\n\n{combat['enemy_name']}\n"
-            f"HP {enemy_hp_bar} {combat['enemy_hp']}/{combat['enemy_max_hp']}\n\n"
-            f"Ты\n"
-            f"HP {player_hp_bar} {player.health}/{player.max_health}"
+            f"\n\n╔════════════════════════════════╗\n"
+            f"║ <b>СТАТУС БОЯ</b>\n"
+            f"╠════════════════════════════════╣\n"
+            f"║ {combat['enemy_name']}\n"
+            f"║ HP {enemy_hp_bar} {combat['enemy_hp']}/{combat['enemy_max_hp']}\n"
+            f"╠════════════════════════════════╣\n"
+            f"║ <b>ТЫ</b>\n"
+            f"║ ❤️ HP {player_hp_bar} {player.health}/{player.max_health}\n"
+            f"║ ⚡ Энергия: {player.energy}/100\n"
+            f"║ 🛡️ Защита: {player.total_defense}\n"
+            f"╚════════════════════════════════╝"
         )
 
         # Уменьшаем кулдауны после хода
@@ -1724,11 +1741,19 @@ def handle_combat_attack(player, vk, user_id: int):
         # Показываем активные эффекты
         active_effects = get_active_effects(user_id)
         if active_effects:
-            effects_msg = "\n🔮 <b>Активные эффекты:</b>\n"
+            effects_msg = "\n🔮 <b>АКТИВНЫЕ ЭФФЕКТЫ:</b>\n"
             for eff_name, eff_val in active_effects.items():
                 if isinstance(eff_val, int) and eff_val > 0:
                     effects_msg += f"• {eff_name}: {eff_val} ход\n"
             message += effects_msg
+
+        # Показываем кулдауны навыков
+        cooldowns = _skill_cooldowns.get(user_id, {})
+        if cooldowns:
+            cd_msg = "\n⏳ <b>ПЕРЕЗАРЯДКА НАВЫКОВ:</b>\n"
+            for skill_name, cd_val in cooldowns.items():
+                cd_msg += f"• {skill_name}: {cd_val} ход\n"
+            message += cd_msg
 
         # Сохраняем состояние боя и показываем клавиатуру боя
         _combat_state[user_id] = combat

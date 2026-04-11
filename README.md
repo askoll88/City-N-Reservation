@@ -1,88 +1,27 @@
-tags and an edit snippet in <edit> tags. We must apply the edit to the code. But these are not typical code; it's a markdown file (like README). The edit appears to replace the whole content? The code snippet is the original README, the edit is a new version of README. We need to merge them. However the instructions mention using comments to locate insertion points. But in this case it's a full replacement? Let's examine.
+# S.T.A.L.K.E.R. Bot - ВКонтакте
 
-The original code block (the <code> content) is:
+Текстовый RPG-чат-бот ВКонтакте в стиле S.T.A.L.K.E.R. с механиками выживания, аномалий, артефактов, боя и торговли.
 
-```
-# Город N: Запретная Зона
-
-Игровой чат-бот ВКонтакте в стиле S.T.A.L.K.E.R.
-
-## Требования
-
-- Python 3.8+
-- Токен сообщества ВК
-- ID группы ВК
-
-## Установка
-
-1. Клонируйте репозиторий
-2. Установите зависимости:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Создайте файл `.env` на основе `.env.example`:
-   ```
-   VK_TOKEN=your_vk_token_here
-   GROUP_ID=your_group_id_here
-   ```
-
-## Получение токена ВК
-
-1. Перейдите в управление сообществом
-2. Работа с API → Long API
-3. Создайте ключ доступа
-4. Скопируйте токен в `.env`
-
-## Запуск
-
-```bash
-python main.py
-```
-
-## Команды
-
-- `/start` или `Начать` — начать игру
-- `/status` — узнать текущую локацию
-- Название локации — переместиться (Город, КПП)
-
-## Структура проекта
-
-```
-├── main.py        # Основной файл бота
-├── config.py      # Конфигурация
-├── player.py      # Игрок и состояние
-├── locations.py   # Локации игры
-├── requirements.txt
-└── .env.example
-```
-
-```
-
-Now the edit is:
-
-```
-# Город N: Запретная Зона
-
-Текстовый RPG-чат-бот ВКонтакте в стиле S.T.A.L.K.E.R. с механиками выживания, аномалий, артефактов и боя.
-
-## Возможности
+## 🎮 Возможности
 
 - 🚶 **Навигация** — 7 локаций: город, КПП, больница, чёрный рынок, убежище, дорога на военную часть, дорога на НИИ
 - ⚔️ **Бой** — атака оружием, использование укрытий, побег
-- 🎒 **Инвентарь** — оружие, броня, рюкзаки, артефакты, ресурсы
-- 💎 **Артефакты** — 4 уровня редкости (common, rare, unique, legendary), бонусы к характеристикам
+- 🎒 **Инвентарь** — оружие, броня (5 слотов), рюкзаки, артефакты, ресурсы, гильзы
+- 💎 **Артефакты** — 40+ артефактов с бонусами, слоты для экипировки
 - ☢️ **Выживание** — здоровье, энергия, радиация, переносимый вес
 - 🔬 **Аномалии** — исследование локаций для поиска артефактов и ресурсов
 - 💰 **Торговля** — магазины на КПП, у учёного, на чёрном рынке
+- 🎭 **Классы** — сталкер, военный, учёный с уникальными бонусами
+- ⚡ **Красивые статус-бары** — визуальные индикаторы HP, энергии, радиации и опыта
 
-## Требования
+## 📋 Требования
 
 - Python 3.10+
 - PostgreSQL 14+
 - Токен сообщества ВКонтакте
 - ID группы ВК
 
-## Установка
+## 🛠️ Установка
 
 1. Клонируйте репозиторий
 2. Установите зависимости:
@@ -104,33 +43,151 @@ Now the edit is:
    DB_PASSWORD=your_password
    ```
 
-## Получение токена ВК
+## 🔑 Получение токена ВК
 
 1. Перейдите в управление сообществом
 2. Работа с API → Long API
 3. Создайте ключ доступа
 4. Скопируйте токен в `.env`
 
-## Запуск
+## 🚀 Запуск
 
 ```bash
 python main.py
 ```
 
-## Основные команды
+## 🎯 Основные команды
 
 | Команда | Описание |
 |---------|----------|
 | `/start`, `начать` | Начать игру |
-| `/status`, `статус` | Показать статус |
+| `/status`, `статус` | Показать статус персонажа |
 | `инвентарь` | Открыть инвентарь |
 | `город`, `кпп`, `больница`, `черный рынок`, `убежище` | Переместиться |
 | `исследовать` | Искать артефакты (на дорогах) |
-| `лечиться`, `спать` | Восстановить здоровье/энергию |
+| `лечиться` | Восстановить здоровье и энергию в больнице |
+| `спать` | Восстановить энергию в убежище |
 | `надеть <предмет>` | Экипировать предмет |
-| `купить/продать` | Торговля |
+| `снять <предмет>` | Снять предмет |
+| `купить <предмет>` | Купить предмет у торговца |
+| `продать <предмет>` | Продать предмет торговцу |
+| `выбросить <предмет>` | Выбросить предмет из инвентаря |
+| `гильзы` | Показать информацию о гильзах |
 
-## Структура проекта
+## 💀 Механика смерти
+
+При смерти персонажа:
+
+| Параметр | Потеря | Восстановление |
+|----------|--------|----------------|
+| 💰 Деньги | -10% | — |
+| ⭐ Опыт | -25% (не ниже уровня) | — |
+| ❤️ Здоровье | — | 50% от макс. |
+| ⚡ Энергия | — | 50% |
+| ☢️ Радиация | — | 0% |
+| 🎒 Предметы | ✅ Сохраняются | — |
+
+**Защита от потери уровня:** Опыт не может опуститься ниже порога текущего уровня.
+
+**Пример:**
+```
+Уровень 5, Опыт: 600/700
+После смерти: Опыт 450/700
+✅ Уровень 5 сохранён!
+```
+
+## 🏥 Лечение в больнице
+
+Первое лечение — **бесплатно**, последующие становятся дороже:
+
+| Лечение | Цена |
+|---------|------|
+| 1-е | 0 руб. |
+| 2-е | 100 руб. |
+| 3-е | 300 руб. |
+| 4-е | 900 руб. |
+| 5-е | 2700 руб. |
+
+**Восстанавливает:**
+- ✅ Здоровье до 100%
+- ✅ Энергию до 100%
+- ✅ Радиацию до 0%
+
+## 🎒 Артефакты
+
+### Слоты для артефактов
+- **Базово:** 3 слота
+- **Максимум:** 10 слотов
+- **Покупка:** у Учёного на КПП (требуется 25 уровень)
+
+### Стоимость слотов:
+| Слот | Цена |
+|------|------|
+| 4-й | 500 руб. |
+| 5-й | 750 руб. |
+| 6-й | 1000 руб. |
+| 7-й | 1500 руб. |
+| 8-й | 2000 руб. |
+| 9-й | 2500 руб. |
+| 10-й | 3000 руб. |
+
+### Редкость артефактов
+- 🟢 **Common** — обычные бонусы
+- 🔵 **Rare** — 2 слота, улучшенные бонусы
+- 🟣 **Unique** — уникальные эффекты
+- 🟡 **Legendary** — легендарные артефакты
+
+## 📊 Статус персонажа
+
+Пример вывода статуса:
+```
+📊 СТАТУС ПЕРСОНАЖА
+🎭 Класс: СТАЛКЕР
+
+❤️ HP:        🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩 100/100
+⚡ Энергия:    🟩🟩🟩🟩🟩🟩🟩🟨🟨⬜ 71/100
+☢️ Радиация:  ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ 0%
+
+💰 Деньги: 5092 руб.
+🎯 Уровень: 1 | Опыт: 0/100
+           ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜
+
+🎒 Экипировка:
+🔫 Оружие: PMM (атака 18)
+🛡️ Броня:
+   🧢 Бандана (броня 2)
+   🧥 Куртка сталкера (броня 15)
+   ────────
+📊 Всего брони: 17
+📊 Всего атаки: 18
+🔮 Артефакты (2/3):
+   🔮 Слизь (рад:-0.5)
+   🔮 Пружина (крит:+2%)
+🎒 Рюкзак: Рюкзак охотника (+10кг)
+📡 Детектор: нет
+
+💪 Характеристики:
+   • Сила: 5 (урон: 10, +10кг)
+   • Выносливость: 4 (HP: 100)
+   • Восприятие: 3 (находка: 9%)
+   • Удача: 5 (крит: 13%, редкое: 10%)
+   • Уклонение: 10%
+
+📦 Груз:
+   • Защита: +17
+   • Вес: 12.5/30кг ОК
+
+🎯 Гильзы: 0/10 (мешочек: нет)
+```
+
+### Цветовые индикаторы:
+- 🟩 **Зелёный** — >70% (норма)
+- 🟨 **Жёлтый** — 30-70% (внимание)
+- 🟥 **Красный** — <30% (критично)
+- 🔵 **Синий** — прогресс опыта
+- ⬜ **Пустой** — отсутствует
+
+## 🗺️ Структура проекта
 
 ```
 ├── main.py              # Главный файл, обработка сообщений
@@ -140,10 +197,12 @@ python main.py
 ├── locations.py         # Описания локаций
 ├── constants.py         # Перечисления и маппинг команд
 ├── state_manager.py     # Управление состоянием (бой, диалоги)
+├── anomalies.py         # Аномалии и генерация артефактов
+├── classes.py           # Классы персонажей и бонусы
 ├── handlers/            # Обработчики команд
 │   ├── commands.py      # Команды навигации и статуса
 │   ├── combat.py        # Боевая система
-│   ├── inventory.py     # Инвентарь и торговля
+│   ├── inventory.py     # Инвентарь, торговля, артефакты
 │   ├── location.py      # Перемещение между локациями
 │   ├── keyboards.py     # Клавиатуры ВК
 │   └── ...
@@ -151,287 +210,31 @@ python main.py
 └── .env                 # Переменные окружения
 ```
 
-## Конфигурация
+## ⚙️ Конфигурация
 
 Основные настройки в `config.py`:
 
-- `START_MONEY` — начальные деньги (10000 руб.)
-- `START_HEALTH` — начальное здоровье (100)
-- `MAX_HEALTH` — максимальное здоровье (150)
-- Параметры БД и VK API
-
-## Лицензия
-
-MIT
-
-```
-
-We need to merge them. Based on the description: "The edit is in the form of: // ... existing code ... FIRST_EDIT // ... existing code ..." So the edit uses comments indicating where to insert. But here the edit is just a full new version; perhaps we need to replace the original with new version. The instructions: "In some cases, the comment // ... existing code ... or // ... остальной код ... may not be at the beginning or end of the snippet. The merged code must be exact with no room for any errors. Make sure all whitespaces are preserved correctly."
-
-Thus, we must produce final code with the edit applied. Since the edit appears to contain a full replacement (the original had some sections, the edit has new sections and updated content), we need to integrate them. However there may be some sections unchanged: for instance "Получение токена ВК" appears identical in both. "Запуск" appears identical. "Структура проекта" is different: original had simple list, edit has more extensive. "Команды" replaced by "Основные команды" with a table. Also new sections: "Возможности", "Конфигурация", "Лицензия". The original had "Требования" with Python 3.8+, no DB, edit has Python 3.10+ and PostgreSQL. "Установка" changed. So the merge is essentially replace those sections. But the edit doesn't have comments like // ... existing code ... but is full content. The instructions: The edit is in the form of // ... existing code ... FIRST_EDIT // ... etc. The edit snippet in this case is not using comments; maybe they omitted the comments because it's a full replacement. How to treat? Possibly the edit is the new code, and we should output exactly the edit (the new code). But we need to incorporate any unchanged parts. The original code had some sections that are unchanged in edit: "Получение токена ВК" and "Запуск" are identical, but those appear also in edit. So we could just output the edit as is. However maybe there are some parts of original that are not in edit but should remain? The original had "Команды" and "Структура проекта" which are replaced. So edit includes new "Основные команды" and "Структура проекта". It also has new "Конфигурация" and "Лицензия". The original had no "Конфигурация" and "Лицензия". The edit includes them. So final output is basically the edit. The only potential difference: the original had a trailing empty line? Let's compare.
-
-Original:
-
-```
-# Город N: Запретная Зона
-
-Игровой чат-бот ВКонтакте в стиле S.T.A.L.K.E.R.
-
-## Требования
-...
-## Структура проекта
-...
-```
-
-But after "Структура проекта", there is a code block with list, then closing triple backticks, then a blank line? Let's see original: It ends with:
-
-```
-## Структура проекта
-
-```
-├── main.py        # Основной файл бота
-├── config.py      # Конфигурация
-├── player.py      # Игрок и состояние
-├── locations.py   # Локации игры
-├── requirements.txt
-└── .env.example
-```
-
-```
-
-There is a trailing newline after the final triple backticks? Possibly.
-
-The edit ends with:
-
-```
-## Лицензия
-
-MIT
-```
-
-It ends with "MIT". There is no trailing newline? Usually there is a newline after "MIT". Might be fine.
-
-Thus final code should be the edit exactly. However we must preserve whitespace exactly: indentation, line breaks, triple backticks, etc. Let's replicate exactly as edit.
-
-But let's double-check the edit content: It includes some lines with trailing spaces? We'll need to copy exactly.
-
-Let's copy edit snippet line by line:
-
-```
-# Город N: Запретная Зона
-
-Текстовый RPG-чат-бот ВКонтакте в стиле S.T.A.L.K.E.R. с механиками выживания, аномалий, артефактов и боя.
-
-## Возможности
-
-- 🚶 **Навигация** — 7 локаций: город, КПП, больница, чёрный рынок, убежище, дорога на военную часть, дорога на НИИ
-- ⚔️ **Бой** — атака оружием, использование укрытий, побег
-- 🎒 **Инвентарь** — оружие, броня, рюкзаки, артефакты, ресурсы
-- 💎 **Артефакты** — 4 уровня редкости (common, rare, unique, legendary), бонусы к характеристикам
-- ☢️ **Выживание** — здоровье, энергия, радиация, переносимый вес
-- 🔬 **Аномалии** — исследование локаций для поиска артефактов и ресурсов
-- 💰 **Торговля** — магазины на КПП, у учёного, на чёрном рынке
-
-## Требования
-
-- Python 3.10+
-- PostgreSQL 14+
-- Токен сообщества ВКонтакте
-- ID группы ВК
-
-## Установка
-
-1. Клонируйте репозиторий
-2. Установите зависимости:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Создайте базу данных PostgreSQL:
-   ```sql
-   CREATE DATABASE stalker_bot;
-   ```
-4. Создайте файл `.env`:
-   ```
-   VK_TOKEN=your_vk_token_here
-   GROUP_ID=your_group_id_here
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=stalker_bot
-   DB_USER=postgres
-   DB_PASSWORD=your_password
-   ```
-
-## Получение токена ВК
-
-1. Перейдите в управление сообществом
-2. Работа с API → Long API
-3. Создайте ключ доступа
-4. Скопируйте токен в `.env`
-
-## Запуск
-
-```bash
-python main.py
-```
-
-## Основные команды
-
-| Команда | Описание |
-|---------|----------|
-| `/start`, `начать` | Начать игру |
-| `/status`, `статус` | Показать статус |
-| `инвентарь` | Открыть инвентарь |
-| `город`, `кпп`, `больница`, `черный рынок`, `убежище` | Переместиться |
-| `исследовать` | Искать артефакты (на дорогах) |
-| `лечиться`, `спать` | Восстановить здоровье/энергию |
-| `надеть <предмет>` | Экипировать предмет |
-| `купить/продать` | Торговля |
-
-## Структура проекта
-
-```
-├── main.py              # Главный файл, обработка сообщений
-├── config.py            # Конфигурация и константы
-├── database.py          # PostgreSQL с пулом соединений
-├── player.py            # Класс Player и Inventory
-├── locations.py         # Описания локаций
-├── constants.py         # Перечисления и маппинг команд
-├── state_manager.py     # Управление состоянием (бой, диалоги)
-├── handlers/            # Обработчики команд
-│   ├── commands.py      # Команды навигации и статуса
-│   ├── combat.py        # Боевая система
-│   ├── inventory.py     # Инвентарь и торговля
-│   ├── location.py      # Перемещение между локациями
-│   ├── keyboards.py     # Клавиатуры ВК
-│   └── ...
-├── requirements.txt     # Зависимости
-└── .env                 # Переменные окружения
-```
-
-## Конфигурация
-
-Основные настройки в `config.py`:
-
-- `START_MONEY` — начальные деньги (10000 руб.)
-- `START_HEALTH` — начальное здоровье (100)
-- `MAX_HEALTH` — максимальное здоровье (150)
-- Параметры БД и VK API
-
-## Лицензия
-
-MIT
-```
-
-We must ensure we preserve all whitespace: The edit has some lines with leading spaces for indentation within lists (like "   ```bash"). Also the code block indentation is consistent: "   ```bash". That's three spaces then triple backticks. The original had similar but we must match edit.
-
-Thus final output: wrap in <code> tags.
-
-We should output exactly that.
-
-Potential nuance: The edit includes a trailing newline after "MIT". The original had no "Лицензия" section. Should we add a newline at end? Usually we can include a newline. It's fine.
-
-Thus final answer is:
-
-<code>
-# Город N: Запретная Зона
-
-Текстовый RPG-чат-бот ВКонтакте в стиле S.T.A.L.K.E.R. с механиками выживания, аномалий, артефактов и боя.
-
-## Возможности
-
-- 🚶 **Навигация** — 7 локаций: город, КПП, больница, чёрный рынок, убежище, дорога на военную часть, дорога на НИИ
-- ⚔️ **Бой** — атака оружием, использование укрытий, побег
-- 🎒 **Инвентарь** — оружие, броня, рюкзаки, артефакты, ресурсы
-- 💎 **Артефакты** — 4 уровня редкости (common, rare, unique, legendary), бонусы к характеристикам
-- ☢️ **Выживание** — здоровье, энергия, радиация, переносимый вес
-- 🔬 **Аномалии** — исследование локаций для поиска артефактов и ресурсов
-- 💰 **Торговля** — магазины на КПП, у учёного, на чёрном рынке
-
-## Требования
-
-- Python 3.10+
-- PostgreSQL 14+
-- Токен сообщества ВКонтакте
-- ID группы ВК
-
-## Установка
-
-1. Клонируйте репозиторий
-2. Установите зависимости:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Создайте базу данных PostgreSQL:
-   ```sql
-   CREATE DATABASE stalker_bot;
-   ```
-4. Создайте файл `.env`:
-   ```
-   VK_TOKEN=your_vk_token_here
-   GROUP_ID=your_group_id_here
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=stalker_bot
-   DB_USER=postgres
-   DB_PASSWORD=your_password
-   ```
-
-## Получение токена ВК
-
-1. Перейдите в управление сообществом
-2. Работа с API → Long API
-3. Создайте ключ доступа
-4. Скопируйте токен в `.env`
-
-## Запуск
-
-```bash
-python main.py
-```
-
-## Основные команды
-
-| Команда | Описание |
-|---------|----------|
-| `/start`, `начать` | Начать игру |
-| `/status`, `статус` | Показать статус |
-| `инвентарь` | Открыть инвентарь |
-| `город`, `кпп`, `больница`, `черный рынок`, `убежище` | Переместиться |
-| `исследовать` | Искать артефакты (на дорогах) |
-| `лечиться`, `спать` | Восстановить здоровье/энергию |
-| `надеть <предмет>` | Экипировать предмет |
-| `купить/продать` | Торговля |
-
-## Структура проекта
-
-```
-├── main.py              # Главный файл, обработка сообщений
-├── config.py            # Конфигурация и константы
-├── database.py          # PostgreSQL с пулом соединений
-├── player.py            # Класс Player и Inventory
-├── locations.py         # Описания локаций
-├── constants.py         # Перечисления и маппинг команд
-├── state_manager.py     # Управление состоянием (бой, диалоги)
-├── handlers/            # Обработчики команд
-│   ├── commands.py      # Команды навигации и статуса
-│   ├── combat.py        # Боевая система
-│   ├── inventory.py     # Инвентарь и торговля
-│   ├── location.py      # Перемещение между локациями
-│   ├── keyboards.py     # Клавиатуры ВК
-│   └── ...
-├── requirements.txt     # Зависимости
-└── .env                 # Переменные окружения
-```
-
-## Конфигурация
-
-Основные настройки в `config.py`:
-
-- `START_MONEY` — начальные деньги (10000 руб.)
-- `START_HEALTH` — начальное здоровье (100)
-- `MAX_HEALTH` — максимальное здоровье (150)
-- Параметры БД и VK API
-
-## Лицензия
+| Параметр | Значение | Описание |
+|----------|----------|----------|
+| `START_MONEY` | 10000 | Начальные деньги |
+| `START_HEALTH` | 100 | Начальное здоровье |
+| `BASE_ARTIFACT_SLOTS` | 3 | Базовые слоты артефактов |
+| `MAX_ARTIFACT_SLOTS` | 10 | Максимум слотов |
+| `MIN_LEVEL_FOR_ARTIFACT_SLOT` | 25 | Уровень для покупки слотов |
+| `DEBUG` | False | Режим отладки (логи) |
+
+## 📝 История изменений
+
+### Последнее обновление
+- ✅ **Механика смерти:** 10% денег, 25% опыта (без потери уровня), 50% HP/энергии
+- ✅ **Лечение в больнице:** Восстановление HP + энергии + радиации
+- ✅ **Статус-бары:** Визуальные индикаторы с цветами
+- ✅ **Слоты артефактов:** Унифицированная система (3→10 слотов)
+- ✅ **Защита от потери уровня:** Опыт не опускается ниже порога
+- ✅ **Выбрасывание предметов:** Команда `выбросить <название>`
+- ✅ **Маркеры экипировки:** ⚡ [ЭКИП] в инвентаре
+- ✅ **Бонусы артефактов:** Применяются только при экипировке
+
+## 📄 Лицензия
 
 MIT

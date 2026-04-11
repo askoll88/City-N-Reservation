@@ -1,0 +1,603 @@
+"""
+Модуль обработки команд игрока
+Централизованная обработка всех команд и сообщений
+"""
+import sys
+
+import player as player_module
+from player import get_player as get_player_cached
+
+from handlers.location import (
+    go_to_location, go_to_inventory, go_back,
+    handle_heal, get_status, show_welcome
+)
+from handlers.combat import (
+    handle_explore, handle_combat_attack, handle_combat_flee,
+    is_researching, get_research_status, cancel_research,
+    show_skills_in_combat, use_skill
+)
+from handlers.keyboards import (
+    create_location_keyboard, create_combat_keyboard,
+    create_npc_select_keyboard
+)
+from handlers.npc import (
+    show_npc_dialog, handle_npc_choice, handle_npc_back
+)
+from handlers.inventory import (
+    show_weapons, show_armor, show_backpacks, show_artifacts, show_other,
+    show_soldier_weapons, show_soldier_armor
+)
+from npcs import get_npc_by_location
+from state_manager import (
+    is_in_combat, get_combat_data, clear_combat_state,
+    is_in_dialog, get_dialog_info, clear_dialog_state,
+    is_researching as is_in_research,
+    get_research_data, clear_research_state,
+    get_research_status, cancel_research,
+    is_in_anomaly, get_anomaly_data
+)
+
+
+# === Текстовые сообщения ===
+
+def get_welcome_message():
+    """Приветственное сообщение"""
+    return (
+        "ГОРОД N: ЗАПРЕТНАЯ ЗОНА\n\n"
+        "Ты просыпаешься на заброшенной территории закрытого города N. "
+        "Радиационный фон повышен. Инструкции в голове нет — только выживай.\n\n"
+        "Используй кнопки для навигации по локациям."
+    )
+
+
+# === Утилиты ===
+
+def normalize_text(text: str) -> str:
+    """Нормализация текста сообщения"""
+    if not text:
+        return ""
+    return text.strip().lower().strip()
+
+
+# === Обработчики команд ===
+
+def handle_start_command(vk, user_id: int):
+    """Обработка команды /start"""
+    show_welcome(vk, user_id)
+
+
+def handle_status_command(player, vk, user_id: int):
+    """Обработка команды статус"""
+    get_status(player, vk, user_id)
+
+
+def handle_inventory_command(player, vk, user_id: int):
+    """Обработка команды инвентарь"""
+    go_to_inventory(player, vk, user_id)
+
+
+def handle_navigation(player, vk, user_id: int, text: str):
+    """Обработка навигационных команд"""
+    # Город
+    if text in ['город', 'в город']:
+        go_to_location(player, 'город', vk, user_id)
+        return True
+    
+    # КПП
+    if text in ['кпп', 'в кпп']:
+        go_to_location(player, 'кпп', vk, user_id)
+        return True
+    
+    # Больница
+    if 'больница' in text:
+        go_to_location(player, 'больница', vk, user_id)
+        return True
+    
+    # Черный рынок
+    if 'черный рынок' in text or text == 'рынок':
+        if player.level < 25:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"🚫 <b>Доступ запрещён!</b>\n\nЧёрный рынок открыт только для сталкеров 25+ уровня.\n\nТвоё текущее положение: {player.level} уровень\n\nПодними уровень, чтобы получить доступ.",
+                random_id=0
+            )
+            return True
+        go_to_location(player, 'черный рынок', vk, user_id)
+        return True
+    
+    # Убежище
+    if 'убежище' in text:
+        go_to_location(player, 'убежище', vk, user_id)
+        return True
+    
+    # Дороги
+    if 'военная' in text or ('дорога' in text and 'воен' in text):
+        go_to_location(player, 'дорога_военная_часть', vk, user_id)
+        return True
+    
+    if 'нии' in text or 'на нии' in text:
+        go_to_location(player, 'дорога_нии', vk, user_id)
+        return True
+    
+    if 'лес' in text or 'заражен' in text:
+        go_to_location(player, 'дорога_зараженный_лес', vk, user_id)
+        return True
+    
+    # Назад
+    if text in ['назад', 'выйти', 'выйти из']:
+        go_back(player, vk, user_id)
+        return True
+    
+    return False
+
+
+def handle_location_actions(player, vk, user_id: int, text: str):
+    """Обработка действий в локации"""
+    # Лечение
+    if text in ['лечиться', 'лечение'] or 'лечиться' in text or 'лечение' in text:
+        handle_heal(player, vk, user_id)
+        return True
+    
+    return False
+
+
+def handle_combat_commands(player, vk, user_id: int, text: str, original_text: str):
+    """Обработка команд боя"""
+    if not is_in_combat(user_id):
+        return False
+    
+    combat_data = get_combat_data(user_id)
+
+    # Атака
+    if text in ['атаковать', 'атака']:
+        handle_combat_attack(player, vk, user_id)
+        return True
+    
+    # Бегство
+    if text in ['убежать', 'бежать']:
+        handle_combat_flee(player, vk, user_id)
+        return True
+    
+    # Навыки
+    if text in ['навыки', 'навык', 'скилы', 'скилл']:
+        show_skills_in_combat(player, vk, user_id)
+        return True
+    
+    # Использование навыка по имени
+    skill_keywords = ['двойной выстрел', 'точный выстрел', 'очередь', 'подавление', 
+                      'прицельный выстрел', 'незримый', 'шквал огня', 'бронирование', 
+                      'клинок в сердце', 'уклонение', 'заградительный огонь']
+    if any(skill_name in text for skill_name in skill_keywords):
+        use_skill(player, vk, user_id, original_text)
+        return True
+    
+    # Возврат в бой
+    if text == 'назад':
+        vk.messages.send(
+            user_id=user_id,
+            message="⚔️ Возвращаемся в бой!",
+            keyboard=create_combat_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return True
+    
+    # Выход из боя
+    if text in ['кпп', 'в кпп', 'выйти']:
+        clear_combat_state(user_id)
+        go_to_location(player, 'кпп', vk, user_id)
+        return True
+    
+    # Неизвестная команда в бою
+    vk.messages.send(
+        user_id=user_id,
+        message="⚔️ Ты в бою! Атакуй или убеги!",
+        keyboard=create_combat_keyboard().get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def handle_research_commands(player, vk, user_id: int, text: str):
+    """Обработка команд исследования"""
+    if not is_in_research(user_id):
+        return False
+    
+    # Отмена исследования
+    if text in ['отмена', 'отменить', 'стоп', 'прекратить']:
+        if cancel_research(user_id):
+            vk.messages.send(
+                user_id=user_id,
+                message="❌ Исследование отменено.",
+                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0
+            )
+        return True
+    
+    # Показать статус исследования
+    status = get_research_data(user_id)
+    if status:
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                f"⏳ <b>ИДЁТ ИССЛЕДОВАНИЕ</b>\n\n"
+                f"⏱️ Осталось: {status.get('remaining', 0)} сек\n"
+                f"📍 Локация: {status.get('location_id', 'unknown')}\n\n"
+                f"Жди результата или напиши 'отмена' для отмены."
+            ),
+            random_id=0
+        )
+        return True
+    
+    return False
+
+
+def handle_anomaly_commands(player, vk, user_id: int, text: str):
+    """Обработка команд аномалии"""
+    from handlers.combat import handle_anomaly_action
+    
+    if not is_in_anomaly(user_id):
+        return False
+    
+    if text in ['обойти', 'извлечь', 'отступить']:
+        handle_anomaly_action(player, vk, user_id, text)
+        return True
+    
+    vk.messages.send(
+        user_id=user_id,
+        message="⚠️ Ты в аномалии! Выбери действие:\n\n• Обойти — попробовать обойти\n• Извлечь — попробовать добыть артефакт\n• Отступить — уйти с уроном",
+        random_id=0
+    )
+    return True
+
+
+def handle_talk_command(player, vk, user_id: int, text: str):
+    """Обработка команды поговорить"""
+    if text not in ['поговорить', 'диалог']:
+        return False
+    
+    location_id = player.current_location_id
+    npcs = get_npc_by_location(location_id)
+
+    if npcs:
+        npc_names = ", ".join([npc.name for npc in npcs])
+        vk.messages.send(
+            user_id=user_id,
+            message=f"👥 <b>Выбери, с кем поговорить:</b>\n\n{npc_names}",
+            keyboard=create_npc_select_keyboard(location_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+    elif location_id == 'убежище':
+        show_npc_dialog(player, vk, user_id, 'местный житель')
+        return True
+    
+    vk.messages.send(user_id=user_id, message="😶 Здесь никого нет для разговора.", random_id=0)
+    return True
+
+
+def handle_npc_selection(player, vk, user_id: int, text: str):
+    """Обработка выбора NPC"""
+    npc_map = {
+        'военный': 'военный',
+        'учёный': 'ученый',
+        'ученый': 'ученый',
+        'барыга': 'барыга',
+        'местный житель': 'местный житель',
+        'наставник': 'наставник',
+    }
+    
+    npc_id = npc_map.get(text)
+    if npc_id:
+        show_npc_dialog(player, vk, user_id, npc_id)
+        return True
+    
+    return False
+
+
+def handle_class_commands(player, vk, user_id: int, text: str):
+    """Обработка команд класса персонажа"""
+    # Команды: класс, мой класс, получить класс
+    if text not in ['класс', 'мой класс', 'получить класс', 'мои навыки', 'навыки']:
+        return False
+
+    from classes import get_class_by_weapon, format_class_info, format_passive_status
+    from handlers.keyboards import create_location_keyboard
+
+    # Если игрок в убежище - показываем через NPC
+    if player.current_location_id == 'убежище':
+        from handlers.npc import show_npc_dialog
+        show_npc_dialog(player, vk, user_id, 'наставник')
+        return True
+
+    # Иначе показываем информацию о классе напрямую
+    if not player.player_class:
+        # Попробуем определить класс по оружию
+        if player.equipped_weapon:
+            class_id = get_class_by_weapon(player.equipped_weapon)
+            if class_id:
+                class_info = format_class_info(class_id, player.level)
+                vk.messages.send(
+                    user_id=user_id,
+                    message=f"🎓 <b>Твой класс:</b> {class_id.upper()}\n\n{class_info}\n\nДля получения класса найди наставника в убежище (дорога → убежище).",
+                    keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                    random_id=0
+                )
+                return True
+
+        vk.messages.send(
+            user_id=user_id,
+            message="🎓 <b>КЛАСС ПЕРСОНАЖА</b>\n\nУ тебя пока нет класса!\n\nДля получения класса:\n1. Дойди до 10 уровня\n2. Экипируй оружие\n3. Найди наставника в убежище\n\n🚪 Путь: Дорога → Убежище",
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    # Показываем инфу о текущем классе
+    class_info = format_class_info(player.player_class, player.level)
+    passive_status = format_passive_status(player.player_class, player.level)
+
+    current_weapon = player.equipped_weapon or "нет"
+    current_class = get_class_by_weapon(current_weapon) if current_weapon != "нет" else None
+
+    msg = f"🎓 <b>ТВОЙ КЛАСС</b>\n\n"
+    msg += f"Класс: {player.player_class.upper()}\n"
+    msg += f"Оружие: {current_weapon}\n\n"
+    msg += f"{class_info}\n"
+
+    if passive_status:
+        msg += f"\n{passive_status}"
+
+    msg += "\n\nДля смены класса найди наставника в убежище."
+
+    vk.messages.send(
+        user_id=user_id,
+        message=msg,
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def handle_trade_commands(player, vk, user_id: int, text: str):
+    """Обработка команд торговли"""
+    if text not in ['торговля', 'торг', 'магазин']:
+        return False
+    
+    location_id = player.current_location_id
+    
+    if location_id == 'кпп':
+        vk.messages.send(
+            user_id=user_id,
+            message="👤 <b>Военный:</b>\n\n«Я тут не для торговли, сталкер. Военный склад охраняю. Но... если очень нужно, могу кое-что продать из трофеев. За особую цену.»",
+            random_id=0
+        )
+        return True
+    
+    if location_id == 'черный рынок':
+        from handlers.keyboards import create_blackmarket_keyboard
+        vk.messages.send(
+            user_id=user_id,
+            message="👤 <b>Торговец:</b>\n\n«Рад тебя видеть, сталкер! Вот, выбирай:\n\n🔮 Артефакты — редкие аномальные образования\n🔫 Оружие\n🛡️ Броня\n🎒 Рюкзаки\n💰 Продать артефакты — избавься от лишнего»",
+            keyboard=create_blackmarket_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return True
+    
+    vk.messages.send(user_id=user_id, message="😶 Здесь нет торговца.", random_id=0)
+    return True
+
+
+def handle_kpp_shop_commands(player, vk, user_id: int, text: str):
+    """Обработка команд магазина на КПП (без диалога с NPC)"""
+    if player.current_location_id != 'кпп':
+        return False
+    
+    is_at_kpp = player.previous_location == 'кпп'
+    if not is_at_kpp and player.current_location_id != 'кпп':
+        return False
+    
+    if text in ['купить', 'оружие', 'броня']:
+        if text == 'купить':
+            vk.messages.send(
+                user_id=user_id,
+                message="🎖️ <b>Военный:</b>\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                keyboard=create_kpp_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return True
+        elif text == 'оружие':
+            show_soldier_weapons(player, vk, user_id)
+            return True
+        elif text == 'броня':
+            show_soldier_armor(player, vk, user_id)
+            return True
+    
+    return False
+
+
+def handle_blackmarket_commands(player, vk, user_id: int, text: str):
+    """Обработка команд на Черном рынке"""
+    if player.current_location_id != 'черный рынок':
+        return False
+
+    from handlers.inventory import show_artifact_shop, show_sell_artifacts, show_soldier_weapons, show_soldier_armor
+    from handlers.keyboards import create_blackmarket_keyboard
+
+    # Артефакты - меню
+    if text in ['артефакты', 'артефакт', 'артефакты купить', 'купить артефакты']:
+        show_artifact_shop(player, vk, user_id, rarity=None)
+        return True
+
+    # Артефакты по редкости
+    if text in ['обычные', 'обычные артефакты']:
+        show_artifact_shop(player, vk, user_id, rarity='common')
+        return True
+
+    if text in ['редкие', 'редкие артефакты']:
+        show_artifact_shop(player, vk, user_id, rarity='rare')
+        return True
+
+    if text in ['уникальные', 'уникальные артефакты']:
+        show_artifact_shop(player, vk, user_id, rarity='unique')
+        return True
+
+    if text in ['легендарные', 'легендарные артефакты']:
+        show_artifact_shop(player, vk, user_id, rarity='legendary')
+        return True
+
+    # Продажа артефактов
+    if text in ['продать артефакты', 'продать артефакт', 'продажа артефактов']:
+        show_sell_artifacts(player, vk, user_id)
+        return True
+
+    # Оружие и броня
+    if text == 'оружие':
+        show_soldier_weapons(player, vk, user_id)
+        return True
+
+    if text == 'броня':
+        show_soldier_armor(player, vk, user_id)
+        return True
+
+    return False
+
+
+def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: str):
+    """Обработка команд внутри диалога с NPC"""
+    if not is_in_dialog(user_id):
+        return False
+    
+    dialog_info = get_dialog_info(user_id)
+    if not dialog_info:
+        return False
+    
+    npc_id = dialog_info.get("npc")
+    stage = dialog_info.get("stage", "")
+
+    # Обработка "Назад" из диалога
+    if text == 'назад' or text == 'к выбору npc':
+        handle_npc_back(player, vk, user_id)
+        return True
+    
+    # Обработка меню магазина у военного
+    if npc_id == "военный" and text in ["купить", "оружие", "броня"]:
+        from state_manager import set_dialog_state
+        from handlers.keyboards import create_kpp_shop_keyboard
+        
+        if text == "купить":
+            set_dialog_state(user_id, npc_id, "shop_menu")
+            vk.messages.send(
+                user_id=user_id,
+                message="🎖️ <b>Военный:</b>\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                keyboard=create_kpp_shop_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return True
+        elif text == "оружие":
+            set_dialog_state(user_id, npc_id, "shop_weapons")
+            show_soldier_weapons(player, vk, user_id)
+            return True
+        elif text == "броня":
+            set_dialog_state(user_id, npc_id, "shop_armor")
+            show_soldier_armor(player, vk, user_id)
+            return True
+    
+    # Обработка меню магазина у учёного
+    if npc_id == "ученый" and text in ["купить", "лекарства", "энергетики"]:
+        from state_manager import set_dialog_state
+        from handlers.keyboards import create_scientist_shop_keyboard
+        
+        if text == "купить":
+            set_dialog_state(user_id, npc_id, "shop_menu")
+            show_scientist_shop(player, vk, user_id, category='all')
+            return True
+        elif text == "лекарства":
+            set_dialog_state(user_id, npc_id, "shop_meds")
+            show_scientist_shop(player, vk, user_id, category='meds')
+            return True
+        elif text == "энергетики":
+            set_dialog_state(user_id, npc_id, "shop_food")
+            show_scientist_shop(player, vk, user_id, category='food')
+            return True
+    
+    # Обработка выбора вопроса диалога
+    from npcs import get_npc
+    npc = get_npc(npc_id)
+    if npc:
+        menu = npc.get_menu()
+        for dialog_id in menu:
+            question = npc.get_question_text(dialog_id)
+            if question and (text == question.lower() or text == dialog_id):
+                show_npc_dialog(player, vk, user_id, npc_id, dialog_id)
+                return True
+    
+    # Обработка "Назад" из магазина
+    if text == "назад":
+        from handlers.inventory import clear_shop_cache
+        
+        if npc_id == "военный":
+            clear_shop_cache(user_id)
+            show_npc_dialog(player, vk, user_id, npc_id, None)
+            return True
+        
+        if npc_id == "ученый":
+            clear_shop_cache(user_id)
+            if stage in ["shop_meds", "shop_food"]:
+                show_scientist_shop(player, vk, user_id, category='all')
+            else:
+                show_npc_dialog(player, vk, user_id, npc_id, None)
+            return True
+
+        # Назад от Барыги
+        if npc_id == "барыга":
+            clear_shop_cache(user_id)
+            show_npc_dialog(player, vk, user_id, npc_id, None)
+            return True
+
+    # Обработка редкости артефактов (у Барыги или напрямую)
+    rarity_map = {
+        'обычные': 'common',
+        'редкие': 'rare',
+        'уникальные': 'unique',
+        'легендарные': 'legendary'
+    }
+
+    text_lower = text.lower().strip()
+
+    if text_lower in rarity_map:
+        from handlers.inventory import show_artifact_shop
+        show_artifact_shop(player, vk, user_id, rarity=rarity_map[text_lower])
+        return True
+
+    # Показать текущее меню диалога
+    show_npc_dialog(player, vk, user_id, npc_id, None)
+    return True
+
+
+def handle_buy_sell_commands(player, vk, user_id: int, text: str, in_dialog: bool):
+    """Обработка команд покупки/продажи"""
+    if in_dialog:
+        return False
+    
+    if text == 'купить':
+        vk.messages.send(
+            user_id=user_id,
+            message="💰 Чтобы купить предмет, напиши 'купить <название предмета>'.\n\nПример: купить нож",
+            random_id=0
+        )
+        return True
+    
+    if text == 'продать':
+        show_weapons(player, vk, user_id)
+        return True
+    
+    return False
+
+
+def handle_unknown_command(vk, user_id: int):
+    """Обработка неизвестной команды"""
+    vk.messages.send(
+        user_id=user_id,
+        message="😕 Я не понимаю эту команду.\n\nИспользуй кнопки для навигации или напиши 'начать' для справки.",
+        random_id=0
+    )
