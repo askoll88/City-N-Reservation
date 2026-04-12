@@ -4,7 +4,6 @@
 import database
 import logging
 from locations import get_location, Location
-from config import MAX_ARTIFACT_SLOTS
 
 logger = logging.getLogger(__name__)
 
@@ -233,10 +232,6 @@ class Player:
             self.max_health_bonus = self._artifact_bonuses.get('max_health_bonus', 0)
 
             self.inventory.reload()
-
-    @property
-    def max_artifact_slots(self) -> int:
-    return MAX_ARTIFACT_SLOTS
 
     @property
     def dodge_chance(self) -> int:
