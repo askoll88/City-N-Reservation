@@ -2041,26 +2041,17 @@ def roll_artifact_from_anomaly(anomaly_type: str, luck: int, detector_bonus: int
     if not artifacts_list:
         return None
 
-    # Базовый шанс успеха с детектором
     base_chance = anomaly.get("success_chance_with_detector", 50)
-
-    # Бонус от удачи и детектора
     total_chance = base_chance + (luck * 2) + detector_bonus
-    total_chance = min(95, total_chance)  # Максимум 95%
+    total_chance = min(95, total_chance)
 
     if random.randint(1, 100) > total_chance:
         return None
 
-    # Выбираем случайный артефакт из списка
     artifact_name = random.choice(artifacts_list)
-
-    # Получаем данные об артефакте из БД
     artifact = get_item_by_name(artifact_name)
     if artifact:
-        return {
-            'name': artifact_name,
-            'rarity': artifact.get('rarity', 'common')
-        }
+        return {'name': artifact_name, 'rarity': artifact.get('rarity', 'common')}
 
     return None
 
@@ -2074,8 +2065,6 @@ def equip_shells_bag(vk_id: int, bag_name: str) -> dict:
             return {'success': False, 'message': 'Пользователь не найден'}
 
         user_id = user['id']
-
-        # Проверяем, есть ли мешочек в инвентаре
         cursor.execute("""
             SELECT ui.quantity, i.name 
             FROM user_inventory ui
@@ -2088,26 +2077,19 @@ def equip_shells_bag(vk_id: int, bag_name: str) -> dict:
         if not item:
             return {'success': False, 'message': f'Мешочек "{bag_name}" не найден в инвентаре'}
 
-        # Надеваем в слот shells_bag
         cursor.execute("""
             INSERT INTO user_equipment (user_id, slot, item_name)
             VALUES (%s, 'shells_bag', %s)
             ON CONFLICT (user_id, slot) DO UPDATE SET item_name = EXCLUDED.item_name
         """, (user_id, bag_name))
 
-        # Получаем вместимость мешочка
         capacity = item.get('backpack_bonus', 0)
-
-        # Обнуляем гильзы при смене мешочка (если в новом меньше вместимость)
         cursor.execute("SELECT shells FROM users WHERE id = %s", (user_id,))
         current_shells = cursor.fetchone()['shells']
         if current_shells > capacity:
             cursor.execute("UPDATE users SET shells = %s WHERE id = %s", (capacity, user_id))
 
-        return {
-            'success': True,
-            'message': f'Надет мешочек: {bag_name} (вместимость: {capacity} гильз)'
-        }
+        return {'success': True, 'message': f'Надет мешочек: {bag_name} (вместимость: {capacity} гильз)'}
 
 
 def unequip_shells_bag(vk_id: int) -> dict:
@@ -2119,42 +2101,89 @@ def unequip_shells_bag(vk_id: int) -> dict:
             return {'success': False, 'message': 'Пользователь не найден'}
 
         user_id = user['id']
-
-        # Снимаем мешочек
-        cursor.execute("""
-            DELETE FROM user_equipment 
-            WHERE user_id = %s AND slot = 'shells_bag'
-        """, (user_id,))
-
-        # Обнуляем гильзы при снятии мешочка
-        cursor.execute("""
-            UPDATE users SET shells = 0 WHERE id = %s
-        """, (user_id,))
+        cursor.execute("DELETE FROM user_equipment WHERE user_id = %s AND slot = 'shells_bag'", (user_id,))
+        cursor.execute("UPDATE users SET shells = 0 WHERE id = %s", (user_id,))
 
         return {'success': True, 'message': 'Мешочек для гильз снят. Гильзы потеряны.'}
+
+
+# ---------------------------------------------------------------------------
+# Рынок P2P
+# ---------------------------------------------------------------------------
+
+def is_market_enabled() -> bool:
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT value FROM game_settings WHERE key = 'p2p_market_enabled'")
+        row = cursor.fetchone()
+        return row and row['value'] == '1'
+
+
+def get_market_listings(limit: int = 50) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT * FROM market_listings
+            WHERE status = 'active'
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_market_user_transactions(vk_id: int, limit: int = 20) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT id, listing_id, seller_vk_id, buyer_vk_id, item_name,
+                   quantity, price_per_item, total_price, sale_fee, created_at
+            FROM market_transactions
+            WHERE seller_vk_id = %s OR buyer_vk_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (vk_id, vk_id, limit))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def admin_get_market_listings(status: str = "active", limit: int = 50) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT id, seller_vk_id, buyer_vk_id, item_name, quantity, price_per_item,
+                   (quantity * price_per_item) AS total_price,
+                   status, created_at, expires_at, completed_at
+            FROM market_listings
+            WHERE (%s = 'all' OR status = %s)
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (status, status, limit))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def admin_cancel_market_listing(listing_id: int) -> dict:
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT * FROM market_listings WHERE id = %s FOR UPDATE", (listing_id,))
+        lot = cursor.fetchone()
+        if not lot:
+            return {"success": False, "message": "Лот не найден."}
+        if lot["status"] != "active":
+            return {"success": False, "message": f"Лот не активен (status={lot['status']})."}
+
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (lot["seller_vk_id"],))
+        seller = cursor.fetchone()
+        if seller:
+            cursor.execute("""
+                INSERT INTO user_inventory (user_id, item_id, quantity)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, item_id) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+            """, (seller["id"], lot["item_id"], lot["quantity"]))
+
+        cursor.execute("UPDATE market_listings SET status = 'cancelled', cancelled_at = NOW() WHERE id = %s", (listing_id,))
+
+    return {"success": True, "message": f"Лот #{listing_id} принудительно снят администратором."}
 
 
 # ---------------------------------------------------------------------------
 # Инициализация БД
 # ---------------------------------------------------------------------------
 
-def init_db():
-    """Инициализировать базу данных: создать таблицы и заполнить справочники."""
-    logger.info("Инициализация базы данных...")
-
-    _create_tables()
-    _migrate_old_equipment()
-    _seed_items()
-    _seed_npcs()
-    _seed_game_settings()
-
-    # Сброс кэша предметов после инициализации
-    _reset_items_cache()
-
-    logger.info("База данных успешно инициализирована")
-
-
 if __name__ == "__main__":
-    # Тестовый запуск для проверки БД
     init_db()
     print("База данных готова к работе!")
