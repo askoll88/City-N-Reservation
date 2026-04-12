@@ -4,6 +4,7 @@
 import database
 import logging
 from locations import get_location, Location
+from config import MAX_ARTIFACT_SLOTS
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,9 @@ class Inventory:
                      self.artifacts + self.other):
             total += item.get('weight', 1.0) * item.get('quantity', 1)
         return round(total, 1)
+
+    def max_artifact_slots(self) -> int:
+    return MAX_ARTIFACT_SLOTS
 
     def is_empty(self) -> bool:
         """Проверить, пуст ли инвентарь"""
