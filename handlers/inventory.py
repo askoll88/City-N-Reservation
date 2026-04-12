@@ -1544,7 +1544,7 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
 
         # Проверяем вес
         current_weight = player.inventory.total_weight
-        max_weight = player.max_carry_weight
+        max_weight = player.max_weight
         if current_weight + weight > max_weight:
             vk.messages.send(
                 user_id=user_id,
