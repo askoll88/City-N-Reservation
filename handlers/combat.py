@@ -187,6 +187,7 @@ def cancel_research(user_id: int):
     """Отменить исследование"""
     if user_id in _research_timers:
         del _research_timers[user_id]
+        clear_research_state(user_id)
         return True
     return False
 
@@ -240,7 +241,18 @@ def show_explore_menu(player, vk, user_id: int):
     )
 
 
+def cleanup_research_timers():
+    """Удалить записи таймеров, время которых уже истекло"""
+    current_time = time.time()
+    expired = [
+        uid for uid, data in _research_timers.items()
+        if current_time - data["start_time"] > data["time_sec"] + 60  # +60 сек запас
+    ]
+    for uid in expired:
+        del _research_timers[uid]
+
 def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
+    cleanup_research_timers()
     """Запустить исследование с таймером (случайное время если не указано)"""
     # Если время не указано - выбираем случайное
     if time_sec is None:
@@ -1808,7 +1820,6 @@ def handle_combat_flee(player, vk, user_id: int):
             keyboard=create_combat_keyboard().get_keyboard(),
             random_id=0
         )
-
 
 def _handle_victory(player, combat, user_id: int) -> str:
     """Обработка победы над врагом"""
