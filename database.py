@@ -1825,6 +1825,50 @@ def get_random_trash(count: int = 3) -> list[dict]:
     return random.sample(trash, min(count, len(trash))) if trash else []
 
 
+def get_shells_info(vk_id: int) -> dict:
+    """Получить информацию о гильзах игрока"""
+    user_data = get_user_by_vk(vk_id)
+    if not user_data:
+        return {'current': 0, 'capacity': 0, 'equipped_bag': None}
+
+    shells = user_data.get('shells', 0)
+    equipped_bag = user_data.get('equipped_shells_bag')
+
+    capacity = 0
+    if equipped_bag:
+        bag_item = get_item_by_name(equipped_bag)
+        if bag_item:
+            capacity = bag_item.get('backpack_bonus', 0)
+
+    return {
+        'current': shells,
+        'capacity': capacity,
+        'equipped_bag': equipped_bag
+    }
+
+
+def get_user_shells(vk_id: int) -> int:
+    """Получить текущее количество гильз"""
+    info = get_shells_info(vk_id)
+    return info['current']
+
+
+def remove_shells(vk_id: int, quantity: int) -> bool:
+    """Удалить гильзы у игрока"""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return False
+
+        cursor.execute("""
+            UPDATE users SET shells = GREATEST(0, shells - %s)
+            WHERE id = %s AND shells >= %s
+        """, (quantity, user['id'], quantity))
+
+        return cursor.rowcount > 0
+
+
 def get_loot_from_human(player_luck: int = 5) -> list[dict]:
     import random
     _, by_cat, _ = _get_cached_items()
@@ -1959,16 +2003,158 @@ def get_equipped_artifacts(vk_id: int) -> list:
 def get_artifact_bonuses(vk_id: int) -> dict:
     equipped = get_equipped_artifacts(vk_id)
     bonuses = {
-        "defense": 0, "defense_fire": 0, "energy": 0, "radiation": 0,
-        "crit": 0, "find_chance": 0, "dodge": 0, "max_health_bonus": 0,
-        "weight": 0, "fire_immune": False, "full_heal": False,
+        "defense": 0,
+        "defense_fire": 0,
+        "energy": 0,
+        "radiation": 0,
+        "crit": 0,
+        "find_chance": 0,
+        "dodge": 0,
+        "max_health_bonus": 0,
+        "fire_immune": False,
+        "rare_find_chance": 0,
     }
-    for name in equipped:
-        for key, value in ARTIFACT_BONUSES.get(name, {}).items():
-            if key in ("fire_immune", "full_heal"):
-                bonuses[key] = bonuses[key] or value
-            elif key in bonuses:
-                bonuses[key] += value
+
+    for artifact_name in equipped:
+        bonus_data = ARTIFACT_BONUSES.get(artifact_name, {})
+        for key, value in bonus_data.items():
+            if key in bonuses:
+                if isinstance(value, bool):
+                    bonuses[key] = bonuses[key] or value
+                else:
+                    bonuses[key] += value
+
     return bonuses
 
 
+def roll_artifact_from_anomaly(anomaly_type: str, luck: int, detector_bonus: int) -> dict | None:
+    """Попытаться получить артефакт из аномалии с броском гильзы"""
+    import random
+    from anomalies import ANOMALIES
+
+    if anomaly_type not in ANOMALIES:
+        return None
+
+    anomaly = ANOMALIES[anomaly_type]
+    artifacts_list = anomaly.get("artifacts", [])
+
+    if not artifacts_list:
+        return None
+
+    # Базовый шанс успеха с детектором
+    base_chance = anomaly.get("success_chance_with_detector", 50)
+
+    # Бонус от удачи и детектора
+    total_chance = base_chance + (luck * 2) + detector_bonus
+    total_chance = min(95, total_chance)  # Максимум 95%
+
+    if random.randint(1, 100) > total_chance:
+        return None
+
+    # Выбираем случайный артефакт из списка
+    artifact_name = random.choice(artifacts_list)
+
+    # Получаем данные об артефакте из БД
+    artifact = get_item_by_name(artifact_name)
+    if artifact:
+        return {
+            'name': artifact_name,
+            'rarity': artifact.get('rarity', 'common')
+        }
+
+    return None
+
+
+def equip_shells_bag(vk_id: int, bag_name: str) -> dict:
+    """Надеть мешочек для гильз"""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {'success': False, 'message': 'Пользователь не найден'}
+
+        user_id = user['id']
+
+        # Проверяем, есть ли мешочек в инвентаре
+        cursor.execute("""
+            SELECT ui.quantity, i.name 
+            FROM user_inventory ui
+            JOIN items i ON ui.item_id = i.id
+            WHERE ui.user_id = %s AND i.name = %s AND ui.quantity > 0
+            AND i.category = 'shells_bag'
+        """, (user_id, bag_name))
+
+        item = cursor.fetchone()
+        if not item:
+            return {'success': False, 'message': f'Мешочек "{bag_name}" не найден в инвентаре'}
+
+        # Надеваем в слот shells_bag
+        cursor.execute("""
+            INSERT INTO user_equipment (user_id, slot, item_name)
+            VALUES (%s, 'shells_bag', %s)
+            ON CONFLICT (user_id, slot) DO UPDATE SET item_name = EXCLUDED.item_name
+        """, (user_id, bag_name))
+
+        # Получаем вместимость мешочка
+        capacity = item.get('backpack_bonus', 0)
+
+        # Обнуляем гильзы при смене мешочка (если в новом меньше вместимость)
+        cursor.execute("SELECT shells FROM users WHERE id = %s", (user_id,))
+        current_shells = cursor.fetchone()['shells']
+        if current_shells > capacity:
+            cursor.execute("UPDATE users SET shells = %s WHERE id = %s", (capacity, user_id))
+
+        return {
+            'success': True,
+            'message': f'Надет мешочек: {bag_name} (вместимость: {capacity} гильз)'
+        }
+
+
+def unequip_shells_bag(vk_id: int) -> dict:
+    """Снять мешочек для гильз"""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {'success': False, 'message': 'Пользователь не найден'}
+
+        user_id = user['id']
+
+        # Снимаем мешочек
+        cursor.execute("""
+            DELETE FROM user_equipment 
+            WHERE user_id = %s AND slot = 'shells_bag'
+        """, (user_id,))
+
+        # Обнуляем гильзы при снятии мешочка
+        cursor.execute("""
+            UPDATE users SET shells = 0 WHERE id = %s
+        """, (user_id,))
+
+        return {'success': True, 'message': 'Мешочек для гильз снят. Гильзы потеряны.'}
+
+
+# ---------------------------------------------------------------------------
+# Инициализация БД
+# ---------------------------------------------------------------------------
+
+def init_db():
+    """Инициализировать базу данных: создать таблицы и заполнить справочники."""
+    logger.info("Инициализация базы данных...")
+
+    _create_tables()
+    _migrate_old_equipment()
+    _seed_items()
+    _seed_npcs()
+    _seed_game_settings()
+
+    # Сброс кэша предметов после инициализации
+    _reset_items_cache()
+
+    logger.info("База данных успешно инициализирована")
+
+
+if __name__ == "__main__":
+    # Тестовый запуск для проверки БД
+    init_db()
+    print("База данных готова к работе!")
