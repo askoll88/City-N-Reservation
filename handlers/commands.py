@@ -377,7 +377,15 @@ def handle_trade_commands(player, vk, user_id: int, text: str):
         from handlers.keyboards import create_blackmarket_keyboard
         vk.messages.send(
             user_id=user_id,
-            message="👤 <b>Торговец:</b>\n\n«Рад тебя видеть, сталкер! Вот, выбирай:\n\n🔮 Артефакты — редкие аномальные образования\n🔫 Оружие\n🛡️ Броня\n🎒 Рюкзаки\n💰 Продать артефакты — избавься от лишнего»",
+            message=(
+                "👤 <b>Торговец:</b>\n\n«Рад тебя видеть, сталкер! Вот, выбирай:\n\n"
+                "🔮 Артефакты — редкие аномальные образования\n"
+                "🔫 Оружие\n"
+                "🛡️ Броня\n"
+                "🎒 Рюкзаки\n"
+                "💰 Продать артефакты — избавься от лишнего\n"
+                "📈 Рынок игроков — торговля между сталкерами через эскроу»"
+            ),
             keyboard=create_blackmarket_keyboard().get_keyboard(),
             random_id=0
         )
@@ -422,6 +430,55 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
 
     from handlers.inventory import show_artifact_shop, show_sell_artifacts, show_soldier_weapons, show_soldier_armor
     from handlers.keyboards import create_blackmarket_keyboard
+    from handlers.market import (
+        show_market_menu,
+        show_market_listings,
+        show_my_market_listings,
+        show_my_market_transactions,
+        handle_market_create_listing,
+        handle_market_buy_listing,
+        handle_market_cancel_listing,
+    )
+
+    # Команды P2P рынка (парсим первыми, чтобы не перехватились обычным "купить ...")
+    if handle_market_create_listing(player, vk, user_id, text):
+        return True
+    if handle_market_buy_listing(player, vk, user_id, text):
+        return True
+    if handle_market_cancel_listing(player, vk, user_id, text):
+        return True
+
+    if text in ['рынок игроков', 'рынок', 'барахолка', 'рынок показать']:
+        show_market_menu(player, vk, user_id)
+        return True
+
+    if text in ['мои лоты', 'мои лот']:
+        show_my_market_listings(player, vk, user_id)
+        return True
+
+    if text in ['мои сделки', 'сделки']:
+        show_my_market_transactions(player, vk, user_id)
+        return True
+
+    if text in ['рынок оружие', 'рынок оружия']:
+        show_market_listings(player, vk, user_id, category='weapons')
+        return True
+
+    if text in ['рынок броня', 'рынок брони']:
+        show_market_listings(player, vk, user_id, category='armor')
+        return True
+
+    if text in ['рынок артефакты', 'рынок артефактов']:
+        show_market_listings(player, vk, user_id, category='artifacts')
+        return True
+
+    if text in ['рынок медицина', 'рынок лекарства']:
+        show_market_listings(player, vk, user_id, category='meds')
+        return True
+
+    if text in ['рынок еда', 'рынок энергетики']:
+        show_market_listings(player, vk, user_id, category='food')
+        return True
 
     # Артефакты - меню
     if text in ['артефакты', 'артефакт', 'артефакты купить', 'купить артефакты']:

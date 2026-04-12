@@ -13,9 +13,11 @@ PostgreSQL с пулом соединений, нормальной схемой
 """
 
 import logging
+import math
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime
 
 import psycopg2
 from psycopg2 import pool, OperationalError, DatabaseError
@@ -211,6 +213,44 @@ def init_db():
             )
         """)
 
+        # -- market_listings ------------------------------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS market_listings (
+                id              SERIAL PRIMARY KEY,
+                seller_vk_id    BIGINT      NOT NULL,
+                buyer_vk_id     BIGINT,
+                item_id         INTEGER     NOT NULL REFERENCES items(id) ON DELETE RESTRICT,
+                item_name       VARCHAR(100) NOT NULL,
+                quantity        INTEGER     NOT NULL CHECK (quantity > 0),
+                price_per_item  INTEGER     NOT NULL CHECK (price_per_item > 0),
+                listing_fee     INTEGER     NOT NULL DEFAULT 0,
+                sale_fee        INTEGER     NOT NULL DEFAULT 0,
+                status          VARCHAR(20) NOT NULL DEFAULT 'active',
+                created_at      TIMESTAMP   NOT NULL DEFAULT NOW(),
+                expires_at      TIMESTAMP   NOT NULL,
+                completed_at    TIMESTAMP,
+                cancelled_at    TIMESTAMP,
+                expired_at      TIMESTAMP
+            )
+        """)
+
+        # -- market_transactions -------------------------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS market_transactions (
+                id              SERIAL PRIMARY KEY,
+                listing_id      INTEGER     NOT NULL REFERENCES market_listings(id) ON DELETE RESTRICT,
+                seller_vk_id    BIGINT      NOT NULL,
+                buyer_vk_id     BIGINT      NOT NULL,
+                item_id         INTEGER     NOT NULL REFERENCES items(id) ON DELETE RESTRICT,
+                item_name       VARCHAR(100) NOT NULL,
+                quantity        INTEGER     NOT NULL,
+                price_per_item  INTEGER     NOT NULL,
+                total_price     INTEGER     NOT NULL,
+                sale_fee        INTEGER     NOT NULL,
+                created_at      TIMESTAMP   NOT NULL DEFAULT NOW()
+            )
+        """)
+
         # -- Индексы --------------------------------------------------------
         for ddl in [
             "CREATE INDEX IF NOT EXISTS idx_users_vk_id          ON users(vk_id)",
@@ -218,6 +258,11 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_user_inventory_item   ON user_inventory(item_id)",
             "CREATE INDEX IF NOT EXISTS idx_items_category        ON items(category)",
             "CREATE INDEX IF NOT EXISTS idx_user_equipment_user   ON user_equipment(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status)",
+            "CREATE INDEX IF NOT EXISTS idx_market_listings_exp    ON market_listings(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_market_listings_seller ON market_listings(seller_vk_id)",
+            "CREATE INDEX IF NOT EXISTS idx_market_trx_buyer       ON market_transactions(buyer_vk_id)",
+            "CREATE INDEX IF NOT EXISTS idx_market_trx_seller      ON market_transactions(seller_vk_id)",
         ]:
             cursor.execute(ddl)
 
@@ -1060,6 +1105,397 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0) -
         "sell_price": sell_price,
         "remaining_money": new_balance,
     }
+
+
+# ---------------------------------------------------------------------------
+# P2P Рынок игроков
+# ---------------------------------------------------------------------------
+
+_MARKET_TRADABLE_CATEGORIES = frozenset({
+    "weapons",
+    "rare_weapons",
+    "armor",
+    "backpacks",
+    "artifacts",
+    "meds",
+    "food",
+})
+
+
+def _calc_fee(total: int, percent: float) -> int:
+    if total <= 0 or percent <= 0:
+        return 0
+    return max(1, math.ceil(total * (percent / 100)))
+
+
+def _get_market_price_bounds(item: dict) -> tuple[int, int]:
+    rarity = (item.get("rarity") or "common").lower()
+    base_price = int(item.get("price") or 0)
+    if base_price <= 0:
+        return 1, 10**9
+
+    if rarity == "rare":
+        min_mult = config.MARKET_PRICE_MIN_MULT_RARE
+        max_mult = config.MARKET_PRICE_MAX_MULT_RARE
+    elif rarity == "unique":
+        min_mult = config.MARKET_PRICE_MIN_MULT_UNIQUE
+        max_mult = config.MARKET_PRICE_MAX_MULT_UNIQUE
+    elif rarity == "legendary":
+        min_mult = config.MARKET_PRICE_MIN_MULT_LEGENDARY
+        max_mult = config.MARKET_PRICE_MAX_MULT_LEGENDARY
+    else:
+        min_mult = config.MARKET_PRICE_MIN_MULT_COMMON
+        max_mult = config.MARKET_PRICE_MAX_MULT_COMMON
+
+    min_price = max(1, int(base_price * min_mult))
+    max_price = max(min_price, int(base_price * max_mult))
+    return min_price, max_price
+
+
+def _is_market_item_tradable(item: dict) -> bool:
+    category = (item.get("category") or "").lower()
+    return category in _MARKET_TRADABLE_CATEGORIES
+
+
+def _expire_market_listings_tx(cursor, limit: int = 200) -> int:
+    """
+    Закрыть просроченные лоты и вернуть предметы продавцам.
+    Вызывать внутри уже открытой транзакции.
+    """
+    cursor.execute("""
+        SELECT id, seller_vk_id, item_id, quantity
+        FROM market_listings
+        WHERE status = 'active' AND expires_at <= NOW()
+        ORDER BY expires_at ASC
+        LIMIT %s
+        FOR UPDATE SKIP LOCKED
+    """, (limit,))
+    expired_rows = cursor.fetchall()
+    if not expired_rows:
+        return 0
+
+    for row in expired_rows:
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (row["seller_vk_id"],))
+        seller = cursor.fetchone()
+        if seller:
+            cursor.execute("""
+                INSERT INTO user_inventory (user_id, item_id, quantity)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, item_id)
+                DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+            """, (seller["id"], row["item_id"], row["quantity"]))
+
+    listing_ids = [row["id"] for row in expired_rows]
+    cursor.execute("""
+        UPDATE market_listings
+        SET status = 'expired', expired_at = NOW()
+        WHERE id = ANY(%s)
+    """, (listing_ids,))
+    return len(expired_rows)
+
+
+def expire_market_listings(limit: int = 200) -> int:
+    with db_cursor() as (cursor, _):
+        return _expire_market_listings_tx(cursor, limit=limit)
+
+
+def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quantity: int = 1) -> dict:
+    if quantity <= 0:
+        return {"success": False, "message": "Количество должно быть больше нуля."}
+    if price_per_item <= 0:
+        return {"success": False, "message": "Цена должна быть больше нуля."}
+
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+
+        cursor.execute("SELECT id, level, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        seller = cursor.fetchone()
+        if not seller:
+            return {"success": False, "message": "Пользователь не найден."}
+        if seller["level"] < config.MARKET_MIN_LEVEL:
+            return {
+                "success": False,
+                "message": f"Рынок доступен с {config.MARKET_MIN_LEVEL} уровня.",
+            }
+
+        cursor.execute("""
+            SELECT COUNT(*) AS cnt
+            FROM market_listings
+            WHERE seller_vk_id = %s AND status = 'active' AND expires_at > NOW()
+        """, (vk_id,))
+        active_lots = int(cursor.fetchone()["cnt"])
+        if active_lots >= config.MARKET_MAX_LISTINGS_PER_USER:
+            return {
+                "success": False,
+                "message": f"Достигнут лимит активных лотов ({config.MARKET_MAX_LISTINGS_PER_USER}).",
+            }
+
+        cursor.execute("SELECT * FROM items WHERE LOWER(name) = LOWER(%s)", (item_name,))
+        item = cursor.fetchone()
+        if not item:
+            return {"success": False, "message": f"Предмет '{item_name}' не найден."}
+        item = dict(item)
+        if not _is_market_item_tradable(item):
+            return {"success": False, "message": "Этот предмет нельзя выставить на рынок."}
+
+        min_price, max_price = _get_market_price_bounds(item)
+        if price_per_item < min_price or price_per_item > max_price:
+            return {
+                "success": False,
+                "message": f"Цена вне диапазона: {min_price}..{max_price} руб. за шт.",
+            }
+
+        cursor.execute("""
+            SELECT quantity
+            FROM user_inventory
+            WHERE user_id = %s AND item_id = %s
+            FOR UPDATE
+        """, (seller["id"], item["id"]))
+        inv = cursor.fetchone()
+        if not inv or inv["quantity"] < quantity:
+            have = inv["quantity"] if inv else 0
+            return {
+                "success": False,
+                "message": f"Недостаточно предметов. У тебя: {have}, нужно: {quantity}.",
+            }
+
+        total_price = price_per_item * quantity
+        listing_fee = _calc_fee(total_price, config.MARKET_LISTING_FEE_PCT)
+        if seller["money"] < listing_fee:
+            return {
+                "success": False,
+                "message": f"Не хватает денег на комиссию выставления ({listing_fee} руб.).",
+            }
+
+        cursor.execute("UPDATE users SET money = money - %s WHERE vk_id = %s", (listing_fee, vk_id))
+        cursor.execute("""
+            UPDATE user_inventory
+            SET quantity = quantity - %s
+            WHERE user_id = %s AND item_id = %s
+        """, (quantity, seller["id"], item["id"]))
+        cursor.execute("""
+            DELETE FROM user_inventory
+            WHERE user_id = %s AND item_id = %s AND quantity <= 0
+        """, (seller["id"], item["id"]))
+
+        cursor.execute("""
+            INSERT INTO market_listings (
+                seller_vk_id, item_id, item_name, quantity, price_per_item,
+                listing_fee, expires_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s,
+                NOW() + (%s * INTERVAL '1 hour')
+            )
+            RETURNING id, expires_at
+        """, (
+            vk_id, item["id"], item["name"], quantity, price_per_item,
+            listing_fee, config.MARKET_LISTING_TTL_HOURS
+        ))
+        new_lot = cursor.fetchone()
+
+    return {
+        "success": True,
+        "listing_id": new_lot["id"],
+        "listing_fee": listing_fee,
+        "expires_at": new_lot["expires_at"],
+        "message": (
+            f"Лот #{new_lot['id']} выставлен: {item['name']} x{quantity} "
+            f"по {price_per_item} руб. Комиссия: {listing_fee} руб."
+        ),
+    }
+
+
+def buy_market_listing(vk_id: int, listing_id: int) -> dict:
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+
+        cursor.execute("SELECT id, level FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        buyer = cursor.fetchone()
+        if not buyer:
+            return {"success": False, "message": "Покупатель не найден."}
+        if buyer["level"] < config.MARKET_MIN_LEVEL:
+            return {
+                "success": False,
+                "message": f"Рынок доступен с {config.MARKET_MIN_LEVEL} уровня.",
+            }
+
+        cursor.execute("""
+            SELECT *
+            FROM market_listings
+            WHERE id = %s
+            FOR UPDATE
+        """, (listing_id,))
+        lot = cursor.fetchone()
+        if not lot:
+            return {"success": False, "message": "Лот не найден."}
+        if lot["status"] != "active" or lot["expires_at"] <= datetime.now():
+            return {"success": False, "message": "Лот уже недоступен."}
+        if lot["seller_vk_id"] == vk_id:
+            return {"success": False, "message": "Нельзя купить свой лот."}
+
+        total_price = lot["price_per_item"] * lot["quantity"]
+        sale_fee = _calc_fee(total_price, config.MARKET_SALE_FEE_PCT)
+        seller_payout = max(0, total_price - sale_fee)
+
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (lot["seller_vk_id"],))
+        seller = cursor.fetchone()
+        if not seller:
+            return {"success": False, "message": "Продавец не найден."}
+
+        cursor.execute("""
+            UPDATE users
+            SET money = money - %s
+            WHERE vk_id = %s AND money >= %s
+            RETURNING money
+        """, (total_price, vk_id, total_price))
+        buyer_balance = cursor.fetchone()
+        if not buyer_balance:
+            return {"success": False, "message": f"Не хватает денег. Нужно {total_price} руб."}
+
+        cursor.execute("""
+            UPDATE users
+            SET money = money + %s
+            WHERE vk_id = %s
+        """, (seller_payout, lot["seller_vk_id"]))
+
+        cursor.execute("""
+            INSERT INTO user_inventory (user_id, item_id, quantity)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+        """, (buyer["id"], lot["item_id"], lot["quantity"]))
+
+        cursor.execute("""
+            UPDATE market_listings
+            SET status = 'sold',
+                buyer_vk_id = %s,
+                sale_fee = %s,
+                completed_at = NOW()
+            WHERE id = %s
+        """, (vk_id, sale_fee, listing_id))
+
+        cursor.execute("""
+            INSERT INTO market_transactions (
+                listing_id, seller_vk_id, buyer_vk_id, item_id, item_name,
+                quantity, price_per_item, total_price, sale_fee
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            listing_id, lot["seller_vk_id"], vk_id, lot["item_id"], lot["item_name"],
+            lot["quantity"], lot["price_per_item"], total_price, sale_fee
+        ))
+
+    return {
+        "success": True,
+        "message": (
+            f"Куплено: {lot['item_name']} x{lot['quantity']} за {total_price} руб.\n"
+            f"Комиссия рынка (с продавца): {sale_fee} руб."
+        ),
+    }
+
+
+def cancel_market_listing(vk_id: int, listing_id: int) -> dict:
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+
+        cursor.execute("""
+            SELECT *
+            FROM market_listings
+            WHERE id = %s AND seller_vk_id = %s
+            FOR UPDATE
+        """, (listing_id, vk_id))
+        lot = cursor.fetchone()
+        if not lot:
+            return {"success": False, "message": "Лот не найден."}
+        if lot["status"] != "active":
+            return {"success": False, "message": "Лот уже неактивен."}
+
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        seller = cursor.fetchone()
+        if not seller:
+            return {"success": False, "message": "Продавец не найден."}
+
+        cursor.execute("""
+            INSERT INTO user_inventory (user_id, item_id, quantity)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+        """, (seller["id"], lot["item_id"], lot["quantity"]))
+
+        cursor.execute("""
+            UPDATE market_listings
+            SET status = 'cancelled', cancelled_at = NOW()
+            WHERE id = %s
+        """, (listing_id,))
+
+    return {
+        "success": True,
+        "message": f"Лот #{listing_id} снят. Предмет возвращён в инвентарь.",
+    }
+
+
+def get_market_listings(limit: int = 10, offset: int = 0, category: str | None = None) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+        if category:
+            cursor.execute("""
+                SELECT l.id, l.seller_vk_id, l.item_name, l.quantity, l.price_per_item,
+                       (l.quantity * l.price_per_item) AS total_price,
+                       l.expires_at, i.category, i.rarity
+                FROM market_listings l
+                JOIN items i ON i.id = l.item_id
+                WHERE l.status = 'active'
+                  AND l.expires_at > NOW()
+                  AND i.category = %s
+                ORDER BY l.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (category, limit, offset))
+        else:
+            cursor.execute("""
+                SELECT l.id, l.seller_vk_id, l.item_name, l.quantity, l.price_per_item,
+                       (l.quantity * l.price_per_item) AS total_price,
+                       l.expires_at, i.category, i.rarity
+                FROM market_listings l
+                JOIN items i ON i.id = l.item_id
+                WHERE l.status = 'active'
+                  AND l.expires_at > NOW()
+                ORDER BY l.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (limit, offset))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_market_user_listings(vk_id: int, status: str = "active", limit: int = 20) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+        cursor.execute("""
+            SELECT id, item_name, quantity, price_per_item,
+                   (quantity * price_per_item) AS total_price,
+                   status, created_at, expires_at, completed_at, cancelled_at
+            FROM market_listings
+            WHERE seller_vk_id = %s
+              AND (%s = 'all' OR status = %s)
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (vk_id, status, status, limit))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_market_user_transactions(vk_id: int, limit: int = 20) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT id, listing_id, seller_vk_id, buyer_vk_id, item_name,
+                   quantity, price_per_item, total_price, sale_fee, created_at
+            FROM market_transactions
+            WHERE seller_vk_id = %s OR buyer_vk_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (vk_id, vk_id, limit))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------

@@ -179,6 +179,25 @@ def create_blackmarket_keyboard():
     keyboard.add_button("Броня", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("Рюкзаки", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Рынок игроков", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Мои лоты", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_player_market_keyboard():
+    """Клавиатура P2P рынка игроков"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Рынок показать", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Мои лоты", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Рынок оружие", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Рынок броня", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("Рынок артефакты", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Мои сделки", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
