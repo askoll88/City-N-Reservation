@@ -23,6 +23,8 @@ DB_PORT = os.getenv('DB_PORT', '5432')
 DB_NAME = os.getenv('DB_NAME', 'stalker_game')
 DB_USER = os.getenv('DB_USER', 'postgres')
 DB_PASSWORD = os.getenv('DB_PASSWORD', '')
+DB_POOL_MIN = int(os.getenv('DB_POOL_MIN', '2'))
+DB_POOL_MAX = int(os.getenv('DB_POOL_MAX', '30'))
 
 # === Настройки игры ===
 START_MONEY = 10000
@@ -51,6 +53,12 @@ ARTIFACT_SLOT_COST = 10000
 # === Кэш ===
 CACHE_TTL = 60  # секунд
 MAX_CACHED_PLAYERS = 100
+ENABLE_PLAYER_CACHE = os.getenv('ENABLE_PLAYER_CACHE', 'false').lower() == 'true'
+
+# === Обработка апдейтов ===
+BOT_WORKERS = int(os.getenv('BOT_WORKERS', '8'))
+BOT_QUEUE_MAX = int(os.getenv('BOT_QUEUE_MAX', '2000'))
+BOT_QUEUE_PUT_TIMEOUT = float(os.getenv('BOT_QUEUE_PUT_TIMEOUT', '0.2'))
 
 # === Retry для БД ===
 DB_MAX_RETRIES = 3
@@ -58,4 +66,3 @@ DB_RETRY_DELAY = 1  # секунд
 
 # === Прочее ===
 DEBUG = os.getenv('DEBUG', '').lower() == 'true'
-

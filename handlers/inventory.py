@@ -1,6 +1,8 @@
 """
 Обработчики инвентаря
 """
+import threading
+
 import database
 from constants import InventorySection
 
@@ -935,20 +937,33 @@ def handle_drop_item_by_index(player, index: int, vk, user_id: int):
 
 # Кэш списков товаров для покупки по номеру
 _shop_cache = {}  # {user_id: {'weapons': [...], 'armor': [...]}}
+_shop_cache_lock = threading.RLock()
+
+
+def get_shop_cache_data(user_id: int) -> dict:
+    """Потокобезопасно получить кэш магазина пользователя."""
+    with _shop_cache_lock:
+        return dict(_shop_cache.get(user_id, {}))
+
+
+def set_shop_cache_data(user_id: int, data: dict):
+    """Потокобезопасно установить кэш магазина пользователя."""
+    with _shop_cache_lock:
+        _shop_cache[user_id] = dict(data)
 
 
 def _get_shop_items_by_number(user_id: int, category: str, number: int) -> str | None:
     """Получить название предмета по номеру в магазине"""
-    global _shop_cache
+    with _shop_cache_lock:
+        if user_id not in _shop_cache:
+            _shop_cache[user_id] = {}
 
-    if user_id not in _shop_cache:
-        _shop_cache[user_id] = {}
+        if category not in _shop_cache[user_id]:
+            items = database.get_items_by_category(category)
+            _shop_cache[user_id][category] = items
 
-    if category not in _shop_cache[user_id]:
-        items = database.get_items_by_category(category)
-        _shop_cache[user_id][category] = items
+        items = _shop_cache[user_id].get(category, [])
 
-    items = _shop_cache[user_id].get(category, [])
     if 1 <= number <= len(items):
         return items[number - 1]['name']
     return None
@@ -956,11 +971,11 @@ def _get_shop_items_by_number(user_id: int, category: str, number: int) -> str |
 
 def clear_shop_cache(user_id: int = None):
     """Очистить кэш магазина"""
-    global _shop_cache
-    if user_id:
-        _shop_cache.pop(user_id, None)
-    else:
-        _shop_cache.clear()
+    with _shop_cache_lock:
+        if user_id:
+            _shop_cache.pop(user_id, None)
+        else:
+            _shop_cache.clear()
 
 
 def show_soldier_weapons(player, vk, user_id: int):
@@ -999,7 +1014,7 @@ def show_soldier_weapons(player, vk, user_id: int):
         # Ограничиваем до 10 предметов (VK лимит)
         weapons = all_weapons[:10]
         logger.info(f"[SOLDIER_SHOP] Загружено оружия: {len(weapons)} из {len(all_weapons)}")
-        _shop_cache[user_id] = {'weapons': weapons}
+        set_shop_cache_data(user_id, {'weapons': weapons})
 
         if not weapons:
             vk.messages.send(
@@ -1078,7 +1093,7 @@ def show_soldier_armor(player, vk, user_id: int):
         # Ограничиваем до 10 предметов (VK лимит)
         armor_list = all_armor[:10]
         logger.info(f"[SOLDIER_SHOP] Загружено брони: {len(armor_list)} из {len(all_armor)}")
-        _shop_cache[user_id] = {'armor': armor_list}
+        set_shop_cache_data(user_id, {'armor': armor_list})
 
         if not armor_list:
             vk.messages.send(
@@ -1171,7 +1186,7 @@ def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
             title = "ЭНЕРГЕТИКИ"
 
         logger.info(f"[SCIENTIST_SHOP] Категория consumables: {len(items)} предметов")
-        _shop_cache[user_id] = {'scientist': items, 'category': category}
+        set_shop_cache_data(user_id, {'scientist': items, 'category': category})
 
         if not items:
             vk.messages.send(
@@ -1260,7 +1275,7 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
             )
             return
 
-        _shop_cache[user_id] = {'artifacts': items, 'rarity': rarity}
+        set_shop_cache_data(user_id, {'artifacts': items, 'rarity': rarity})
 
         msg = f"🔮 <b>АРТЕФАКТЫ — {title}</b>\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
@@ -1329,7 +1344,7 @@ def show_sell_artifacts(player, vk, user_id: int):
             return
 
         # Сохраняем в кэш для продажи по номеру
-        _shop_cache[user_id] = {'sell_artifacts': artifacts}
+        set_shop_cache_data(user_id, {'sell_artifacts': artifacts})
 
         msg = "💰 <b>ПРОДАЖА АРТЕФАКТОВ</b>\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
@@ -1377,7 +1392,7 @@ def handle_sell_artifact_by_number(player, vk, user_id: int, item_num: str) -> b
     logger = logging.getLogger(__name__)
 
     try:
-        shop_data = _shop_cache.get(user_id, {})
+        shop_data = get_shop_cache_data(user_id)
         artifacts = shop_data.get('sell_artifacts', [])
 
         if not artifacts:
@@ -1480,7 +1495,7 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
 
     try:
         # Ищем артефакт в кэше магазина
-        shop_data = _shop_cache.get(user_id, {})
+        shop_data = get_shop_cache_data(user_id)
         artifacts = shop_data.get('artifacts', [])
 
         artifact = None
@@ -1587,4 +1602,3 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
             random_id=0
         )
         return True
-

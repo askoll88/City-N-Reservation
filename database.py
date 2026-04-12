@@ -40,8 +40,8 @@ def get_connection_pool():
         with _pool_lock:
             if _connection_pool is None:
                 _connection_pool = pool.ThreadedConnectionPool(
-                    minconn=2,
-                    maxconn=10,
+                    minconn=config.DB_POOL_MIN,
+                    maxconn=config.DB_POOL_MAX,
                     host=config.DB_HOST,
                     port=config.DB_PORT,
                     dbname=config.DB_NAME,

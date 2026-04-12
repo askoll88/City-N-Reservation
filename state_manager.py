@@ -6,11 +6,59 @@ import threading
 import time
 from typing import Any
 
+class LockedDict:
+    """Потокобезопасный dict с минимальным API, совместимым с текущим кодом."""
+
+    def __init__(self):
+        self._data = {}
+        self._lock = threading.RLock()
+
+    def __contains__(self, key):
+        with self._lock:
+            return key in self._data
+
+    def __getitem__(self, key):
+        with self._lock:
+            return self._data[key]
+
+    def __setitem__(self, key, value):
+        with self._lock:
+            self._data[key] = value
+
+    def __delitem__(self, key):
+        with self._lock:
+            del self._data[key]
+
+    def get(self, key, default=None):
+        with self._lock:
+            return self._data.get(key, default)
+
+    def pop(self, key, default=None):
+        with self._lock:
+            return self._data.pop(key, default)
+
+    def clear(self):
+        with self._lock:
+            self._data.clear()
+
+    def keys(self):
+        with self._lock:
+            return list(self._data.keys())
+
+    def items(self):
+        with self._lock:
+            return list(self._data.items())
+
+    def __len__(self):
+        with self._lock:
+            return len(self._data)
+
+
 # === Глобальное состояние ===
-_combat_state = {}  # {user_id: combat_data}
-_dialog_state = {}  # {user_id: {"npc": str, "stage": str}}
-_research_state = {}  # {user_id: research_data}
-_anomaly_state = {}  # {user_id: anomaly_data}
+_combat_state = LockedDict()  # {user_id: combat_data}
+_dialog_state = LockedDict()  # {user_id: {"npc": str, "stage": str}}
+_research_state = LockedDict()  # {user_id: research_data}
+_anomaly_state = LockedDict()  # {user_id: anomaly_data}
 
 # Кэш игроков
 _players_cache = {}

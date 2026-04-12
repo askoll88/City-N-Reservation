@@ -3,7 +3,9 @@ VK S.T.A.L.K.E.R. Бот - Главный файл
 """
 import logging
 import os
+import queue
 import sys
+import threading
 import traceback
 
 import vk_api
@@ -68,15 +70,30 @@ from handlers.keyboards import (
     create_artifact_shop_keyboard,
 )
 
+_user_locks = {}
+_user_locks_guard = threading.Lock()
+
+
+def _get_user_lock(user_id: int) -> threading.Lock:
+    """Получить lock пользователя для последовательной обработки его апдейтов."""
+    with _user_locks_guard:
+        lock = _user_locks.get(user_id)
+        if lock is None:
+            lock = threading.Lock()
+            _user_locks[user_id] = lock
+        return lock
+
 
 def get_player(user_id: int):
     """Получить игрока (из кэша или создать)"""
-    player = get_cached_player(user_id)
-    if player:
-        return player
+    if config.ENABLE_PLAYER_CACHE:
+        player = get_cached_player(user_id)
+        if player:
+            return player
 
     player = player_module.Player(user_id)
-    cache_player(user_id, player)
+    if config.ENABLE_PLAYER_CACHE:
+        cache_player(user_id, player)
     return player
 
 
@@ -277,8 +294,8 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
                 return True
 
         # Покупка артефактов на Черном рынке по названию
-        from handlers.inventory import _shop_cache
-        shop_data = _shop_cache.get(user_id, {})
+        from handlers.inventory import get_shop_cache_data
+        shop_data = get_shop_cache_data(user_id)
         if 'artifacts' in shop_data:
             from handlers.inventory import handle_buy_artifact
             handle_buy_artifact(player, item_name, vk, user_id)
@@ -292,8 +309,8 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         item_name = text.replace('продать ', '')
 
         # Продажа артефактов по номеру
-        from handlers.inventory import _shop_cache
-        shop_data = _shop_cache.get(user_id, {})
+        from handlers.inventory import get_shop_cache_data
+        shop_data = get_shop_cache_data(user_id)
         if 'sell_artifacts' in shop_data and item_name.isdigit():
             from handlers.inventory import handle_sell_artifact_by_number
             if handle_sell_artifact_by_number(player, vk, user_id, item_name):
@@ -390,12 +407,12 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
 
 def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
     """Обработка покупки по номеру в магазине"""
-    from handlers.inventory import _get_shop_items_by_number, _shop_cache, handle_buy_item
+    from handlers.inventory import _get_shop_items_by_number, get_shop_cache_data, handle_buy_item
 
     dialog_info = get_dialog_info(user_id)
     if not dialog_info:
         # Проверяем кэш магазина артефактов
-        shop_data = _shop_cache.get(user_id, {})
+        shop_data = get_shop_cache_data(user_id)
         if 'artifacts' in shop_data:
             return _handle_buy_artifact_by_number(player, vk, user_id, item_num)
         return False
@@ -420,7 +437,7 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
             return True
 
     # Обработка покупки артефактов по названию
-    shop_data = _shop_cache.get(user_id, {})
+    shop_data = get_shop_cache_data(user_id)
     if 'artifacts' in shop_data:
         return _handle_buy_artifact_by_number(player, vk, user_id, item_num)
 
@@ -429,9 +446,9 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
 
 def _handle_buy_artifact_by_number(player, vk, user_id: int, item_num: str) -> bool:
     """Обработка покупки артефакта по номеру"""
-    from handlers.inventory import _shop_cache, handle_buy_artifact
+    from handlers.inventory import get_shop_cache_data, handle_buy_artifact
 
-    shop_data = _shop_cache.get(user_id, {})
+    shop_data = get_shop_cache_data(user_id)
     artifacts = shop_data.get('artifacts', [])
 
     if not artifacts:
@@ -470,6 +487,83 @@ def _get_unequip_list(player) -> str:
     return msg
 
 
+def _handle_message_error(event, vk, error: Exception):
+    logger.error(f"Ошибка при обработке сообщения: {error}")
+    traceback.print_exc()
+
+    user_id = event.obj.message.get('from_id', 0)
+    if user_id:
+        try:
+            vk.messages.send(
+                user_id=user_id,
+                message="⚠️ Произошла ошибка. Попробуй еще раз.",
+                random_id=0
+            )
+        except Exception:
+            pass
+
+
+def _process_message_event(event, vk):
+    user_id = event.obj.message.get('from_id', 0)
+    if not user_id:
+        return
+
+    lock = _get_user_lock(user_id)
+    with lock:
+        try:
+            handle_message(event, vk)
+        except Exception as e:
+            _handle_message_error(event, vk, e)
+
+
+def _process_callback_event(event, vk):
+    user_id = getattr(event.obj, "user_id", 0)
+    lock = _get_user_lock(user_id) if user_id else None
+
+    try:
+        if lock:
+            lock.acquire()
+
+        payload = event.obj.payload
+
+        if payload and payload.get("command") == "back":
+            player = get_player(user_id)
+            return_location = payload.get("location") or player.previous_location or 'город'
+
+            vk.messages.send(
+                user_id=user_id,
+                message=f"↩️ Возвращаемся в {return_location}...",
+                keyboard=create_location_keyboard(return_location, player.level).get_keyboard(),
+                random_id=0
+            )
+
+            player.current_location_id = return_location
+            database.update_user_location(user_id, return_location)
+
+        vk.messages.send_message_event_answer(
+            event_id=event.obj.event_id,
+            user_id=event.obj.user_id,
+            peer_id=event.obj.peer_id,
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при обработке callback: {e}")
+    finally:
+        if lock and lock.locked():
+            lock.release()
+
+
+def _event_worker(task_queue: "queue.Queue[tuple[str, object]]", vk):
+    while True:
+        kind, event = task_queue.get()
+        try:
+            if kind == "message_new":
+                _process_message_event(event, vk)
+            elif kind == "message_event":
+                _process_callback_event(event, vk)
+        finally:
+            task_queue.task_done()
+
+
 # === Главная функция ===
 def main():
     """Запуск бота"""
@@ -490,7 +584,23 @@ def main():
     vk = vk_session.get_api()
     longpoll = VkBotLongPoll(vk_session, GROUP_ID)
     
-    logger.info("Bot started and ready!")
+    logger.info(
+        "Bot started and ready! workers=%d queue_max=%d player_cache=%s db_pool=%d..%d",
+        config.BOT_WORKERS,
+        config.BOT_QUEUE_MAX,
+        config.ENABLE_PLAYER_CACHE,
+        config.DB_POOL_MIN,
+        config.DB_POOL_MAX,
+    )
+
+    task_queue: "queue.Queue[tuple[str, object]]" = queue.Queue(maxsize=config.BOT_QUEUE_MAX)
+    for idx in range(max(1, config.BOT_WORKERS)):
+        threading.Thread(
+            target=_event_worker,
+            args=(task_queue, vk),
+            name=f"event-worker-{idx + 1}",
+            daemon=True,
+        ).start()
 
     processed_events = set()
     MAX_PROCESSED = 1000
@@ -510,55 +620,31 @@ def main():
                     processed_events.clear()
             
             try:
-                handle_message(event, vk)
-            except Exception as e:
-                logger.error(f"Ошибка при обработке сообщения: {e}")
-                traceback.print_exc()
-
+                task_queue.put(
+                    ("message_new", event),
+                    timeout=config.BOT_QUEUE_PUT_TIMEOUT,
+                )
+            except queue.Full:
+                logger.warning("Очередь обработки заполнена, апдейт пропущен")
                 user_id = event.obj.message.get('from_id', 0)
                 if user_id:
                     try:
                         vk.messages.send(
                             user_id=user_id,
-                            message="⚠️ Произошла ошибка. Попробуй еще раз.",
-                            random_id=0
+                            message="⏳ Бот перегружен. Попробуй через пару секунд.",
+                            random_id=0,
                         )
-                    except:
+                    except Exception:
                         pass
 
         elif event.type == VkBotEventType.MESSAGE_EVENT:
-            # Обработка callback кнопок
             try:
-                user_id = event.obj.user_id
-                payload = event.obj.payload
-
-                if payload and payload.get("command") == "back":
-                    # Обрабатываем "Назад"
-                    player = get_player(user_id)
-
-                    # Используем location из payload или previous_location
-                    return_location = payload.get("location") or player.previous_location or 'город'
-
-                    # Показываем клавиатуру локации
-                    vk.messages.send(
-                        user_id=user_id,
-                        message=f"↩️ Возвращаемся в {return_location}...",
-                        keyboard=create_location_keyboard(return_location, player.level).get_keyboard(),
-                        random_id=0
-                    )
-
-                    # Обновляем текущую локацию
-                    player.current_location_id = return_location
-                    database.update_user_location(user_id, return_location)
-
-                # Отправляем OK ответ
-                vk.messages.send_message_event_answer(
-                    event_id=event.obj.event_id,
-                    user_id=event.obj.user_id,
-                    peer_id=event.obj.peer_id,
+                task_queue.put(
+                    ("message_event", event),
+                    timeout=config.BOT_QUEUE_PUT_TIMEOUT,
                 )
-            except Exception as e:
-                logger.error(f"Ошибка при обработке callback: {e}")
+            except queue.Full:
+                logger.warning("Очередь обработки заполнена, callback пропущен")
 
 
 if __name__ == '__main__':
