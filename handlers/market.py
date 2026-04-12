@@ -30,7 +30,7 @@ def show_market_menu(player, vk, user_id: int):
     vk.messages.send(
         user_id=user_id,
         message=(
-            "📈 <b> РЫНОК СТАЛКЕРОВ </b>\n\n"
+            "📈 РЫНОК СТАЛКЕРОВ \n\n"
             "Здесь сталкеры торгуют между собой через эскроу.\n"
             "Рынок берет комиссию за безопасность сделки.\n\n"
             "Быстрый старт:\n"
@@ -67,7 +67,7 @@ def show_market_listings(player, vk, user_id: int, category: str | None = None):
         )
         return
 
-    lines = ["📈 <b>АКТИВНЫЕ ЛОТЫ</b>\n"]
+    lines = ["📈АКТИВНЫЕ ЛОТЫ\n"]
     for row in listings:
         lines.append(_format_listing(row))
         lines.append("")
@@ -92,7 +92,7 @@ def show_my_market_listings(player, vk, user_id: int):
         )
         return
 
-    lines = ["🧾 <b>МОИ АКТИВНЫЕ ЛОТЫ</b>\n"]
+    lines = ["🧾МОИ АКТИВНЫЕ ЛОТЫ\n"]
     for row in rows:
         lines.append(
             f"#{row['id']} | {row['item_name']} x{row['quantity']} | "
@@ -119,7 +119,7 @@ def show_my_market_transactions(player, vk, user_id: int):
         )
         return
 
-    lines = ["📒 <b>МОИ СДЕЛКИ</b>\n"]
+    lines = ["📒МОИ СДЕЛКИ\n"]
     for row in rows:
         side = "🟢 Покупка" if row["buyer_vk_id"] == user_id else "🔵 Продажа"
         lines.append(

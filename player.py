@@ -562,7 +562,7 @@ class Player:
         passive_bonuses = self._get_passive_bonuses()
         passive_info = ""
         if passive_bonuses and self.player_class:
-            passive_info = "\n🎓 <b>Бонусы класса:</b>\n"
+            passive_info = "\n🎓Бонусы класса:\n"
             bonus_parts = []
             if passive_bonuses.get('dodge'):
                 bonus_parts.append(f"Уклонение: +{passive_bonuses['dodge']}%")

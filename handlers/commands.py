@@ -107,7 +107,7 @@ def handle_navigation(player, vk, user_id: int, text: str):
         if player.level < 25:
             vk.messages.send(
                 user_id=user_id,
-                message=f"🚫 <b>Доступ запрещён!</b>\n\nЧёрный рынок открыт только для сталкеров 25+ уровня.\n\nТвоё текущее положение: {player.level} уровень\n\nПодними уровень, чтобы получить доступ.",
+                message=f"🚫Доступ запрещён!\n\nЧёрный рынок открыт только для сталкеров 25+ уровня.\n\nТвоё текущее положение: {player.level} уровень\n\nПодними уровень, чтобы получить доступ.",
                 random_id=0
             )
             return True
@@ -228,7 +228,7 @@ def handle_research_commands(player, vk, user_id: int, text: str):
         vk.messages.send(
             user_id=user_id,
             message=(
-                f"⏳ <b>ИДЁТ ИССЛЕДОВАНИЕ</b>\n\n"
+                f"⏳ИДЁТ ИССЛЕДОВАНИЕ\n\n"
                 f"⏱️ Осталось: {status.get('remaining', 0)} сек\n"
                 f"📍 Локация: {status.get('location_id', 'unknown')}\n\n"
                 f"Жди результата или напиши 'отмена' для отмены."
@@ -271,7 +271,7 @@ def handle_talk_command(player, vk, user_id: int, text: str):
         npc_names = ", ".join([npc.name for npc in npcs])
         vk.messages.send(
             user_id=user_id,
-            message=f"👥 <b>Выбери, с кем поговорить:</b>\n\n{npc_names}",
+            message=f"👥Выбери, с кем поговорить:\n\n{npc_names}",
             keyboard=create_npc_select_keyboard(location_id).get_keyboard(),
             random_id=0
         )
@@ -327,7 +327,7 @@ def handle_class_commands(player, vk, user_id: int, text: str):
                 class_info = format_class_info(class_id, player.level)
                 vk.messages.send(
                     user_id=user_id,
-                    message=f"🎓 <b>Твой класс:</b> {class_id.upper()}\n\n{class_info}\n\nДля получения класса найди наставника в убежище (дорога → убежище).",
+                    message=f"🎓Твой класс: {class_id.upper()}\n\n{class_info}\n\nДля получения класса найди наставника в убежище (дорога → убежище).",
                     keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                     random_id=0
                 )
@@ -335,7 +335,7 @@ def handle_class_commands(player, vk, user_id: int, text: str):
 
         vk.messages.send(
             user_id=user_id,
-            message="🎓 <b>КЛАСС ПЕРСОНАЖА</b>\n\nУ тебя пока нет класса!\n\nДля получения класса:\n1. Дойди до 10 уровня\n2. Экипируй оружие\n3. Найди наставника в убежище\n\n🚪 Путь: Дорога → Убежище",
+            message="🎓КЛАСС ПЕРСОНАЖА\n\nУ тебя пока нет класса!\n\nДля получения класса:\n1. Дойди до 10 уровня\n2. Экипируй оружие\n3. Найди наставника в убежище\n\n🚪 Путь: Дорога → Убежище",
             keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
             random_id=0
         )
@@ -348,7 +348,7 @@ def handle_class_commands(player, vk, user_id: int, text: str):
     current_weapon = player.equipped_weapon or "нет"
     current_class = get_class_by_weapon(current_weapon) if current_weapon != "нет" else None
 
-    msg = f"🎓 <b>ТВОЙ КЛАСС</b>\n\n"
+    msg = f"🎓ТВОЙ КЛАСС\n\n"
     msg += f"Класс: {player.player_class.upper()}\n"
     msg += f"Оружие: {current_weapon}\n\n"
     msg += f"{class_info}\n"
@@ -377,7 +377,7 @@ def handle_trade_commands(player, vk, user_id: int, text: str):
     if location_id == 'кпп':
         vk.messages.send(
             user_id=user_id,
-            message="👤 <b>Военный:</b>\n\n«Я тут не для торговли, сталкер. Военный склад охраняю. Но... если очень нужно, могу кое-что продать из трофеев. За особую цену.»",
+            message="👤Военный:\n\n«Я тут не для торговли, сталкер. Военный склад охраняю. Но... если очень нужно, могу кое-что продать из трофеев. За особую цену.»",
             random_id=0
         )
         return True
@@ -387,7 +387,7 @@ def handle_trade_commands(player, vk, user_id: int, text: str):
         vk.messages.send(
             user_id=user_id,
             message=(
-                "👤 <b>Торговец:</b>\n\n«Рад тебя видеть, сталкер! Вот, выбирай:\n\n"
+                "👤Торговец:\n\n«Рад тебя видеть, сталкер! Вот, выбирай:\n\n"
                 "🔮 Артефакты — редкие аномальные образования\n"
                 "🔫 Оружие\n"
                 "🛡️ Броня\n"
@@ -418,7 +418,7 @@ def handle_kpp_shop_commands(player, vk, user_id: int, text: str):
         if text == 'купить':
             vk.messages.send(
                 user_id=user_id,
-                message="🎖️ <b>Военный:</b>\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
                 keyboard=create_kpp_shop_keyboard().get_keyboard(),
                 random_id=0
             )
@@ -566,7 +566,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
             set_dialog_state(user_id, npc_id, "shop_menu")
             vk.messages.send(
                 user_id=user_id,
-                message="🎖️ <b>Военный:</b>\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
                 keyboard=create_kpp_shop_keyboard().get_keyboard(),
                 random_id=0
             )

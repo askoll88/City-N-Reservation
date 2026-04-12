@@ -335,7 +335,7 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
     vk.messages.send(
         user_id=user_id,
         message=(
-            f"🔍 <b>ИССЛЕДОВАНИЕ НАЧАТО</b>\n\n"
+            f"🔍ИССЛЕДОВАНИЕ НАЧАТО\n\n"
             f"⏱️ Время: {time_sec} секунд\n"
             f"⚡ Энергия: {current_energy} → {remaining_energy} (-{energy_cost})\n\n"
             f"Сканирование территории...\n"
@@ -771,7 +771,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 message=(
                     f"{anomaly_icon} ✨ АРТЕФАКТ ПОЛУЧЕН! ✨\n\n"
                     f"Ты бросил гильзу в аномалию '{anomaly_name}'...\n\n"
-                    f"{rarity_emoji} <b>{artifact_name}</b>\n"
+                    f"{rarity_emoji}{artifact_name}\n"
                     f"Редкость: {rarity}\n\n"
                     f"Гильз осталось: {shells_after}\n\n"
                     f"Артефакт добавлен в инвентарь!"
@@ -1158,7 +1158,7 @@ def show_skills_in_combat(player, vk, user_id):
         return
 
     # Формируем сообщение
-    msg = f"⚡ <b>НАВЫКИ КЛАССА {class_id.upper()}</b>\n\n"
+    msg = f"⚡НАВЫКИ КЛАССА {class_id.upper()}\n\n"
     msg += f"Твоя энергия: {player.energy}/100\n\n"
 
     cooldowns = _skill_cooldowns.get(user_id, {})
@@ -1184,14 +1184,14 @@ def show_skills_in_combat(player, vk, user_id):
         elif player.energy < skill_cost:
             status = f"❌ Мало энергии"
 
-        msg += f"<b>{skill_name}</b>\n"
+        msg += f"<b>{skill_name}\n"
         msg += f"   {skill_desc}\n"
         msg += f"   Энергия: {skill_cost} | Кулдаун: {skill['cooldown']} ходов\n"
         msg += f"   Статус: {status}\n\n"
 
     # Показываем активные эффекты
     if active_effects:
-        msg += "🔮 <b>Активные эффекты:</b>\n"
+        msg += "🔮Активные эффекты:\n"
         for effect_name, turns in active_effects.items():
             msg += f"• {effect_name}: {turns} ходов\n"
 
@@ -1391,10 +1391,10 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         total_damage = first_damage + second_damage
         combat['enemy_hp'] -= total_damage
 
-        message = f"🎯 <b>{skill_name}</b>\n\n"
+        message = f"🎯{skill_name}\n\n"
         message += f"Первый выстрел: {first_damage} урона\n"
         message += f"Второй выстрел: {second_damage} урона ({int(second_mult*100)}%)\n"
-        message += f"<b>Всего: {total_damage} урона</b>\n\n"
+        message += f"<b>Всего: {total_damage} урона\n\n"
 
     # === Точный выстрел (damage_boost) ===
     elif "damage_boost" in effect:
@@ -1404,7 +1404,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
             _active_skill_effects[user_id] = {}
         _active_skill_effects[user_id]["damage_boost"] = 1  # 1 ход
 
-        message = f"🎯 <b>{skill_name}</b>\n\n"
+        message = f"🎯{skill_name}\n\n"
         message += f"Прицел взят! Следующая атака нанесет {int((mult-1)*100)}% бонусного урона.\n\n"
         message += "Используй 'Атаковать' для нанесения удара!\n\n"
 
@@ -1426,11 +1426,11 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
 
         combat['enemy_hp'] -= total_damage
 
-        message = f"🔥 <b>{skill_name}</b>\n\n"
+        message = f"🔥{skill_name}\n\n"
         message += f"Очередь из {burst_count} выстрелов:\n"
         for i in range(burst_count):
             message += f"  Выстрел {i+1}: {per_shot} урона\n"
-        message += f"<b>Всего: {total_damage} урона</b>\n\n"
+        message += f"<b>Всего: {total_damage} урона\n\n"
 
     # === Подавление ===
     elif "enemy_damage_reduction" in effect:
@@ -1440,7 +1440,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
             _active_skill_effects[user_id] = {}
         _active_skill_effects[user_id]["enemy_damage_reduction"] = 1
 
-        message = f"🛡️ <b>{skill_name}</b>\n\n"
+        message = f"🛡️{skill_name}\n\n"
         message += f"Враг подавлен! Его атаки наносят на {int(reduction*100)}% меньше урона.\n\n"
 
     # === Прицельный выстрел ===
@@ -1460,7 +1460,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
 
         combat['enemy_hp'] -= total_damage
 
-        message = f"🎯 <b>{skill_name}</b>\n\n"
+        message = f"🎯{skill_name}\n\n"
         message += f"Мощный прицельный выстрел!\n"
         message += f"База: {base_damage} x {mult} = {total_damage} урона\n"
         if cannot_dodge:
@@ -1475,7 +1475,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
             _active_skill_effects[user_id] = {}
         _active_skill_effects[user_id]["incoming_damage_reduction"] = 1
 
-        message = f"👻 <b>{skill_name}</b>\n\n"
+        message = f"👻{skill_name}\n\n"
         message += f"Ты стал невидимым! Следующий урон врага уменьшен на {int(reduction*100)}%.\n\n"
 
     # === Шквал огня ===
@@ -1496,11 +1496,11 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
 
         combat['enemy_hp'] -= total_damage
 
-        message = f"💥 <b>{skill_name}</b>\n\n"
+        message = f"💥{skill_name}\n\n"
         message += f"Шквал из {burst_count} выстрелов:\n"
         for i in range(burst_count):
             message += f"  Выстрел {i+1}: {per_shot} урона\n"
-        message += f"<b>Всего: {total_damage} урона</b>\n\n"
+        message += f"<b>Всего: {total_damage} урона\n\n"
 
     # === Бронирование ===
     elif "temp_defense" in effect:
@@ -1511,7 +1511,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         _active_skill_effects[user_id]["temp_defense"] = defense
         _active_skill_effects[user_id]["temp_defense_active"] = 1
 
-        message = f"🛡️ <b>{skill_name}</b>\n\n"
+        message = f"🛡️{skill_name}\n\n"
         message += f"Бронирование активировано! +{defense} защиты на 1 ход.\n\n"
 
     # === Клинок в сердце ===
@@ -1530,7 +1530,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
 
         combat['enemy_hp'] -= total_damage
 
-        message = f"🗡️ <b>{skill_name}</b>\n\n"
+        message = f"🗡️{skill_name}\n\n"
         message += f"Точный удар в уязвимое место!\n"
         message += f"Урон: {total_damage} (150%)\n"
         message += f"Игнорирование защиты: {ignore_def}%\n\n"
@@ -1541,7 +1541,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
             _active_skill_effects[user_id] = {}
         _active_skill_effects[user_id]["perfect_dodge"] = 1
 
-        message = f"💨 <b>{skill_name}</b>\n\n"
+        message = f"💨{skill_name}\n\n"
         message += "Ты готов уклониться от следующей атаки!\n\n"
 
     # === Заградительный огонь ===
@@ -1552,11 +1552,11 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
             _active_skill_effects[user_id] = {}
         _active_skill_effects[user_id]["aoe_damage_reduction"] = reduction
 
-        message = f"🔥 <b>{skill_name}</b>\n\n"
+        message = f"🔥{skill_name}\n\n"
         message += f"Заградительный огонь! Все враги поблизости наносят на {int(reduction*100)}% меньше урона.\n\n"
 
     else:
-        message = f"⚡ <b>{skill_name}</b>\n\nНавык активирован!\n\n"
+        message = f"⚡{skill_name}\n\nНавык активирован!\n\n"
 
     return message
 
@@ -1655,18 +1655,18 @@ def handle_combat_attack(player, vk, user_id: int):
     dodge_chance = player.dodge_chance
     total_defense = player.total_defense
 
-    message = f"⚔️ <b>ТЫ АТАКУЕШЬ {combat['enemy_name'].upper()}</b>\n\n"
+    message = f"⚔️ТЫ АТАКУЕШЬ {combat['enemy_name'].upper()}\n\n"
     message += f"🎯 Шанс крита: {crit_chance}% | 💨 Уклонение: {dodge_chance}%\n"
     message += f"🛡️ Твоя защита: {total_defense}\n"
 
     if is_crit:
-        message += f"\n🔥 <b>КРИТИЧЕСКИЙ УДАР! x1.5</b>\n"
-    message += f"Нанесён урон: <b>{total_damage}</b>\n"
+        message += f"\n🔥КРИТИЧЕСКИЙ УДАР! x1.5\n"
+    message += f"Нанесён урон:{total_damage}\n"
     message += f"({(' | '.join(damage_details))})\n"
 
     # Сообщение о кровотечении
     if bleed_applied:
-        message += f"\n🩸 <b>КРОВОТЕЧЕНИЕ!</b> Враг истекает кровью!\n"
+        message += f"\n🩸КРОВОТЕЧЕНИЕ! Враг истекает кровью!\n"
     if bleed_damage > 0:
         message += f"🩸 Кровотечение наносит {bleed_damage} урона!\n"
 
@@ -1681,12 +1681,12 @@ def handle_combat_attack(player, vk, user_id: int):
         
         # === Проверяем perfect_dodge (навык Уклонение) ===
         if "perfect_dodge" in active_effects:
-            message += "\n💨 <b>УКЛОНЕНИЕ!</b> (навык Уклонение)\n"
+            message += "\n💨УКЛОНЕНИЕ! (навык Уклонение)\n"
             del _active_skill_effects[user_id]["perfect_dodge"]
         else:
             is_dodged = random.randint(1, 100) <= player.dodge_chance
             if is_dodged:
-                message += f"\n💨 <b>УКЛОНЕНИЕ!</b> (шанс: {player.dodge_chance}%)\n"
+                message += f"\n💨УКЛОНЕНИЕ! (шанс: {player.dodge_chance}%)\n"
             else:
                 total_defense = player.total_defense
 
@@ -1694,26 +1694,26 @@ def handle_combat_attack(player, vk, user_id: int):
                 if "temp_defense_active" in active_effects:
                     temp_def = active_effects.get("temp_defense", 0)
                     total_defense += temp_def
-                    message += f"🛡️ <b>БРОНИРОВАНИЕ:</b> +{temp_def} защиты!\n"
+                    message += f"🛡️БРОНИРОВАНИЕ: +{temp_def} защиты!\n"
 
                 # === Применяем incoming_damage_reduction (Незримый) ===
                 if "incoming_damage_reduction" in active_effects:
                     reduction = active_effects["incoming_damage_reduction"]
                     enemy_damage = int(enemy_damage * (1 - reduction))
-                    message += f"👻 <b>НЕЗРИМЫЙ:</b> урон уменьшен на {int(reduction*100)}%!\n"
+                    message += f"👻НЕЗРИМЫЙ: урон уменьшен на {int(reduction*100)}%!\n"
                     del _active_skill_effects[user_id]["incoming_damage_reduction"]
 
                 # === Применяем enemy_damage_reduction (Подавление) ===
                 if "enemy_damage_reduction" in active_effects:
                     reduction = active_effects["enemy_damage_reduction"]
                     enemy_damage = int(enemy_damage * (1 - reduction))
-                    message += f"🔥 <b>ПОДАВЛЕНИЕ:</b> враг ослаблен на {int(reduction*100)}%!\n"
+                    message += f"🔥ПОДАВЛЕНИЕ: враг ослаблен на {int(reduction*100)}%!\n"
                     del _active_skill_effects[user_id]["enemy_damage_reduction"]
 
                 final_damage = max(1, enemy_damage - total_defense)
                 player.health -= final_damage
-                message += f"\n⚔️ <b>{combat['enemy_name']} АТАКУЕТ!</b>\n"
-                message += f"Урон врага: {enemy_damage} → Получено: <b>{final_damage}</b> (защита: {total_defense})\n"
+                message += f"\n⚔️{combat['enemy_name']} АТАКУЕТ!\n"
+                message += f"Урон врага: {enemy_damage} → Получено:{final_damage} (защита: {total_defense})\n"
 
             # Проверка на смерть
             if player.health <= 0:
@@ -1735,12 +1735,12 @@ def handle_combat_attack(player, vk, user_id: int):
 
         message += (
             f"\n\n╔════════════════════════════════╗\n"
-            f"║ <b>СТАТУС БОЯ</b>\n"
+            f"║СТАТУС БОЯ\n"
             f"╠════════════════════════════════╣\n"
             f"║ {combat['enemy_name']}\n"
             f"║ HP {enemy_hp_bar} {combat['enemy_hp']}/{combat['enemy_max_hp']}\n"
             f"╠════════════════════════════════╣\n"
-            f"║ <b>ТЫ</b>\n"
+            f"║ТЫ\n"
             f"║ ❤️ HP {player_hp_bar} {player.health}/{player.max_health}\n"
             f"║ ⚡ Энергия: {player.energy}/100\n"
             f"║ 🛡️ Защита: {player.total_defense}\n"
@@ -1753,7 +1753,7 @@ def handle_combat_attack(player, vk, user_id: int):
         # Показываем активные эффекты
         active_effects = get_active_effects(user_id)
         if active_effects:
-            effects_msg = "\n🔮 <b>АКТИВНЫЕ ЭФФЕКТЫ:</b>\n"
+            effects_msg = "\n🔮АКТИВНЫЕ ЭФФЕКТЫ:\n"
             for eff_name, eff_val in active_effects.items():
                 if isinstance(eff_val, int) and eff_val > 0:
                     effects_msg += f"• {eff_name}: {eff_val} ход\n"
@@ -1762,7 +1762,7 @@ def handle_combat_attack(player, vk, user_id: int):
         # Показываем кулдауны навыков
         cooldowns = _skill_cooldowns.get(user_id, {})
         if cooldowns:
-            cd_msg = "\n⏳ <b>ПЕРЕЗАРЯДКА НАВЫКОВ:</b>\n"
+            cd_msg = "\n⏳ПЕРЕЗАРЯДКА НАВЫКОВ:\n"
             for skill_name, cd_val in cooldowns.items():
                 cd_msg += f"• {skill_name}: {cd_val} ход\n"
             message += cd_msg

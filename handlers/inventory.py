@@ -370,7 +370,7 @@ def show_resources_shop(player, vk, user_id: int):
     shells_bags = db.get_items_by_category('shells_bag')
 
     # Формируем сообщение
-    msg = "📦 <b>РЕСУРСЫ</b>\n\n"
+    msg = "📦РЕСУРСЫ\n\n"
     msg += "Гильзы — для добычи артефактов из аномалий.\n\n"
 
     for idx, item in enumerate(resources, 1):
@@ -381,7 +381,7 @@ def show_resources_shop(player, vk, user_id: int):
         msg += f"{idx}. {name} — {price} руб.\n   {desc} Вес: {weight}кг\n\n"
 
     if shells_bags:
-        msg += "🎒 <b>Мешочки для гильз:</b>\n\n"
+        msg += "🎒Мешочки для гильз:\n\n"
         start_idx = len(resources) + 1
         for idx, item in enumerate(shells_bags, start_idx):
             price = item.get('price', 0)
@@ -915,7 +915,7 @@ def handle_drop_item_by_index(player, index: int, vk, user_id: int):
 
         # Оповещение о выбрасывании
         drop_message = (
-            f"🗑️ <b>Предмет выброшен!</b>\n\n"
+            f"🗑️Предмет выброшен!\n\n"
             f"Ты выбросил: {item_name}\n"
             f"⚖️ Освобождено: {item_weight}кг\n\n"
             f"Вещь навсегда исчезла в Зоне..."
@@ -1019,13 +1019,13 @@ def show_soldier_weapons(player, vk, user_id: int):
         if not weapons:
             vk.messages.send(
                 user_id=user_id,
-                message="🎖️ <b>Военный:</b>\n\n«Оружия нет в наличии. Загляни позже.»",
+                message="🎖️Военный:\n\n«Оружия нет в наличии. Загляни позже.»",
                 keyboard=create_kpp_shop_keyboard().get_keyboard(),
                 random_id=0
             )
             return
 
-        msg = "🎖️ <b>ВОЕННЫЙ СКЛАД — ОРУЖИЕ</b>\n\n"
+        msg = "🎖️ВОЕННЫЙ СКЛАД — ОРУЖИЕ\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
 
         for idx, weapon in enumerate(weapons, 1):
@@ -1098,13 +1098,13 @@ def show_soldier_armor(player, vk, user_id: int):
         if not armor_list:
             vk.messages.send(
                 user_id=user_id,
-                message="🎖️ <b>Военный:</b>\n\n«Брони нет в наличии. Загляни позже.»",
+                message="🎖️Военный:\n\n«Брони нет в наличии. Загляни позже.»",
                 keyboard=create_kpp_shop_keyboard().get_keyboard(),
                 random_id=0
             )
             return
 
-        msg = "🎖️ <b>ВОЕННЫЙ СКЛАД — БРОНЯ</b>\n\n"
+        msg = "🎖️ВОЕННЫЙ СКЛАД — БРОНЯ\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
 
         for idx, armor in enumerate(armor_list, 1):
@@ -1171,7 +1171,7 @@ def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
         if category == 'all':
             vk.messages.send(
                 user_id=user_id,
-                message="🔬 <b>Учёный:</b>\n\n«Выбирай, сталкер:\n\n💊 Лекарства — аптечки, бинты, стимуляторы\n⚡ Энергетики — еда и напитки\n\nЦены честные, научные!»",
+                message="🔬Учёный:\n\n«Выбирай, сталкер:\n\n💊 Лекарства — аптечки, бинты, стимуляторы\n⚡ Энергетики — еда и напитки\n\nЦены честные, научные!»",
                 keyboard=create_scientist_shop_keyboard().get_keyboard(),
                 random_id=0
             )
@@ -1191,13 +1191,13 @@ def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
         if not items:
             vk.messages.send(
                 user_id=user_id,
-                message="🔬 <b>Учёный:</b>\n\n«Лекарств пока нет. Загляни позже.»",
+                message="🔬Учёный:\n\n«Лекарств пока нет. Загляни позже.»",
                 keyboard=create_scientist_shop_keyboard().get_keyboard(),
                 random_id=0
             )
             return
 
-        msg = f"🔬 <b>ЛАБОРАТОРИЯ — {title}</b>\n\n"
+        msg = f"🔬ЛАБОРАТОРИЯ — {title}\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
 
         for idx, item in enumerate(items, 1):
@@ -1252,7 +1252,7 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
         if not rarity:
             vk.messages.send(
                 user_id=user_id,
-                message="🔮 <b>АРТЕФАКТЫ</b>\n\nВыбери редкость:\n\n"
+                message="🔮АРТЕФАКТЫ\n\nВыбери редкость:\n\n"
                         "🔹 Обычные — Медуза, Камень, Пульсатор и др.\n"
                         "🔹 Редкие — Метеорит, Огненный камень и др.\n"
                         "🔹 Уникальные — Вечный, Феникс и др.\n"
@@ -1269,7 +1269,7 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
         if not items:
             vk.messages.send(
                 user_id=user_id,
-                message=f"🔮 <b>Артефакты {title}</b>\n\nНет в наличии.",
+                message=f"🔮Артефакты {title}\n\nНет в наличии.",
                 keyboard=create_artifact_shop_keyboard().get_keyboard(),
                 random_id=0
             )
@@ -1277,7 +1277,7 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
 
         set_shop_cache_data(user_id, {'artifacts': items, 'rarity': rarity})
 
-        msg = f"🔮 <b>АРТЕФАКТЫ — {title}</b>\n\n"
+        msg = f"🔮АРТЕФАКТЫ — {title}\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
 
         for idx, item in enumerate(items, 1):
@@ -1337,7 +1337,7 @@ def show_sell_artifacts(player, vk, user_id: int):
         if not artifacts:
             vk.messages.send(
                 user_id=user_id,
-                message="💰 <b>ПРОДАЖА АРТЕФАКТОВ</b>\n\nУ тебя нет артефактов для продажи.\n\n"
+                message="💰ПРОДАЖА АРТЕФАКТОВ\n\nУ тебя нет артефактов для продажи.\n\n"
                         "Артефакты можно найти в аномалиях на дорогах.",
                 random_id=0
             )
@@ -1346,7 +1346,7 @@ def show_sell_artifacts(player, vk, user_id: int):
         # Сохраняем в кэш для продажи по номеру
         set_shop_cache_data(user_id, {'sell_artifacts': artifacts})
 
-        msg = "💰 <b>ПРОДАЖА АРТЕФАКТОВ</b>\n\n"
+        msg = "💰ПРОДАЖА АРТЕФАКТОВ\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
 
         for idx, art in enumerate(artifacts, 1):
@@ -1462,7 +1462,7 @@ def handle_sell_artifact(player, artifact_name: str, vk, user_id: int) -> bool:
         if success:
             vk.messages.send(
                 user_id=user_id,
-                message=f"💰 <b>Артефакт продан!</b>\n\n"
+                message=f"💰Артефакт продан!\n\n"
                         f"🔮 {artifact_name}\n"
                         f"💵 Получено: {sell_price} руб.\n\n"
                         f"💰 Баланс: {player.money} руб.",
@@ -1534,7 +1534,7 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
         if player.money < price:
             vk.messages.send(
                 user_id=user_id,
-                message=f"💸 <b>Недостаточно денег!</b>\n\n"
+                message=f"💸Недостаточно денег!\n\n"
                         f"Цена: {price} руб.\n"
                         f"У тебя: {player.money} руб.\n"
                         f"Не хватает: {price - player.money} руб.",
@@ -1548,7 +1548,7 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
         if current_weight + weight > max_weight:
             vk.messages.send(
                 user_id=user_id,
-                message=f"🎒 <b>Не хватает места!</b>\n\n"
+                message=f"🎒Не хватает места!\n\n"
                         f"Текущий вес: {current_weight:.1f} / {max_weight} кг\n"
                         f"Вес артефакта: {weight} кг",
                 random_id=0
@@ -1559,7 +1559,7 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
         if len(player.equipped_artifacts) >= player.max_artifact_slots:
             vk.messages.send(
                 user_id=user_id,
-                message=f"🔮 <b>Нет слотов для артефактов!</b>\n\n"
+                message=f"🔮Нет слотов для артефактов!\n\n"
                         f"У тебя {player.max_artifact_slots} слотов.\n"
                         f"Освободи слот: 'снять артефакт'",
                 random_id=0
@@ -1576,7 +1576,7 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
 
             vk.messages.send(
                 user_id=user_id,
-                message=f"✅ <b>Артефакт куплен!</b>\n\n"
+                message=f"✅Артефакт куплен!\n\n"
                         f"🔮 {artifact_name}\n"
                         f"💵 Потрачено: {price} руб.\n"
                         f"⚖️ Вес: {weight} кг\n\n"

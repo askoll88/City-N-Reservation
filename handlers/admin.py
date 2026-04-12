@@ -18,7 +18,7 @@ def _send(vk, user_id: int, message: str):
 
 def _help_text() -> str:
     return (
-        "🛠️ <b>АДМИНКА</b>\n\n"
+        "🛠️АДМИНКА\n\n"
         "Пользователи:\n"
         "• админ пользователи [поиск]\n"
         "• админ профиль <vk_id>\n"
@@ -79,7 +79,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         if not users:
             _send(vk, user_id, "Пользователи не найдены.")
             return True
-        lines = ["👥 <b>ПОСЛЕДНИЕ ПОЛЬЗОВАТЕЛИ</b>\n"]
+        lines = ["👥ПОСЛЕДНИЕ ПОЛЬЗОВАТЕЛИ\n"]
         for u in users:
             flags = []
             if u.get("is_admin"):
@@ -95,7 +95,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     if m:
         query = m.group(1).strip()
         users = database.admin_search_users(query=query, limit=20)
-        lines = [f"🔎 <b>ПОИСК: {query}</b>\n"]
+        lines = [f"🔎ПОИСК: {query}\n"]
         for u in users:
             lines.append(f"{u['vk_id']} | {u['name']} | lvl {u['level']} | {u['money']} руб")
         if len(lines) == 1:
@@ -114,7 +114,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             vk,
             user_id,
             (
-                f"🧾 <b>ПРОФИЛЬ {user['vk_id']}</b>\n\n"
+                f"🧾ПРОФИЛЬ {user['vk_id']}\n\n"
                 f"Имя: {user['name']}\n"
                 f"Локация: {user['location']}\n"
                 f"Уровень: {user['level']}\n"
@@ -154,7 +154,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         if not bans:
             _send(vk, user_id, "✅ Активных банов нет.")
             return True
-        lines = ["⛔ <b>ЗАБАНЕННЫЕ ПОЛЬЗОВАТЕЛИ</b>\n"]
+        lines = ["⛔ЗАБАНЕННЫЕ ПОЛЬЗОВАТЕЛИ\n"]
         for b in bans:
             lines.append(f"{b['vk_id']} | {b['name']} | {b.get('ban_reason') or '-'}")
         _send(vk, user_id, "\n".join(lines))
@@ -195,7 +195,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         if not rows:
             _send(vk, user_id, f"Лотов со статусом '{status}' нет.")
             return True
-        lines = [f"🧾 <b>ЛОТЫ ({status})</b>\n"]
+        lines = [f"🧾ЛОТЫ ({status})\n"]
         for r in rows:
             lines.append(
                 f"#{r['id']} | {r['item_name']} x{r['quantity']} | {r['price_per_item']} руб | "
@@ -206,7 +206,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
 
     if text in {"админ: лоты"}:
         rows = database.admin_get_market_listings(status="active", limit=30)
-        lines = ["🧾 <b>АКТИВНЫЕ ЛОТЫ</b>\n"]
+        lines = ["🧾АКТИВНЫЕ ЛОТЫ\n"]
         for r in rows:
             lines.append(
                 f"#{r['id']} | {r['item_name']} x{r['quantity']} | {r['price_per_item']} руб | seller={r['seller_vk_id']}"

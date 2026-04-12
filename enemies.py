@@ -193,14 +193,14 @@ def perform_attack(weapon_type, weapon_attack, luck, crit_chance=5, melee_damage
 
     # Добавляем информацию о критических ударах
     if result["crits"] > 0:
-        result["messages"].append(f"💥 <b>КРИТ! x{result['crits']}</b> — +{result['crit_damage']} урона!")
+        result["messages"].append(f"💥КРИТ! x{result['crits']} — +{result['crit_damage']} урона!")
 
     # Шанс кровотечения для ножа
     if action.get("special") == "bleed":
         bleed_chance = 30 + luck * 3  # 30-60%
         if random.randint(1, 100) <= bleed_chance:
             result["bleed"] = True
-            result["messages"].append("🔪 <b>Кровотечение!</b> Враг истекает кровью.")
+            result["messages"].append("🔪Кровотечение! Враг истекает кровью.")
 
     return result
 

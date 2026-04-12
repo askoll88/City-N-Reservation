@@ -119,7 +119,7 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
             items_list = "\n".join([f"• {name} x{qty}" for name, qty in result["items"]])
             vk.messages.send(
                 user_id=user_id,
-                message=f"{answer}\n\n📦 <b>Получено:</b>\n{items_list}\n\n💰 Деньги: 10000 руб.",
+                message=f"{answer}\n\n📦Получено:\n{items_list}\n\n💰 Деньги: 10000 руб.",
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )
@@ -148,7 +148,7 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
     if player.level < 10:
         vk.messages.send(
             user_id=user_id,
-            message="🎓 <b>Наставник:</b>\n\n«Ты ещё слишком слаб, сталкер. Приходи, когда достигнешь 10 уровня. К тому времени я посмотрю, на что ты способен.»",
+            message="🎓Наставник:\n\n«Ты ещё слишком слаб, сталкер. Приходи, когда достигнешь 10 уровня. К тому времени я посмотрю, на что ты способен.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -157,7 +157,7 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
     if not player.equipped_weapon:
         vk.messages.send(
             user_id=user_id,
-            message="🎓 <b>Наставник:</b>\n\n«У тебя нет оружия! Как ты собираешься выживать в Зоне? Экипируй оружие и приходи снова.»",
+            message="🎓Наставник:\n\n«У тебя нет оружия! Как ты собираешься выживать в Зоне? Экипируй оружие и приходи снова.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -167,7 +167,7 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
     if not class_id:
         vk.messages.send(
             user_id=user_id,
-            message="🎓 <b>Наставник:</b>\n\n«Хм, это оружие мне не знакомо. Приходи с другим — я посмотрю, какой стиль боя тебе подходит.»",
+            message="🎓Наставник:\n\n«Хм, это оружие мне не знакомо. Приходи с другим — я посмотрю, какой стиль боя тебе подходит.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -178,7 +178,7 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
         if player.money < CLASS_CHANGE_COST:
             vk.messages.send(
                 user_id=user_id,
-                message=f"🎓 <b>Наставник:</b>\n\n«Ты уже имеешь класс, но хочешь сменить на {class_id.upper()}. Это стоит {CLASS_CHANGE_COST:,} руб.\n\nУ тебя недостаточно денег — нужно ещё {CLASS_CHANGE_COST - player.money:,} руб.»",
+                message=f"🎓Наставник:\n\n«Ты уже имеешь класс, но хочешь сменить на {class_id.upper()}. Это стоит {CLASS_CHANGE_COST:,} руб.\n\nУ тебя недостаточно денег — нужно ещё {CLASS_CHANGE_COST - player.money:,} руб.»",
                 keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
                 random_id=0
             )
@@ -192,7 +192,7 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
         class_info = format_class_info(class_id)
         vk.messages.send(
             user_id=user_id,
-            message=f"💰 <b>Наставник:</b>\n\n«Переобучение прошло успешно! Списано {CLASS_CHANGE_COST:,} руб.\n\nТеперь ты — {class_id.split()[0]} {class_id.upper()}.\n\n{class_info}\n\n'Запомни: сила класса — в оружии. Меняй оружие — меняется и класс!'»",
+            message=f"💰Наставник:\n\n«Переобучение прошло успешно! Списано {CLASS_CHANGE_COST:,} руб.\n\nТеперь ты — {class_id.split()[0]} {class_id.upper()}.\n\n{class_info}\n\n'Запомни: сила класса — в оружии. Меняй оружие — меняется и класс!'»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -206,7 +206,7 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
     class_info = format_class_info(class_id)
     vk.messages.send(
         user_id=user_id,
-        message=f"🎓 <b>Наставник:</b>\n\n«Отлично! Теперь ты — {class_id.split()[0]} {class_id.upper()}. Вот твои навыки:\n\n{class_info}\n\n'Запомни: сила класса — в оружии. Меняй оружие — меняется и класс!'»",
+        message=f"🎓Наставник:\n\n«Отлично! Теперь ты — {class_id.split()[0]} {class_id.upper()}. Вот твои навыки:\n\n{class_info}\n\n'Запомни: сила класса — в оружии. Меняй оружие — меняется и класс!'»",
         keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
         random_id=0
     )
@@ -221,7 +221,7 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
     if player.level < 10:
         vk.messages.send(
             user_id=user_id,
-            message="🎓 <b>Наставник:</b>\n\n«Ты ещё слишком слаб для смены класса. Приходи на 10 уровне.»",
+            message="🎓Наставник:\n\n«Ты ещё слишком слаб для смены класса. Приходи на 10 уровне.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -230,7 +230,7 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
     if not player.equipped_weapon:
         vk.messages.send(
             user_id=user_id,
-            message="🎓 <b>Наставник:</b>\n\n«Экипируй оружие, на которое хочешь перейти, и приходи снова.»",
+            message="🎓Наставник:\n\n«Экипируй оружие, на которое хочешь перейти, и приходи снова.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -240,7 +240,7 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
     if not new_class_id:
         vk.messages.send(
             user_id=user_id,
-            message="🎓 <b>Наставник:</b>\n\n«Это оружие мне не знакомо. Приходи с другим.»",
+            message="🎓Наставник:\n\n«Это оружие мне не знакомо. Приходи с другим.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -249,7 +249,7 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
     if new_class_id == player.player_class:
         vk.messages.send(
             user_id=user_id,
-            message=f"🎓 <b>Наставник:</b>\n\n«У тебя уже есть класс {player.player_class.upper()}. Экипируй другое оружие для смены.»",
+            message=f"🎓Наставник:\n\n«У тебя уже есть класс {player.player_class.upper()}. Экипируй другое оружие для смены.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -258,7 +258,7 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
     if player.money < CLASS_CHANGE_COST:
         vk.messages.send(
             user_id=user_id,
-            message=f"🎓 <b>Наставник:</b>\n\n«Смена класса на {new_class_id.upper()} стоит {CLASS_CHANGE_COST:,} руб.\n\nУ тебя есть {player.money:,} руб. Не хватает {CLASS_CHANGE_COST - player.money:,} руб.»",
+            message=f"🎓Наставник:\n\n«Смена класса на {new_class_id.upper()} стоит {CLASS_CHANGE_COST:,} руб.\n\nУ тебя есть {player.money:,} руб. Не хватает {CLASS_CHANGE_COST - player.money:,} руб.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -272,7 +272,7 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
     class_info = format_class_info(new_class_id)
     vk.messages.send(
         user_id=user_id,
-        message=f"💰 <b>Наставник:</b>\n\n«Класс успешно сменён! Списано {CLASS_CHANGE_COST:,} руб.\n\nТеперь ты — {new_class_id.split()[0]} {new_class_id.upper()}.\n\n{class_info}\n\n'Запомни: сила класса — в оружии!'»",
+        message=f"💰Наставник:\n\n«Класс успешно сменён! Списано {CLASS_CHANGE_COST:,} руб.\n\nТеперь ты — {new_class_id.split()[0]} {new_class_id.upper()}.\n\n{class_info}\n\n'Запомни: сила класса — в оружии!'»",
         keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
         random_id=0
     )
@@ -286,7 +286,7 @@ def _handle_show_class(player, vk, user_id: int, npc_id: str):
     if not player.player_class:
         vk.messages.send(
             user_id=user_id,
-            message="🎓 <b>Наставник:</b>\n\n«У тебя ещё нет класса! Приходи, когда достигнешь 10 уровня и экипируй оружие. Я обучу тебя боевому стилю.»",
+            message="🎓Наставник:\n\n«У тебя ещё нет класса! Приходи, когда достигнешь 10 уровня и экипируй оружие. Я обучу тебя боевому стилю.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -296,18 +296,18 @@ def _handle_show_class(player, vk, user_id: int, npc_id: str):
     current_weapon = player.equipped_weapon or "нет"
     current_class = get_class_by_weapon(current_weapon) if current_weapon != "нет" else None
 
-    msg = f"🎓 <b>Наставник:</b>\n\n"
-    msg += f"📌 <b>Твой текущий класс:</b> {player.player_class.upper()}\n"
-    msg += f"🔫 <b>Экипированное оружие:</b> {current_weapon}\n"
-    msg += f"⭐ <b>Твой уровень:</b> {player.level}\n\n"
+    msg = f"🎓Наставник:\n\n"
+    msg += f"📌Твой текущий класс: {player.player_class.upper()}\n"
+    msg += f"🔫Экипированное оружие: {current_weapon}\n"
+    msg += f"⭐Твой уровень: {player.level}\n\n"
 
     if current_class and current_class != player.player_class:
-        msg += f"⚠️ <b>Внимание!</b> Твой экипированный класс: {current_class.upper()}\n"
+        msg += f"⚠️Внимание! Твой экипированный класс: {current_class.upper()}\n"
         msg += "Класс меняется в зависимости от оружия!\n\n"
 
     passive_status = format_passive_status(player.player_class, player.level)
     msg += f"{passive_status}\n"
-    msg += f"<b>Информация о классе:</b>\n{class_info}"
+    msg += f"<b>Информация о классе:\n{class_info}"
 
     vk.messages.send(
         user_id=user_id,
@@ -327,7 +327,7 @@ def _handle_shop_redirect(player, vk, user_id: int, npc_id: str, next_stage: str
     if next_stage == "shop_menu":
         vk.messages.send(
             user_id=user_id,
-            message="🎖️ <b>Военный:</b>\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+            message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
             keyboard=create_kpp_shop_keyboard().get_keyboard(),
             random_id=0
         )
@@ -376,7 +376,7 @@ def handle_npc_back(player, vk, user_id: int):
         npc_names = ", ".join([npc.name for npc in npcs])
         vk.messages.send(
             user_id=user_id,
-            message=f"👥 <b>Выбери, с кем поговорить:</b>\n\n{npc_names}",
+            message=f"👥Выбери, с кем поговорить:\n\n{npc_names}",
             keyboard=create_npc_select_keyboard(location_id).get_keyboard(),
             random_id=0
         )

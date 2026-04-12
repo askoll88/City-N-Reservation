@@ -143,10 +143,10 @@ def format_class_info(class_id: str, player_level: int = None) -> str:
     msg = f"{player_class.name}\n"
     msg += f"{player_class.description}\n\n"
     
-    msg += "📦 <b>Требуемое оружие:</b> "
+    msg += "📦Требуемое оружие: "
     msg += ", ".join(player_class.required_weapons) + "\n\n"
     
-    msg += "⚡ <b>Активные навыки:</b>\n"
+    msg += "⚡Активные навыки:\n"
     for skill in player_class.active_skills:
         msg += f"• {skill['name']} — {skill['description']} "
         msg += f"({skill['energy_cost']} энергии, перезарядка: {skill['cooldown']} ходов)\n"
@@ -194,7 +194,7 @@ def format_passive_status(class_id: str, player_level: int) -> str:
     if not player_class:
         return ""
     
-    msg = "🔮 <b>Пассивные навыки:</b>\n"
+    msg = "🔮Пассивные навыки:\n"
     
     for passive in player_class.passive_skills:
         required = passive.get("required_level", 10)
@@ -210,7 +210,7 @@ def format_passive_status(class_id: str, player_level: int) -> str:
 def format_all_classes() -> str:
     """Форматировать список всех классов"""
     classes = _get_classes_dict()
-    msg = "🎭 <b>Доступные классы:</b>\n\n"
+    msg = "🎭Доступные классы:\n\n"
     
     for class_id, data in classes.items():
         weapons = ", ".join(data.get("required_weapons", []))
