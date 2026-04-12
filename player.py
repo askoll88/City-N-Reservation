@@ -584,25 +584,69 @@ class Player:
 
         class_info = f"\n🎭 Класс: {self.player_class.upper()}" if self.player_class else ""
 
+                # === HUD СТИЛЬ ===
+
+        def fmt_bar(bar: str) -> str:
+            return bar
+
+        weapon_text = self.equipped_weapon or "—"
+        backpack_text = self.equipped_backpack or "—"
+        detector_text = self.equipped_device or "—"
+
+        artifacts_count = len(self.equipped_artifacts)
+
+        # Вес
+        weight_status = "✅" if current_weight <= self.max_weight else "❌"
+
+        # Гильзы
+        shells_bag = shells_info['equipped_bag'] or "—"
+
         return (
-            f"📊 СТАТУС ПЕРСОНАЖА{class_info}\n\n"
-            f"❤️ HP:        {hp_bar} {self.health}/{self.max_health}\n"
-            f"⚡ Энергия:    {energy_bar} {self.energy}/100\n"
-            f"☢️ Радиация:  {rad_bar} {self.radiation}%\n\n"
-            f"💰 Деньги: {self.money} руб.\n"
-            f"🎯 Уровень: {self.level} | Опыт: {self.experience}/{exp_needed}\n"
-            f"           {exp_bar}\n\n"
-            f"🎒 Экипировка:\n{equip_text}\n\n"
-            f"💪 Характеристики:\n"
-            f"   • Сила: {self.strength} (урон: {self.melee_damage}, +{self.strength * 2}кг)\n"
-            f"   • Выносливость: {self.stamina} (HP: {self.max_health})\n"
-            f"   • Восприятие: {self.perception} (находка: {self.find_chance}%)\n"
-            f"   • Удача: {self.luck} (крит: {self.crit_chance}%, редкое: {self.rare_find_chance}%)\n"
-            f"   • Уклонение: {self.dodge_chance}%{passive_info}\n\n"
-            f"📦 Груз:\n"
-            f"   • Защита: {defense_info}\n"
-            f"   • Вес: {current_weight}/{self.max_weight}кг {weight_status}\n\n"
-            f"🎯 Гильзы: {shells_text}"
+f"""📊 СТАТУС ПЕРСОНАЖА
+━━━━━━━━━━━━━━━━━━━
+
+❤️ Здоровье   {self.health}/{self.max_health}  {fmt_bar(hp_bar)}
+⚡ Энергия     {self.energy}/100  {fmt_bar(energy_bar)}
+☢️ Радиация     {self.radiation}%     {fmt_bar(rad_bar)}
+
+🎯 Уровень {self.level}
+Опыт: {self.experience} / {exp_needed}
+{fmt_bar(exp_bar)}
+
+💰 Деньги: {self.money:,} ₽
+
+━━━━━━━━━━━━━━━━━━━
+🎒 ЭКИПИРОВКА
+
+🔫 Оружие:     {weapon_text}
+🛡️ Броня:      —
+🔮 Артефакты:  {artifacts_count} / {self.artifact_slots}
+🎒 Рюкзак:     {backpack_text}
+📡 Детектор:   {detector_text}
+
+📊 Итог:
+   Атака: {self.melee_damage}   |   Броня: {self.total_defense}
+
+━━━━━━━━━━━━━━━━━━━
+💪 ХАРАКТЕРИСТИКИ
+
+Сила:         {self.strength}  → урон {self.melee_damage} | +{self.strength * 2} кг
+Выносливость: {self.stamina}  → HP {self.max_health}
+Восприятие:   {self.perception}  → лут {self.find_chance}%
+Удача:        {self.luck}  → крит {self.crit_chance}% | редкое {self.rare_find_chance}%
+Уклонение:    {self.dodge_chance}%
+
+━━━━━━━━━━━━━━━━━━━
+📦 ГРУЗ
+
+Защита: +{self.total_defense} ({self.armor_defense})
+Вес: {current_weight} / {self.max_weight} кг  {weight_status}
+
+━━━━━━━━━━━━━━━━━━━
+🎯 ГИЛЬЗЫ
+
+{shells_current} / {shells_capacity}  ({shells_bag})
+"""
         )
 
     def update_stats(self, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None):
