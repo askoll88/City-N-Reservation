@@ -203,6 +203,22 @@ def create_player_market_keyboard():
     return keyboard
 
 
+def create_admin_keyboard():
+    """Клавиатура админки"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Админ: Пользователи", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Админ: Баны", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("Админ: Маркет ON", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("Админ: Маркет OFF", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("Админ: Лоты", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Админ: Помощь", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
 def create_artifact_shop_keyboard():
     """Клавиатура магазина артефактов"""
     keyboard = VkKeyboard(one_time=False)

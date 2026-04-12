@@ -147,6 +147,9 @@ class Player:
         self.inventory_section = self._data.get('inventory_section')  # Текущий раздел инвентаря
         self.previous_location = self._data.get('previous_location')  # Предыдущая локация для возврата
         self.player_class = self._data.get('player_class')  # Класс персонажа
+        self.is_admin = self._data.get('is_admin', 0)
+        self.is_banned = self._data.get('is_banned', 0)
+        self.ban_reason = self._data.get('ban_reason')
 
         # Слоты брони (новый формат)
         self.equipped_armor_head = self._data.get('equipped_armor_head')
@@ -202,6 +205,9 @@ class Player:
             self.newbie_kit_received = self._data.get('newbie_kit_received', 0)
             self.inventory_section = self._data.get('inventory_section')
             self.previous_location = self._data.get('previous_location')
+            self.is_admin = self._data.get('is_admin', 0)
+            self.is_banned = self._data.get('is_banned', 0)
+            self.ban_reason = self._data.get('ban_reason')
             # Слоты брони (новый формат)
             self.equipped_armor_head = self._data.get('equipped_armor_head')
             self.equipped_armor_body = self._data.get('equipped_armor_body')

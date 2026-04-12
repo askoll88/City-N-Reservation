@@ -51,6 +51,7 @@ from handlers.commands import (
 )
 
 from handlers.location import go_to_location
+from handlers.admin import handle_admin_commands
 from state_manager import (
     is_in_combat, is_in_dialog,
     get_combat_data, clear_combat_state,
@@ -105,6 +106,20 @@ def handle_message(event, vk):
 
     # Получаем игрока
     player = get_player(user_id)
+
+    # Админские команды доступны в любой локации/состоянии
+    if handle_admin_commands(player, vk, user_id, text, original_text):
+        return
+
+    # Бан пользователя
+    if player.is_banned:
+        reason = player.ban_reason or "не указана"
+        vk.messages.send(
+            user_id=user_id,
+            message=f"⛔ Ты заблокирован администратором.\nПричина: {reason}",
+            random_id=0,
+        )
+        return
 
     # Проверяем состояния
     in_combat = is_in_combat(user_id)

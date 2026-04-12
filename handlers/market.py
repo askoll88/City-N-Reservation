@@ -18,6 +18,15 @@ def _format_listing(row: dict) -> str:
 
 
 def show_market_menu(player, vk, user_id: int):
+    if not database.is_market_enabled():
+        vk.messages.send(
+            user_id=user_id,
+            message="⛔ P2P рынок временно отключён администратором.",
+            keyboard=create_player_market_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return
+
     vk.messages.send(
         user_id=user_id,
         message=(

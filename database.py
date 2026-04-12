@@ -153,7 +153,10 @@ def init_db():
                 player_class      VARCHAR(50),
                 previous_location VARCHAR(50),
                 hospital_treatments INTEGER DEFAULT 0,
-                newbie_kit_received INTEGER DEFAULT 0
+                newbie_kit_received INTEGER DEFAULT 0,
+                is_admin        INTEGER DEFAULT 0,
+                is_banned       INTEGER DEFAULT 0,
+                ban_reason      TEXT
             )
         """)
 
@@ -213,6 +216,15 @@ def init_db():
             )
         """)
 
+        # -- game_settings --------------------------------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS game_settings (
+                key         VARCHAR(100) PRIMARY KEY,
+                value       VARCHAR(255) NOT NULL,
+                updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
+
         # -- market_listings ------------------------------------------------
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS market_listings (
@@ -265,6 +277,13 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_market_trx_seller      ON market_transactions(seller_vk_id)",
         ]:
             cursor.execute(ddl)
+
+        # Дефолтные настройки игры
+        cursor.execute("""
+            INSERT INTO game_settings (key, value)
+            VALUES ('p2p_market_enabled', '1')
+            ON CONFLICT (key) DO NOTHING
+        """)
 
     # Миграция: перенести данные из старых колонок users в новые таблицы
     _migrate_legacy_schema()
@@ -354,6 +373,9 @@ def _migrate_legacy_schema():
             ("max_health_bonus",      "INTEGER DEFAULT 0"),
             ("artifact_slots",        "INTEGER DEFAULT 3"),
             ("shells",                "INTEGER DEFAULT 0"),
+            ("is_admin",              "INTEGER DEFAULT 0"),
+            ("is_banned",             "INTEGER DEFAULT 0"),
+            ("ban_reason",            "TEXT"),
         ]
         for col, definition in new_columns:
             if col not in existing:
@@ -814,6 +836,7 @@ _ALLOWED_USER_FIELDS = frozenset({
     "artifact_slots", "shells",
     "player_class", "location", "previous_location",
     "hospital_treatments", "newbie_kit_received",
+    "is_admin", "is_banned", "ban_reason",
 })
 
 # Поля экипировки — обновляются через user_equipment
@@ -1108,6 +1131,184 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0) -
 
 
 # ---------------------------------------------------------------------------
+# Админ-функции и настройки игры
+# ---------------------------------------------------------------------------
+
+def get_game_setting(key: str, default: str | None = None) -> str | None:
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT value FROM game_settings WHERE key = %s", (key,))
+        row = cursor.fetchone()
+        if not row:
+            return default
+        return str(row["value"])
+
+
+def set_game_setting(key: str, value: str):
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            INSERT INTO game_settings (key, value, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (key)
+            DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        """, (key, value))
+
+
+def is_market_enabled() -> bool:
+    value = get_game_setting("p2p_market_enabled", default="1")
+    return str(value).strip() in {"1", "true", "on", "yes"}
+
+
+def is_user_admin(vk_id: int) -> bool:
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT is_admin FROM users WHERE vk_id = %s", (vk_id,))
+        row = cursor.fetchone()
+        return bool(row and int(row.get("is_admin") or 0) == 1)
+
+
+def set_user_admin(vk_id: int, is_admin: bool = True) -> dict:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            UPDATE users
+            SET is_admin = %s
+            WHERE vk_id = %s
+            RETURNING vk_id, name, is_admin
+        """, (1 if is_admin else 0, vk_id))
+        row = cursor.fetchone()
+        if not row:
+            return {"success": False, "message": "Пользователь не найден."}
+    return {
+        "success": True,
+        "message": f"Права админа для {row['name']} ({row['vk_id']}) -> {row['is_admin']}.",
+    }
+
+
+def set_user_ban(vk_id: int, banned: bool, reason: str | None = None) -> dict:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            UPDATE users
+            SET is_banned = %s,
+                ban_reason = %s
+            WHERE vk_id = %s
+            RETURNING vk_id, name, is_banned, ban_reason
+        """, (1 if banned else 0, reason if banned else None, vk_id))
+        row = cursor.fetchone()
+        if not row:
+            return {"success": False, "message": "Пользователь не найден."}
+    if banned:
+        return {
+            "success": True,
+            "message": f"Пользователь {row['name']} ({row['vk_id']}) забанен. Причина: {row['ban_reason'] or 'не указана'}",
+        }
+    return {
+        "success": True,
+        "message": f"Пользователь {row['name']} ({row['vk_id']}) разбанен.",
+    }
+
+
+def get_admin_user(vk_id: int) -> dict | None:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT vk_id, name, level, money, is_admin, is_banned, ban_reason, location
+            FROM users
+            WHERE vk_id = %s
+        """, (vk_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def admin_search_users(query: str | None = None, limit: int = 20) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        if query:
+            q = f"%{query}%"
+            cursor.execute("""
+                SELECT vk_id, name, level, money, is_admin, is_banned
+                FROM users
+                WHERE CAST(vk_id AS TEXT) ILIKE %s OR name ILIKE %s
+                ORDER BY id DESC
+                LIMIT %s
+            """, (q, q, limit))
+        else:
+            cursor.execute("""
+                SELECT vk_id, name, level, money, is_admin, is_banned
+                FROM users
+                ORDER BY id DESC
+                LIMIT %s
+            """, (limit,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+def admin_list_banned_users(limit: int = 50) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT vk_id, name, ban_reason
+            FROM users
+            WHERE is_banned = 1
+            ORDER BY id DESC
+            LIMIT %s
+        """, (limit,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+def admin_give_item(vk_id: int, item_name: str, quantity: int = 1) -> dict:
+    if quantity <= 0:
+        return {"success": False, "message": "Количество должно быть > 0."}
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден."}
+
+        cursor.execute("SELECT id, name FROM items WHERE LOWER(name) = LOWER(%s)", (item_name,))
+        item = cursor.fetchone()
+        if not item:
+            return {"success": False, "message": f"Предмет '{item_name}' не найден."}
+
+        cursor.execute("""
+            INSERT INTO user_inventory (user_id, item_id, quantity)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+        """, (user["id"], item["id"], quantity))
+    return {
+        "success": True,
+        "message": f"Выдано: {item['name']} x{quantity} пользователю {vk_id}.",
+    }
+
+
+_ADMIN_EDITABLE_FIELDS = frozenset({
+    "money", "level", "experience",
+    "health", "energy", "radiation",
+    "strength", "stamina", "perception", "luck",
+    "shells", "artifact_slots", "max_weight",
+})
+
+
+def admin_set_user_field(vk_id: int, field: str, value: int) -> dict:
+    field = field.strip().lower()
+    if field not in _ADMIN_EDITABLE_FIELDS:
+        return {
+            "success": False,
+            "message": f"Поле '{field}' нельзя редактировать через админку.",
+        }
+    with db_cursor() as (cursor, _):
+        cursor.execute(f"""
+            UPDATE users
+            SET {field} = %s
+            WHERE vk_id = %s
+            RETURNING vk_id, name, {field}
+        """, (value, vk_id))
+        row = cursor.fetchone()
+        if not row:
+            return {"success": False, "message": "Пользователь не найден."}
+    return {
+        "success": True,
+        "message": f"{row['name']} ({row['vk_id']}): {field} = {row[field]}",
+    }
+
+
+# ---------------------------------------------------------------------------
 # P2P Рынок игроков
 # ---------------------------------------------------------------------------
 
@@ -1200,6 +1401,8 @@ def expire_market_listings(limit: int = 200) -> int:
 
 
 def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quantity: int = 1) -> dict:
+    if not is_market_enabled():
+        return {"success": False, "message": "P2P рынок временно отключён администратором."}
     if quantity <= 0:
         return {"success": False, "message": "Количество должно быть больше нуля."}
     if price_per_item <= 0:
@@ -1307,6 +1510,8 @@ def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quant
 
 
 def buy_market_listing(vk_id: int, listing_id: int) -> dict:
+    if not is_market_enabled():
+        return {"success": False, "message": "P2P рынок временно отключён администратором."}
     with db_cursor() as (cursor, _):
         _expire_market_listings_tx(cursor)
 
@@ -1396,6 +1601,8 @@ def buy_market_listing(vk_id: int, listing_id: int) -> dict:
 
 
 def cancel_market_listing(vk_id: int, listing_id: int) -> dict:
+    if not is_market_enabled():
+        return {"success": False, "message": "P2P рынок временно отключён администратором."}
     with db_cursor() as (cursor, _):
         _expire_market_listings_tx(cursor)
 
@@ -1436,6 +1643,8 @@ def cancel_market_listing(vk_id: int, listing_id: int) -> dict:
 
 
 def get_market_listings(limit: int = 10, offset: int = 0, category: str | None = None) -> list[dict]:
+    if not is_market_enabled():
+        return []
     with db_cursor() as (cursor, _):
         _expire_market_listings_tx(cursor)
         if category:
@@ -1468,6 +1677,8 @@ def get_market_listings(limit: int = 10, offset: int = 0, category: str | None =
 
 
 def get_market_user_listings(vk_id: int, status: str = "active", limit: int = 20) -> list[dict]:
+    if not is_market_enabled():
+        return []
     with db_cursor() as (cursor, _):
         _expire_market_listings_tx(cursor)
         cursor.execute("""
@@ -1496,6 +1707,56 @@ def get_market_user_transactions(vk_id: int, limit: int = 20) -> list[dict]:
         """, (vk_id, vk_id, limit))
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+
+def admin_get_market_listings(status: str = "active", limit: int = 50) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+        cursor.execute("""
+            SELECT id, seller_vk_id, buyer_vk_id, item_name, quantity, price_per_item,
+                   (quantity * price_per_item) AS total_price,
+                   status, created_at, expires_at, completed_at
+            FROM market_listings
+            WHERE (%s = 'all' OR status = %s)
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (status, status, limit))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+def admin_cancel_market_listing(listing_id: int) -> dict:
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT *
+            FROM market_listings
+            WHERE id = %s
+            FOR UPDATE
+        """, (listing_id,))
+        lot = cursor.fetchone()
+        if not lot:
+            return {"success": False, "message": "Лот не найден."}
+        if lot["status"] != "active":
+            return {"success": False, "message": f"Лот не активен (status={lot['status']})."}
+
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (lot["seller_vk_id"],))
+        seller = cursor.fetchone()
+        if seller:
+            cursor.execute("""
+                INSERT INTO user_inventory (user_id, item_id, quantity)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, item_id)
+                DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+            """, (seller["id"], lot["item_id"], lot["quantity"]))
+
+        cursor.execute("""
+            UPDATE market_listings
+            SET status = 'cancelled',
+                cancelled_at = NOW()
+            WHERE id = %s
+        """, (listing_id,))
+
+    return {"success": True, "message": f"Лот #{listing_id} принудительно снят администратором."}
 
 
 # ---------------------------------------------------------------------------
