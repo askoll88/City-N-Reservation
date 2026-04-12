@@ -590,7 +590,7 @@ class Player:
             return bar
 
         weapon_text = self.equipped_weapon or "—"
-        armor_text = self.equip_armor or "—"
+        armor_text = self.equipped_armor or "—"
         backpack_text = self.equipped_backpack or "—"
         detector_text = self.equipped_device or "—"
 
