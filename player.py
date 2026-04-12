@@ -2,8 +2,10 @@
 Классы игрока и инвентаря
 """
 import database
+import logging
 from locations import get_location, Location
 
+logger = logging.getLogger(__name__)
 
 class Inventory:
     """Класс инвентаря игрока"""

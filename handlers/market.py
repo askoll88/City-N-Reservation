@@ -21,7 +21,7 @@ def show_market_menu(player, vk, user_id: int):
     if not database.is_market_enabled():
         vk.messages.send(
             user_id=user_id,
-            message="⛔ P2P рынок временно отключён администратором.",
+            message="⛔ P2P рынок временно находится на техническом обслуживании.",
             keyboard=create_player_market_keyboard().get_keyboard(),
             random_id=0,
         )
@@ -30,7 +30,7 @@ def show_market_menu(player, vk, user_id: int):
     vk.messages.send(
         user_id=user_id,
         message=(
-            "📈 <b>РЫНОК СТАЛКЕРОВ</b>\n\n"
+            "📈 <b> РЫНОК СТАЛКЕРОВ </b>\n\n"
             "Здесь сталкеры торгуют между собой через эскроу.\n"
             "Рынок берет комиссию за безопасность сделки.\n\n"
             "Быстрый старт:\n"
