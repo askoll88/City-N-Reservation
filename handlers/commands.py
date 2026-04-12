@@ -25,7 +25,12 @@ from handlers.npc import (
 )
 from handlers.inventory import (
     show_weapons, show_armor, show_backpacks, show_artifacts, show_other,
-    show_soldier_weapons, show_soldier_armor
+    show_soldier_weapons, show_soldier_armor, show_scientist_shop
+)
+from handlers.keyboards import (
+    create_location_keyboard, create_combat_keyboard,
+    create_npc_select_keyboard, create_kpp_shop_keyboard,
+    create_scientist_shop_keyboard
 )
 from npcs import get_npc_by_location
 from state_manager import (
