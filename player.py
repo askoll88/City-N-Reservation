@@ -50,9 +50,6 @@ class Inventory:
             total += item.get('weight', 1.0) * item.get('quantity', 1)
         return round(total, 1)
 
-    def max_artifact_slots(self) -> int:
-    return MAX_ARTIFACT_SLOTS
-
     def is_empty(self) -> bool:
         """Проверить, пуст ли инвентарь"""
         return not (self.weapons or self.armor or self.artifacts or
@@ -236,6 +233,10 @@ class Player:
             self.max_health_bonus = self._artifact_bonuses.get('max_health_bonus', 0)
 
             self.inventory.reload()
+
+    @property
+    def max_artifact_slots(self) -> int:
+    return MAX_ARTIFACT_SLOTS
 
     @property
     def dodge_chance(self) -> int:
