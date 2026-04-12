@@ -8,10 +8,10 @@ from constants import InventorySection
 
 
 def handle_inventory_digit(player, text: str, vk, user_id: int) -> bool:
-    """Обработка цифр 1-9 в инвентаре. Возвращает True если обработано."""
+    """Обработка цифр 1-99 в инвентаре. Возвращает True если обработано."""
     from main import create_inventory_keyboard
     
-    if not text.isdigit() or not (1 <= int(text) <= 9):
+    if not text.isdigit() or not (1 <= int(text) <= 99):
         return False
     
     section = player.inventory_section
@@ -203,9 +203,11 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
 def show_weapons(player, vk, user_id: int):
     """Показать оружие"""
     from main import create_inventory_keyboard
+    import database
 
     player.inventory_section = 'weapons'
-    
+    database.update_user_stats(user_id, inventory_section='weapons')
+
     items = player.inventory.weapons
     if items:
         msg = "Оружие:\n"
@@ -223,9 +225,11 @@ def show_weapons(player, vk, user_id: int):
 def show_armor(player, vk, user_id: int):
     """Показать броню"""
     from main import create_inventory_keyboard
+    import database
 
     player.inventory_section = 'armor'
-    
+    database.update_user_stats(user_id, inventory_section='armor')
+
     items = player.inventory.armor
     if items:
         msg = "Броня:\n"
@@ -253,9 +257,11 @@ def show_armor(player, vk, user_id: int):
 def show_backpacks(player, vk, user_id: int):
     """Показать рюкзаки"""
     from main import create_inventory_keyboard
+    import database
 
     player.inventory_section = 'backpacks'
-    
+    database.update_user_stats(user_id, inventory_section='backpacks')
+
     if player.inventory.backpacks:
         backpack_list = ""
         for idx, b in enumerate(player.inventory.backpacks, 1):
@@ -273,8 +279,10 @@ def show_backpacks(player, vk, user_id: int):
 def show_artifacts(player, vk, user_id: int):
     """Показать артефакты"""
     from main import create_inventory_keyboard
+    import database
 
     player.inventory_section = 'artifacts'
+    database.update_user_stats(user_id, inventory_section='artifacts')
 
     equipped = player.equipped_artifacts
     artifacts = player.inventory.artifacts
@@ -334,8 +342,10 @@ def show_artifacts(player, vk, user_id: int):
 def show_other(player, vk, user_id: int):
     """Показать другие предметы"""
     from main import create_inventory_keyboard
+    import database
 
     player.inventory_section = 'other'
+    database.update_user_stats(user_id, inventory_section='other')
 
     items = player.inventory.other
     if items:

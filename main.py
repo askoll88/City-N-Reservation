@@ -279,8 +279,8 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
             show_all(player, vk, user_id)
             return True
 
-        # Цифры для выбора предмета
-        if text.isdigit() and 1 <= int(text) <= 9:
+        # Цифры для выбора предмета (поддерживаем 1-99)
+        if text.isdigit() and 1 <= int(text) <= 99:
             if handle_inventory_digit(player, text, vk, user_id):
                 return True
 

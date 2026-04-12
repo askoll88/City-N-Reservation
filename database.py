@@ -323,7 +323,8 @@ def _migrate_legacy_schema():
     }
 
     # Колонки сессии которые нужно просто удалить
-    session_columns = ["menu_state", "inventory_section"]
+    session_columns_remove = ["menu_state"]
+    session_columns_keep = ["inventory_section"]  # Нужно для сохранения раздела инвентаря
 
     with db_cursor() as (cursor, conn):
         # Получаем список реально существующих колонок
@@ -358,8 +359,8 @@ def _migrate_legacy_schema():
             # Не удаляем колонку — она нужна для обратной совместимости
             # с get_user_by_vk() который собирает плоский dict
 
-        # Удаляем колонки сессии
-        for col in session_columns:
+        # Удаляем только menu_state, inventory_section оставляем
+        for col in session_columns_remove:
             if col in existing:
                 cursor.execute(f"ALTER TABLE users DROP COLUMN IF EXISTS {col}")
                 logger.info("Удалена колонка сессии users.%s", col)
@@ -376,6 +377,7 @@ def _migrate_legacy_schema():
             ("is_admin",              "INTEGER DEFAULT 0"),
             ("is_banned",             "INTEGER DEFAULT 0"),
             ("ban_reason",            "TEXT"),
+            ("inventory_section",     "VARCHAR(50)"),  # Текущий раздел инвентаря
         ]
         for col, definition in new_columns:
             if col not in existing:
@@ -778,6 +780,8 @@ def _build_user_dict(user_row: dict, equipment_rows: list, flags_rows: list) -> 
         result[row["flag_name"]] = row["value"]
 
     result.setdefault("newbie_kit_received", 0)
+    # inventory_section хранится в основной таблице users
+    result.setdefault("inventory_section", None)
     return result
 
 
@@ -837,6 +841,7 @@ _ALLOWED_USER_FIELDS = frozenset({
     "player_class", "location", "previous_location",
     "hospital_treatments", "newbie_kit_received",
     "is_admin", "is_banned", "ban_reason",
+    "inventory_section",  # Текущий раздел инвентаря
 })
 
 # Поля экипировки — обновляются через user_equipment
@@ -1967,228 +1972,3 @@ def get_artifact_bonuses(vk_id: int) -> dict:
     return bonuses
 
 
-def buy_artifact_slot(vk_id: int) -> dict:
-    user = get_user_by_vk(vk_id)
-    if not user:
-        return {"success": False, "message": "Пользователь не найден"}
-
-    current = user.get("artifact_slots", config.BASE_ARTIFACT_SLOTS)
-    if current >= config.MAX_ARTIFACT_SLOTS:
-        return {"success": False, "message": f"Достигнут максимум слотов ({config.MAX_ARTIFACT_SLOTS})"}
-    if user.get("level", 1) < config.MIN_LEVEL_FOR_ARTIFACT_SLOT:
-        return {"success": False, "message": f"Нужен {config.MIN_LEVEL_FOR_ARTIFACT_SLOT} уровень"}
-
-    cost = config.ARTIFACT_SLOT_COSTS.get(current + 1)
-    if not cost:
-        return {"success": False, "message": "Нельзя купить больше слотов"}
-    if user["money"] < cost:
-        return {"success": False, "message": f"Недостаточно денег! Нужно: {cost} руб."}
-
-    update_user_stats(vk_id, money=user["money"] - cost, artifact_slots=current + 1)
-    return {"success": True, "message": f"✅ Куплен {current + 1}-й слот за {cost} руб.!", "new_slots": current + 1}
-
-
-# ---------------------------------------------------------------------------
-# Набор новичка
-# ---------------------------------------------------------------------------
-
-def give_newbie_kit(vk_id: int) -> dict | None:
-    user = get_user_by_vk(vk_id)
-    if not user or user.get("newbie_kit_received", 0) == 1:
-        return None
-
-    newbie_items = [
-        ("ПМ", 1), ("Кожаная куртка", 1), ("Джинсы", 1),
-        ("Перчатки без пальцев", 1), ("Кеды", 1), ("Кепка", 1),
-        ("Детектор аномалий", 1), ("Маленький мешочек", 1),
-        ("Аптечка", 2), ("Бинт", 2), ("Хлеб", 1), ("Вода", 1),
-    ]
-
-    success_items = []
-    for item_name, qty in newbie_items:
-        if add_item_to_inventory(vk_id, item_name, qty):
-            success_items.append((item_name, qty))
-
-    update_user_stats(
-        vk_id,
-        newbie_kit_received=1,
-        money=10000,
-        shells=50,
-        equipped_shells_bag="Маленький мешочек",
-    )
-
-    return {"items": success_items, "message": "Набор новичка выдан!"}
-
-
-# ---------------------------------------------------------------------------
-# Гильзы
-# ---------------------------------------------------------------------------
-
-SHELLS_BAG_CAPACITY = {
-    "Маленький мешочек":       50,
-    "Средний мешочек":        100,
-    "Большой мешочек":        300,
-    "Профессиональный мешочек": 500,
-    "Легендарный мешочек":   1000,
-}
-
-
-def get_shells_bag_capacity(vk_id: int) -> int:
-    user = get_user_by_vk(vk_id)
-    if not user:
-        return 20
-    return SHELLS_BAG_CAPACITY.get(user.get("equipped_shells_bag"), 20)
-
-
-def get_user_shells(vk_id: int) -> int:
-    user = get_user_by_vk(vk_id)
-    return user.get("shells", 0) if user else 0
-
-
-def get_shells_info(vk_id: int) -> dict:
-    current  = get_user_shells(vk_id)
-    capacity = get_shells_bag_capacity(vk_id)
-    user     = get_user_by_vk(vk_id)
-    bag      = user.get("equipped_shells_bag") if user else None
-    return {"current": current, "capacity": capacity, "equipped_bag": bag, "free_space": max(0, capacity - current)}
-
-
-def add_shells(vk_id: int, amount: int) -> tuple[bool, str]:
-    if amount <= 0:
-        return False, "Некорректное количество"
-    current  = get_user_shells(vk_id)
-    capacity = get_shells_bag_capacity(vk_id)
-    free     = capacity - current
-    if free <= 0:
-        return False, f"Мешочек полный!"
-    actual = min(amount, free)
-    update_user_stats(vk_id, shells=current + actual)
-    if actual < amount:
-        return True, f"Добавлено {actual} гильз из {amount} (мешочек переполнился)"
-    return True, f"Добавлено {actual} гильз"
-
-
-def remove_shells(vk_id: int, amount: int) -> bool:
-    if amount <= 0:
-        return True
-    current = get_user_shells(vk_id)
-    if current < amount:
-        return False
-    update_user_stats(vk_id, shells=current - amount)
-    return True
-
-
-def equip_shells_bag(vk_id: int, bag_name: str) -> dict:
-    inventory = get_user_inventory(vk_id)
-    bags = [i for i in inventory if i["category"] == "shells_bag"]
-    if not any(b["name"] == bag_name for b in bags):
-        return {"success": False, "message": "Мешочек не найден в инвентаре"}
-    update_user_stats(vk_id, equipped_shells_bag=bag_name)
-    capacity = SHELLS_BAG_CAPACITY.get(bag_name, 20)
-    return {"success": True, "message": f"✅ Экипирован {bag_name}! Вместимость: {capacity} гильз"}
-
-
-def unequip_shells_bag(vk_id: int) -> dict:
-    user = get_user_by_vk(vk_id)
-    if not user or not user.get("equipped_shells_bag"):
-        return {"success": False, "message": "Мешочек не экипирован"}
-    update_user_stats(vk_id, equipped_shells_bag="")
-    current = get_user_shells(vk_id)
-    if current > 20:
-        update_user_stats(vk_id, shells=20)
-        return {"success": True, "message": "✅ Мешочек снят! Гильзы обрезаны до 20."}
-    return {"success": True, "message": "✅ Мешочек снят!"}
-
-
-# ---------------------------------------------------------------------------
-# Артефакты из аномалий
-# ---------------------------------------------------------------------------
-
-ARTIFACT_RARITY_CHANCES = {"common": 60, "rare": 30, "unique": 9, "legendary": 1}
-
-ARTIFACTS_BY_RARITY = {
-    "common":    ["Слизь","Пружина","Пустышка","Капля","Слюда","Вспышка","Бенгальский огонь","Батарейка","Плёнка","Ломоть мяса"],
-    "rare":      ["Грави","Выверт","Слизняк","Огненный шар","Золотая рыбка","Ночная звезда","Колобок","Морской ёж","Колючка","Кровь камня","Каменный цветок","Мамины бусы","Лунный свет"],
-    "unique":    ["Кристальная колючка","Кристалл","Медуза"],
-    "legendary": ["Душа"],
-}
-
-ARTIFACT_ANOMALY_MAP = {
-    "Слизь": "туман",    "Капля": "туман",      "Плёнка": "туман",
-    "Ломоть мяса": "туман", "Слизняк": "туман", "Выверт": "туман",
-    "Пружина": "воронка","Золотая рыбка": "воронка","Ночная звезда": "воронка",
-    "Мамины бусы": "воронка","Лунный свет": "воронка","Колобок": "воронка","Грави": "воронка",
-    "Слюда": "жарка",   "Огненный шар": "жарка","Кровь камня": "жарка",
-    "Каменный цветок": "жарка","Кристалл": "жарка","Медуза": "жарка",
-    "Бенгальский огонь": "электра","Вспышка": "электра","Батарейка": "электра","Морской ёж": "электра",
-    "Пустышка": "магнит","Колючка": "магнит","Кристальная колючка": "магнит",
-}
-
-
-def roll_artifact_from_anomaly(anomaly_type: str, player_luck: int = 5, detector_bonus: int = 0) -> dict | None:
-    import random
-    total_chance = 25 + max(0, player_luck - 5) + detector_bonus
-    if random.randint(1, 100) > total_chance:
-        return None
-
-    rarity_roll = random.randint(1, 100)
-    if rarity_roll <= 60:
-        rarity = "common"
-    elif rarity_roll <= 90:
-        rarity = "rare"
-    elif rarity_roll <= 99:
-        rarity = "unique"
-    else:
-        rarity = "legendary"
-
-    candidates = [
-        a for a in ARTIFACTS_BY_RARITY.get(rarity, [])
-        if ARTIFACT_ANOMALY_MAP.get(a) == anomaly_type
-    ]
-    if not candidates:
-        candidates = ARTIFACTS_BY_RARITY.get(rarity, [])
-    if not candidates:
-        candidates = [a for a, t in ARTIFACT_ANOMALY_MAP.items() if t == anomaly_type]
-    if not candidates:
-        return None
-
-    name = random.choice(candidates)
-    return {"name": name, "rarity": rarity, "anomaly": anomaly_type}
-
-
-# ---------------------------------------------------------------------------
-# БД для классов (заглушки — реализация в classes.py)
-# ---------------------------------------------------------------------------
-
-def get_all_classes_from_db() -> list[dict]:
-    with db_cursor() as (cursor, _):
-        cursor.execute("""
-            SELECT * FROM classes
-        """)
-        return [dict(r) for r in cursor.fetchall()]
-
-
-def get_class_active_skills(class_id: str) -> list[dict]:
-    with db_cursor() as (cursor, _):
-        cursor.execute("""
-            SELECT * FROM class_active_skills WHERE class_id = %s ORDER BY id
-        """, (class_id,))
-        return [dict(r) for r in cursor.fetchall()]
-
-
-def get_class_passive_skills(class_id: str) -> list[dict]:
-    with db_cursor() as (cursor, _):
-        cursor.execute("""
-            SELECT * FROM class_passive_skills WHERE class_id = %s ORDER BY required_level
-        """, (class_id,))
-        return [dict(r) for r in cursor.fetchall()]
-
-
-def get_weapon_class(weapon_name: str) -> str | None:
-    """Определить класс по оружию через БД."""
-    with db_cursor() as (cursor, _):
-        cursor.execute("""
-            SELECT class_id FROM class_weapon_map WHERE weapon_name = %s
-        """, (weapon_name,))
-        row = cursor.fetchone()
-        return row["class_id"] if row else None
