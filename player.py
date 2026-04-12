@@ -590,6 +590,7 @@ class Player:
             return bar
 
         weapon_text = self.equipped_weapon or "—"
+        armor_text = self.equip_armor or "—"
         backpack_text = self.equipped_backpack or "—"
         detector_text = self.equipped_device or "—"
 
@@ -619,7 +620,7 @@ f"""📊 СТАТУС ПЕРСОНАЖА
 🎒 ЭКИПИРОВКА
 
 🔫 Оружие:     {weapon_text}
-🛡️ Броня:      —
+🛡️ Броня:      {armor_text}
 🔮 Артефакты:  {artifacts_count} / {self.artifact_slots}
 🎒 Рюкзак:     {backpack_text}
 📡 Детектор:   {detector_text}
