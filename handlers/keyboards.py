@@ -7,14 +7,15 @@ from constants import RESEARCH_LOCATIONS
 from npcs import get_npc_by_location, get_npc
 
 
-def create_main_keyboard():
+def create_main_keyboard(player_level: int = None):
     """Главное меню"""
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Город", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("КПП", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Больница", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Черный рынок", color=VkKeyboardColor.PRIMARY)
+    if player_level is not None and player_level >= 25:
+        keyboard.add_button("Черный рынок", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("Убежище", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
@@ -71,6 +72,9 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_button("Торговля", color=VkKeyboardColor.POSITIVE)
         keyboard.add_line()
         keyboard.add_button("Продать", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Рынок игроков", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+        keyboard.add_button("Мои лоты", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
         keyboard.add_button("В город", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()

@@ -221,7 +221,11 @@ def show_welcome(vk, user_id: int):
         player_level = user_data.get('level', 0)
         vk.messages.send(
             user_id=user_id,
-            message=f"{loc.name}\n\n{loc.description}",
+            message=(
+                f"{loc.name}\n\n{loc.description}\n\n"
+                "ℹ️ Подсказка: P2P рынок игроков находится на Черном рынке "
+                "(доступ с 25 уровня)."
+            ),
             keyboard=create_location_keyboard("город", player_level).get_keyboard(),
             random_id=0
         )
