@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/kondiko/Gorod N/City-N-Reservation/**)",
+      "Bash(ls *)",
+      "Bash(find *)"
+    ]
+  },
+  "$version": 3
+}

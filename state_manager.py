@@ -59,6 +59,7 @@ _combat_state = LockedDict()  # {user_id: combat_data}
 _dialog_state = LockedDict()  # {user_id: {"npc": str, "stage": str}}
 _research_state = LockedDict()  # {user_id: research_data}
 _anomaly_state = LockedDict()  # {user_id: anomaly_data}
+_pending_purchase_state = LockedDict()  # {user_id: purchase_data}
 
 # Кэш игроков
 _players_cache = {}
@@ -275,4 +276,36 @@ def cleanup_inactive_states(max_idle_seconds: int = 300):
             del _combat_state[user_id]
             removed += 1
 
+    # Очистка pending покупок (если слишком долго)
+    for user_id in list(_pending_purchase_state.keys()):
+        data = _pending_purchase_state.get(user_id)
+        if data and (current_time - data.get('start_time', current_time)) > max_idle_seconds:
+            del _pending_purchase_state[user_id]
+            removed += 1
+
     return removed
+
+
+# === Работа с подтверждением покупки на рынке ===
+
+def has_pending_purchase(user_id: int) -> bool:
+    """Проверить, есть ли ожидающая подтверждения покупка"""
+    return user_id in _pending_purchase_state
+
+
+def set_pending_purchase(user_id: int, data: dict):
+    """Установить состояние ожидающей покупки"""
+    _pending_purchase_state[user_id] = {
+        **data,
+        "start_time": time.time()
+    }
+
+
+def get_pending_purchase(user_id: int) -> dict | None:
+    """Получить данные ожидающей покупки"""
+    return _pending_purchase_state.get(user_id)
+
+
+def clear_pending_purchase(user_id: int):
+    """Очистить состояние ожидающей покупки"""
+    _pending_purchase_state.pop(user_id, None)

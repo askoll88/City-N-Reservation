@@ -129,25 +129,37 @@ def handle_sleep(player, vk, user_id: int):
 
 
 def handle_heal(player, vk, user_id: int):
-    """Лечиться в больнице"""
+    """Лечиться в больнице
+
+    Ценообразование:
+      - 1-е лечение: бесплатно (помощь новичкам)
+      - 2+ лечение: базовая цена + бонус за уровень, с потолком
+
+    Формула: min(HEAL_BASE_PRICE + (level - 1) * HEAL_LEVEL_MULTIPLIER, HEAL_PRICE_CAP)
+    При стартовых настройках: 100 + (level-1) * 50, максимум 3000
+    """
     from main import create_location_keyboard
     import database
+    import config
 
     if player.current_location_id == "больница":
         user_data = database.get_user_by_vk(user_id)
         treatment_count = user_data.get('hospital_treatments', 0) if user_data else 0
 
-        # Рассчитываем цену: 1-е бесплатно, 2-е = 100, 3-е = 300, 4-е = 900 и т.д.
+        # Первое лечение всегда бесплатно
         if treatment_count == 0:
             price = 0
         else:
-            price = 100 * (3 ** treatment_count)
+            base = getattr(config, 'HEAL_BASE_PRICE', 100)
+            multiplier = getattr(config, 'HEAL_LEVEL_MULTIPLIER', 50)
+            cap = getattr(config, 'HEAL_PRICE_CAP', 3000)
+            price = min(base + (player.level - 1) * multiplier, cap)
 
         # Проверяем, хватает ли денег
         if player.money < price:
             vk.messages.send(
                 user_id=user_id,
-                message=f"💸 Лечение стоит {price} руб., а у тебя {player.money} руб.\n\nСначала заработай деньги!",
+                message=f"💸 Лечение стоит {price:,} руб., а у тебя {player.money:,} руб.\n\nСначала заработай деньги!",
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )
@@ -165,9 +177,9 @@ def handle_heal(player, vk, user_id: int):
 
         # Формируем сообщение
         if price == 0:
-            price_text = "бесплатно"
+            price_text = "бесплатно (первое лечение)"
         else:
-            price_text = f"{price} руб."
+            price_text = f"{price:,} руб. (лечение #{new_treatment_count}, уровень {player.level})"
 
         message = (
             f"🏥ЛЕЧЕНИЕ В БОЛЬНИЦЕ\n\n"
@@ -177,7 +189,7 @@ def handle_heal(player, vk, user_id: int):
             f"⚡ЭНЕРГИЯ ВОССТАНОВЛЕНА!\n"
             f"   Энергия: {player.energy}/100\n\n"
             f"💰 Оплата: {price_text}\n"
-            f"   Осталось денег: {new_money} руб.\n\n"
+            f"   Осталось денег: {new_money:,} руб.\n\n"
             f"📊 Всего лечений: {new_treatment_count}"
         )
 

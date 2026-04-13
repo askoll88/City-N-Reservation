@@ -2,10 +2,19 @@
 P2P рынок игроков (черный рынок)
 """
 import re
+import time
 
 import config
 import database
-from handlers.keyboards import create_player_market_keyboard
+from handlers.keyboards import (
+    create_player_market_keyboard,
+    create_purchase_confirm_keyboard,
+)
+from state_manager import (
+    set_pending_purchase,
+    clear_pending_purchase,
+    has_pending_purchase,
+)
 
 
 def _format_listing(row: dict) -> str:
@@ -155,19 +164,181 @@ def handle_market_create_listing(player, vk, user_id: int, text: str) -> bool:
 
 
 def handle_market_buy_listing(player, vk, user_id: int, text: str) -> bool:
+    """Показать подтверждение покупки вместо мгновенной покупки"""
     m = re.match(r"^купить\s+лот\s+(\d+)$", text.strip(), flags=re.IGNORECASE)
     if not m:
         return False
 
+    # Если уже есть pending покупка — игнорируем
+    if has_pending_purchase(user_id):
+        vk.messages.send(
+            user_id=user_id,
+            message="⏳ У тебя уже есть неподтверждённая покупка. Подтверди или отмени её сначала.",
+            keyboard=create_purchase_confirm_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
     listing_id = int(m.group(1))
-    result = database.buy_market_listing(user_id, listing_id)
+
+    # Получаем информацию о лоте для превью
+    lot_info = database.get_market_listing_info(listing_id)
+    if not lot_info:
+        vk.messages.send(
+            user_id=user_id,
+            message="❌ Лот не найден или уже недоступен.",
+            keyboard=create_player_market_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    if lot_info["seller_vk_id"] == user_id:
+        vk.messages.send(
+            user_id=user_id,
+            message="❌ Нельзя купить свой лот.",
+            keyboard=create_player_market_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    if player.level < config.MARKET_MIN_LEVEL:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Рынок доступен с {config.MARKET_MIN_LEVEL} уровня. У тебя {player.level}.",
+            keyboard=create_player_market_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    total_price = lot_info["price_per_item"] * lot_info["quantity"]
+
+    if player.money < total_price:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Не хватает денег. Нужно {total_price:,} руб., у тебя {player.money:,} руб.",
+            keyboard=create_player_market_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    # Сохраняем pending покупку
+    set_pending_purchase(user_id, {
+        "listing_id": listing_id,
+        "item_name": lot_info["item_name"],
+        "quantity": lot_info["quantity"],
+        "price_per_item": lot_info["price_per_item"],
+        "total_price": total_price,
+        "seller_vk_id": lot_info["seller_vk_id"],
+        "category": lot_info.get("category", "unknown"),
+        "rarity": lot_info.get("rarity", "common"),
+    })
+
     vk.messages.send(
         user_id=user_id,
-        message=result.get("message", "Не удалось купить лот."),
-        keyboard=create_player_market_keyboard().get_keyboard(),
+        message=(
+            f"🛒 <b>ПОДТВЕРЖДЕНИЕ ПОКУПКИ</b>\n\n"
+            f"📦 {lot_info['item_name']} x{lot_info['quantity']}\n"
+            f"💵 {lot_info['price_per_item']:,} руб/шт\n"
+            f"💰 Итого: <b>{total_price:,} руб.</b>\n"
+            f"👤 Продавец: {lot_info['seller_vk_id']}\n"
+            f"🏷️ {lot_info.get('category', 'unknown')} | ✨ {lot_info.get('rarity', 'common')}\n\n"
+            f"У тебя: {player.money:,} руб.\n"
+            f"После покупки: {player.money - total_price:,} руб.\n\n"
+            f"Подтвердить покупку?"
+        ),
+        keyboard=create_purchase_confirm_keyboard().get_keyboard(),
         random_id=0,
     )
     return True
+
+
+def handle_market_confirm_purchase(player, vk, user_id: int, text: str) -> bool:
+    """Обработка подтверждения или отмены покупки"""
+    if not has_pending_purchase(user_id):
+        return False
+
+    text_lower = text.strip().lower()
+
+    # Отмена покупки
+    if text_lower in ["❌ отмена", "отмена", "отменить", "нет", "cancel"]:
+        pending = get_pending_purchase_data(user_id)
+        clear_pending_purchase(user_id)
+
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                f"❌ Покупка отменена.\n\n"
+                f"📦 {pending['item_name']} x{pending['quantity']} — {pending['total_price']:,} руб."
+            ),
+            keyboard=create_player_market_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    # Подтверждение покупки
+    if text_lower in ["✅ подтвердить", "подтвердить", "подтверждение", "да", "yes", "купить"]:
+        pending = get_pending_purchase_data(user_id)
+        if not pending:
+            clear_pending_purchase(user_id)
+            vk.messages.send(
+                user_id=user_id,
+                message="⚠️ Данные о покупке устарели. Попробуй снова.",
+                keyboard=create_player_market_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
+
+        listing_id = pending["listing_id"]
+        total_price = pending["total_price"]
+
+        # Проверяем баланс ещё раз (мог измениться)
+        if player.money < total_price:
+            clear_pending_purchase(user_id)
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ Не хватает денег. Нужно {total_price:,} руб., у тебя {player.money:,} руб.",
+                keyboard=create_player_market_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
+
+        # Выполняем покупку через БД
+        result = database.buy_market_listing(user_id, listing_id)
+
+        # Очищаем pending независимо от результата
+        clear_pending_purchase(user_id)
+
+        if result.get("success"):
+            vk.messages.send(
+                user_id=user_id,
+                message=f"✅ {result['message']}",
+                keyboard=create_player_market_keyboard().get_keyboard(),
+                random_id=0,
+            )
+        else:
+            vk.messages.send(
+                user_id=user_id,
+                message=f"❌ {result.get('message', 'Не удалось купить лот.')}",
+                keyboard=create_player_market_keyboard().get_keyboard(),
+                random_id=0,
+            )
+        return True
+
+    return False
+
+
+def get_pending_purchase_data(user_id: int) -> dict | None:
+    """Получить данные pending покупки с защитой от stale данных"""
+    from state_manager import get_pending_purchase
+    data = get_pending_purchase(user_id)
+    if not data:
+        return None
+    # Pending данные истекают через 5 минут
+    if time.time() - data.get("start_time", 0) > 300:
+        from state_manager import clear_pending_purchase
+        clear_pending_purchase(user_id)
+        return None
+    return data
 
 
 def handle_market_cancel_listing(player, vk, user_id: int, text: str) -> bool:

@@ -59,6 +59,7 @@ from state_manager import (
     cache_player, get_cached_player,
     is_researching, cancel_research, get_research_status,
     is_in_anomaly,
+    has_pending_purchase,
 )
 from handlers.keyboards import (
     create_main_keyboard,
@@ -137,6 +138,12 @@ def handle_message(event, vk):
     # === Приоритет 3: Исследование ===
     if handle_research_commands(player, vk, user_id, text):
         return
+
+    # === Приоритет 3.5: Подтверждение покупки P2P (если есть pending) ===
+    if has_pending_purchase(user_id):
+        from handlers.market import handle_market_confirm_purchase
+        if handle_market_confirm_purchase(player, vk, user_id, text):
+            return
 
     # === Приоритет 4: Команда /start ===
     if text in ['/start', '/help', 'начать', 'старт']:

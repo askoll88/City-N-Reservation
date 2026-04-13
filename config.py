@@ -32,6 +32,12 @@ START_HEALTH = 100
 MAX_HEALTH = 150
 HEAL_COST_PER_HP = 50
 
+# Лечение в больнице
+# 1-е лечение бесплатно, далее: base + (level-1) * multiplier, с потолком cap
+HEAL_BASE_PRICE = 100          # базовая цена за лечение (2-е и далее)
+HEAL_LEVEL_MULTIPLIER = 50     # добавка за каждый уровень игрока
+HEAL_PRICE_CAP = 3000          # максимальная цена лечения
+
 # Исследование
 RESEARCH_TIME = 30  # секунд
 RESEARCH_BONUS_XP = 50

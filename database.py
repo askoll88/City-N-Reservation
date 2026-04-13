@@ -1514,6 +1514,24 @@ def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quant
     }
 
 
+def get_market_listing_info(listing_id: int) -> dict | None:
+    """Получить информацию о лоте для превью покупки (без блокировки)"""
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+        cursor.execute("""
+            SELECT ml.*, i.category, i.rarity
+            FROM market_listings ml
+            JOIN items i ON i.id = ml.item_id
+            WHERE ml.id = %s
+        """, (listing_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        if row["status"] != "active" or row["expires_at"] <= datetime.now():
+            return None
+        return dict(row)
+
+
 def buy_market_listing(vk_id: int, listing_id: int) -> dict:
     if not is_market_enabled():
         return {"success": False, "message": "P2P рынок временно отключён администратором."}

@@ -654,6 +654,11 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
 
 def handle_buy_sell_commands(player, vk, user_id: int, text: str, in_dialog: bool):
     """Обработка команд покупки/продажи"""
+    # Если есть pending покупка на рынке — пропускаем, её обрабатывает handle_market_confirm_purchase
+    from state_manager import has_pending_purchase
+    if has_pending_purchase(user_id):
+        return False
+
     if in_dialog:
         return False
     

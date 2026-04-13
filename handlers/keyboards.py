@@ -207,6 +207,14 @@ def create_player_market_keyboard():
     return keyboard
 
 
+def create_purchase_confirm_keyboard():
+    """Клавиатура подтверждения покупки на P2P рынке"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("✅ Подтвердить", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("❌ Отмена", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
 def create_admin_keyboard():
     """Клавиатура админки"""
     keyboard = VkKeyboard(one_time=False)
