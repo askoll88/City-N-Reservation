@@ -105,7 +105,7 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
         result = database.give_newbie_kit(user_id)
         clear_dialog_state(user_id)
 
-        if result is None:
+        if result is None or not result.get("success", False):
             vk.messages.send(
                 user_id=user_id,
                 message="👴 Местный житель:\n\n«Эй, я уже давал тебе набор! Не жадничай, сталкер. Иди в Зону — там добудешь всё сам.»",
@@ -116,7 +116,14 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
             invalidate_player_cache(user_id)
             player = get_player_from_module(user_id)
             player.inventory.reload()
-            items_list = "\n".join([f"• {name} x{qty}" for name, qty in result["items"]])
+
+            # Безопасное получение списка предметов
+            items = result.get("items", [])
+            if items:
+                items_list = "\n".join([f"• {name} x{qty}" for name, qty in items])
+            else:
+                items_list = "• Предметы выданы (список недоступен)"
+
             vk.messages.send(
                 user_id=user_id,
                 message=f"{answer}\n\n📦Получено:\n{items_list}\n\n💰 Деньги: 10000 руб.",
