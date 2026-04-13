@@ -8,10 +8,13 @@ from constants import RESEARCH_LOCATIONS, NPC_LOCATIONS
 def go_to_location(player, location_id: str, vk, user_id: int):
     """Переход в локацию"""
     from main import create_location_keyboard
-    
+    from random_events import get_random_event, format_event_message
+    from state_manager import set_pending_event, clear_pending_event
+    from handlers.keyboards import create_random_event_keyboard
+    from handlers.quests import track_quest_explore, track_quest_visit
+
     # Проверка блокировки убежища
     if location_id == "убежище":
-        # Проверяем, получал ли игрок набор новичка
         conn = database.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT newbie_kit_received FROM users WHERE vk_id = %s", (user_id,))
@@ -20,7 +23,6 @@ def go_to_location(player, location_id: str, vk, user_id: int):
         database.release_connection(conn)
 
         if row and row['newbie_kit_received'] == 1:
-            # Убежище заблокировано после получения набора
             vk.messages.send(
                 user_id=user_id,
                 message="УБЕЖИЩЕ ЗАКРЫТО\n\n"
@@ -31,6 +33,9 @@ def go_to_location(player, location_id: str, vk, user_id: int):
             )
             return
 
+    # Трекаем квесты посещения
+    track_quest_visit(user_id, location_id)
+
     # Сохраняем предыдущую локацию перед переходом (кроме инвентаря)
     if player.current_location_id not in ["инвентарь"]:
         player.previous_location = player.current_location_id
@@ -38,11 +43,29 @@ def go_to_location(player, location_id: str, vk, user_id: int):
 
     player.current_location_id = location_id
     database.update_user_location(user_id, location_id)
-    
+
     loc = player.location
     player_level = player.level if hasattr(player, 'level') else None
 
-    # Добавляем информацию о NPC
+    # Трекаем квесты исследования (если дорога)
+    if location_id in RESEARCH_LOCATIONS:
+        track_quest_explore(user_id, location_id)
+
+    # Случайное событие при переходе на дороги
+    clear_pending_event(user_id)
+    if location_id in RESEARCH_LOCATIONS:
+        event = get_random_event()
+        if event:
+            set_pending_event(user_id, event)
+            vk.messages.send(
+                user_id=user_id,
+                message=f"{loc.name}\n\n{loc.description}\n\n{format_event_message(event)}",
+                keyboard=create_random_event_keyboard(event).get_keyboard(),
+                random_id=0,
+            )
+            return
+
+    # Обычное сообщение о локации
     npc_message = ""
     npcs = NPC_LOCATIONS.get(location_id, [])
     if npcs:

@@ -684,3 +684,18 @@ def handle_unknown_command(vk, user_id: int):
         message="😕 Я не понимаю эту команду.\n\nИспользуй кнопки для навигации или напиши 'начать' для справки.",
         random_id=0
     )
+
+
+# =========================================================================
+# Ежедневные задания
+# =========================================================================
+
+def handle_quests_commands(player, vk, user_id: int, text: str) -> bool:
+    """Обработка команд ежедневных заданий"""
+    from handlers.quests import handle_daily_quests_command, handle_claim_rewards
+
+    if handle_daily_quests_command(player, vk, user_id, text):
+        return True
+    if handle_claim_rewards(player, vk, user_id, text):
+        return True
+    return False

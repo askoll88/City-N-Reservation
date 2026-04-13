@@ -283,3 +283,25 @@ def create_npc_dialog_keyboard(npc_id: str):
 
     keyboard.add_button("К выбору NPC", color=VkKeyboardColor.NEGATIVE)
     return keyboard
+
+
+def create_daily_quests_keyboard():
+    """Клавиатура ежедневных заданий"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("📋 Мои задания", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🎁 Забрать награду", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_random_event_keyboard(event: dict):
+    """Клавиатура для случайного события - кнопки выбора"""
+    keyboard = VkKeyboard(one_time=False)
+    for i, choice in enumerate(event.get("choices", []), 1):
+        color = VkKeyboardColor.NEGATIVE if i == len(event["choices"]) else VkKeyboardColor.PRIMARY
+        keyboard.add_button(choice["label"], color=color)
+        keyboard.add_line()
+    keyboard.add_button("Пропустить", color=VkKeyboardColor.SECONDARY)
+    return keyboard

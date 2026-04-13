@@ -145,6 +145,13 @@ def handle_message(event, vk):
         if handle_market_confirm_purchase(player, vk, user_id, text):
             return
 
+    # === Приоритет 3.6: Случайное событие (если есть pending event) ===
+    from state_manager import has_pending_event, get_pending_event, clear_pending_event
+    if has_pending_event(user_id):
+        from handlers.events import handle_event_response
+        if handle_event_response(player, vk, user_id, text):
+            return
+
     # === Приоритет 4: Команда /start ===
     if text in ['/start', '/help', 'начать', 'старт']:
         handle_start_command(vk, user_id)
@@ -217,6 +224,11 @@ def handle_message(event, vk):
 
     # Покупка/продажа
     if handle_buy_sell_commands(player, vk, user_id, text, in_dialog):
+        return
+
+    # Ежедневные задания
+    from handlers.commands import handle_quests_commands
+    if handle_quests_commands(player, vk, user_id, text):
         return
 
     # === Работа с предметами (через player) ===

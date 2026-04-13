@@ -309,3 +309,27 @@ def get_pending_purchase(user_id: int) -> dict | None:
 def clear_pending_purchase(user_id: int):
     """Очистить состояние ожидающей покупки"""
     _pending_purchase_state.pop(user_id, None)
+
+
+# === Работа со случайными событиями ===
+_pending_event_state = LockedDict()  # {user_id: event_data}
+
+
+def has_pending_event(user_id: int) -> bool:
+    """Проверить, есть ли ожидающее случайное событие"""
+    return user_id in _pending_event_state
+
+
+def set_pending_event(user_id: int, event: dict):
+    """Установить состояние случайного события"""
+    _pending_event_state[user_id] = event
+
+
+def get_pending_event(user_id: int) -> dict | None:
+    """Получить данные случайного события"""
+    return _pending_event_state.get(user_id)
+
+
+def clear_pending_event(user_id: int):
+    """Очистить состояние случайного события"""
+    _pending_event_state.pop(user_id, None)

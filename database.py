@@ -291,6 +291,9 @@ def init_db():
     # Заполнить справочник предметов
     _seed_items()
 
+    # Инициализировать таблицу ежедневных заданий
+    init_daily_quests_table()
+
     logger.info("База данных инициализирована")
 
 
@@ -2248,3 +2251,231 @@ def admin_cancel_market_listing(listing_id: int) -> dict:
 if __name__ == "__main__":
     init_db()
     print("База данных готова к работе!")
+
+
+# =========================================================================
+# Ежедневные задания (Daily Quests)
+# =========================================================================
+
+def init_daily_quests_table():
+    """Создать таблицу ежедневных заданий (вызывается из init_db)"""
+    with db_cursor() as (cursor, conn):
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daily_quests (
+                vk_id         BIGINT NOT NULL,
+                quest_date    DATE NOT NULL DEFAULT CURRENT_DATE,
+                quest_json    JSONB NOT NULL,
+                progress_json JSONB NOT NULL DEFAULT '{}',
+                streak        INTEGER NOT NULL DEFAULT 0,
+                last_complete DATE,
+                claimed       BOOLEAN NOT NULL DEFAULT FALSE,
+                PRIMARY KEY (vk_id, quest_date)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_daily_quests_date
+            ON daily_quests(quest_date)
+        """)
+
+
+def get_daily_quests_for_user(vk_id: int) -> dict | None:
+    """Получить ежедневные задания игрока на сегодня"""
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT quest_json, progress_json, streak, last_complete, claimed
+            FROM daily_quests
+            WHERE vk_id = %s AND quest_date = CURRENT_DATE
+        """, (vk_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "quests": row["quest_json"],
+            "progress": row["progress_json"],
+            "streak": row["streak"],
+            "last_complete": row["last_complete"],
+            "claimed": row["claimed"],
+        }
+
+
+def save_daily_quests(vk_id: int, quests: list, progress: dict = None, streak: int = 0):
+    """Сохранить ежедневные задания для игрока"""
+    import json
+    with db_cursor() as (cursor, conn):
+        cursor.execute("""
+            INSERT INTO daily_quests (vk_id, quest_json, progress_json, streak)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (vk_id, quest_date)
+            DO UPDATE SET
+                quest_json = EXCLUDED.quest_json,
+                streak = EXCLUDED.streak
+        """, (vk_id, json.dumps(quests, ensure_ascii=False), json.dumps(progress or {}, ensure_ascii=False), streak))
+
+
+def update_quest_progress(vk_id: int, quest_id: str, increment: int = 1):
+    """Обновить прогресс задания"""
+    import json
+    with db_cursor() as (cursor, conn):
+        cursor.execute("""
+            SELECT progress_json FROM daily_quests
+            WHERE vk_id = %s AND quest_date = CURRENT_DATE
+        """, (vk_id,))
+        row = cursor.fetchone()
+        if not row:
+            return
+
+        progress = row["progress_json"]
+        progress[quest_id] = progress.get(quest_id, 0) + increment
+
+        cursor.execute("""
+            UPDATE daily_quests
+            SET progress_json = %s
+            WHERE vk_id = %s AND quest_date = CURRENT_DATE
+        """, (json.dumps(progress, ensure_ascii=False), vk_id))
+
+
+def claim_daily_rewards(vk_id: int) -> dict | None:
+    """
+    Забрать награду за ежедневные задания.
+    Возвращает dict с наградой или None, если нельзя забрать.
+    """
+    with db_cursor() as (cursor, conn):
+        cursor.execute("""
+            SELECT quest_json, progress_json, streak, claimed
+            FROM daily_quests
+            WHERE vk_id = %s AND quest_date = CURRENT_DATE
+            FOR UPDATE
+        """, (vk_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        if row["claimed"]:
+            return {"error": "already_claimed"}
+
+        quests = row["quest_json"]
+        progress = row["progress_json"]
+        streak = row["streak"]
+
+        # Проверяем, все ли задания выполнены
+        all_done = True
+        for q in quests:
+            qid = q["id"]
+            target = q.get("target", 1)
+            if progress.get(qid, 0) < target:
+                all_done = False
+                break
+
+        if not all_done:
+            return {"error": "not_all_complete"}
+
+        # Считаем награду
+        total_xp = 0
+        total_money = 0
+        bonus_items = []
+
+        for q in quests:
+            qid = q["id"]
+            prog = progress.get(qid, 0)
+            target = q.get("target", 1)
+            xp = q.get("reward_xp", 0)
+            money = q.get("reward_money", 0)
+
+            # Пропорциональная награда за частичный прогресс
+            ratio = min(prog, target) / target
+            total_xp += int(xp * ratio)
+            total_money += int(money * ratio)
+
+        # Бонус за streak
+        from daily_quests import STREAK_BONUSES
+        if streak in STREAK_BONUSES:
+            bonus = STREAK_BONUSES[streak]
+            mult = bonus["multiplier"]
+            total_xp = int(total_xp * mult)
+            total_money = int(total_money * mult)
+            if bonus.get("bonus_item"):
+                bonus_items.append(bonus["bonus_item"])
+
+        # Обновляем streak и claimed
+        new_streak = streak + 1
+        cursor.execute("""
+            UPDATE daily_quests
+            SET claimed = TRUE,
+                streak = %s,
+                last_complete = CURRENT_DATE
+            WHERE vk_id = %s AND quest_date = CURRENT_DATE
+        """, (new_streak, vk_id))
+
+        # Обновляем деньги и XP игрока
+        cursor.execute("""
+            UPDATE users
+            SET money = money + %s,
+                experience = experience + %s
+            WHERE vk_id = %s
+            RETURNING money, experience
+        """, (total_money, total_xp, vk_id))
+        user_row = cursor.fetchone()
+
+        return {
+            "success": True,
+            "xp": total_xp,
+            "money": total_money,
+            "bonus_items": bonus_items,
+            "new_streak": new_streak,
+            "new_money": user_row["money"] if user_row else 0,
+            "new_xp": user_row["experience"] if user_row else 0,
+        }
+
+
+def reset_daily_quests_if_needed(vk_id: int):
+    """
+    Проверить, сменился ли день. Если да - сгенерировать новые задания.
+    Возвращает (quests, progress, streak) или генерирует новые.
+    """
+    from datetime import timezone, datetime
+    from daily_quests import generate_daily_quests
+
+    existing = get_daily_quests_for_user(vk_id)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    if existing is None:
+        # Новые задания
+        quests = generate_daily_quests(today)
+        save_daily_quests(vk_id, quests, streak=0)
+        return quests, {}, 0
+
+    # Проверяем, выполнен ли claim вчера
+    if existing["claimed"]:
+        # Новый день, сбрасываем прогресс
+        quests = generate_daily_quests(today)
+        save_daily_quests(vk_id, quests, streak=existing["streak"])
+        return quests, {}, existing["streak"]
+
+    # Ещё не забрал награду - оставляем те же задания
+    return existing["quests"], existing["progress"], existing["streak"]
+
+
+def track_quest_progress(vk_id: int, quest_type: str, location: str = None, increment: int = 1):
+    """
+    Автоматически обновить прогресс подходящих заданий.
+    Вызывается при действиях игрока.
+    """
+    existing = get_daily_quests_for_user(vk_id)
+    if not existing:
+        return
+
+    quests = existing["quests"]
+    for q in quests:
+        qid = q["id"]
+        qtype = q.get("type")
+        qloc = q.get("location")
+
+        matched = False
+        if qtype == quest_type:
+            if qloc is None or qloc == location:
+                matched = True
+        elif qtype == "kill_any" and quest_type in ("kill", "kill_any"):
+            matched = True
+
+        if matched:
+            update_quest_progress(vk_id, qid, increment)
+
