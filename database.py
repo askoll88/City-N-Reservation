@@ -1,4 +1,4 @@
-"""
+﻿"""
 База данных для игры "Город N: Запретная Зона"
 PostgreSQL с пулом соединений, нормальной схемой и корректной обработкой ошибок.
 
@@ -2108,6 +2108,49 @@ def unequip_shells_bag(vk_id: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
+
+def give_newbie_kit(vk_id: int) -> dict:
+    """Выдать набор новичка"""
+    from constants import NEWBIE_KIT_ITEMS
+    
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {'success': False, 'message': 'Пользователь не найден'}
+        
+        user_id = user['id']
+        
+        # Проверяем, не получал ли уже
+        cursor.execute("""
+            SELECT value FROM user_flags 
+            WHERE user_id = %s AND flag_name = 'newbie_kit_received'
+        """, (user_id,))
+        
+        if cursor.fetchone():
+            return {'success': False, 'message': 'Вы уже получили набор новичка'}
+        
+        # Выдаём предметы из NEWBIE_KIT_ITEMS
+        for item_name, quantity in NEWBIE_KIT_ITEMS:
+            cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+            item = cursor.fetchone()
+            if item:
+                cursor.execute("""
+                    INSERT INTO user_inventory (user_id, item_id, quantity)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, item_id) DO UPDATE 
+                    SET quantity = user_inventory.quantity + EXCLUDED.quantity
+                """, (user_id, item['id'], quantity))
+        
+        # Ставим флаг о получении
+        cursor.execute("""
+            INSERT INTO user_flags (user_id, flag_name, value)
+            VALUES (%s, 'newbie_kit_received', 1)
+            ON CONFLICT (user_id, flag_name) DO NOTHING
+        """, (user_id,))
+    
+    return {'success': True, 'message': '✅ Набор новичка получен! Проверь инвентарь.'}
+
 # Рынок P2P
 # ---------------------------------------------------------------------------
 
