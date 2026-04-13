@@ -1890,6 +1890,34 @@ def remove_shells(vk_id: int, quantity: int) -> bool:
         return cursor.rowcount > 0
 
 
+def add_shells(vk_id: int, quantity: int) -> tuple[bool, str]:
+    """Добавить гильзы игроку с учётом вместимости мешочка.
+    Возвращает (успех, сообщение)."""
+    shells_info = get_shells_info(vk_id)
+    current = shells_info['current']
+    capacity = shells_info['capacity']
+
+    available_space = capacity - current
+    if available_space <= 0:
+        return False, f"Мешочек полон! ({current}/{capacity})"
+
+    actual_add = min(quantity, available_space)
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return False, "Пользователь не найден."
+
+        cursor.execute("""
+            UPDATE users SET shells = shells + %s
+            WHERE id = %s
+        """, (actual_add, user['id']))
+
+    if actual_add < quantity:
+        return True, f"Добавлено {actual_add} гильз (мешочек полон: {current + actual_add}/{capacity})"
+    return True, f"Добавлено {actual_add} гильз"
+
+
 def get_loot_from_human(player_luck: int = 5) -> list[dict]:
     import random
     _, by_cat, _ = _get_cached_items()
