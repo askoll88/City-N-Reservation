@@ -2668,7 +2668,7 @@ def get_active_emission():
     with db_cursor() as (cursor, _):
         cursor.execute("""
             SELECT * FROM emissions
-            WHERE status IN ('pending', 'warning', 'active')
+            WHERE status IN ('pending', 'warning', 'impact')
               AND end_time > NOW()
             ORDER BY impact_time ASC
             LIMIT 1
@@ -2716,7 +2716,7 @@ def get_emission_stats():
         cursor.execute("""
             SELECT
                 COUNT(*) as total_emissions,
-                COUNT(*) FILTER (WHERE status = 'active') as active_emissions,
+                COUNT(*) FILTER (WHERE status = 'impact') as active_emissions,
                 COUNT(*) FILTER (WHERE admin_triggered = TRUE) as admin_triggered,
                 MAX(created_at) as last_emission
             FROM emissions

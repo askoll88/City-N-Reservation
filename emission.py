@@ -31,8 +31,10 @@ logger = logging.getLogger(__name__)
 EMISSION_PHASE_PENDING = "pending"      # Выброс запланирован, ждём warning_time
 EMISSION_PHASE_WARNING = "warning"      # Предупреждение отправлено (15 мин до удара)
 EMISSION_PHASE_IMPACT = "impact"        # Выброс бьёт (30 мин)
-EMISSION_PHASE_AFTERMATH = "aftermath"  # Последствия (бонусы, 60 мин)
 EMISSION_PHASE_FINISHED = "finished"    # Завершён
+EMISSION_PHASE_CANCELLED = "cancelled"  # Отменён
+# После выброса: aftermath проверяется через get_emission_aftermath_active()
+# (status = 'finished' + aftermath_end > NOW())
 
 
 # =========================================================================
@@ -171,7 +173,7 @@ def emission_tick(vk):
         if random.random() < config.EMISSION_CANCEL_CHANCE:
             logger.info("Выброс #%d: ОТМЕНЁН (шанс %.0f%%)", emission_id, config.EMISSION_CANCEL_CHANCE * 100)
             _announce_emission_cancelled(vk, emission_id)
-            database.update_emission_status(emission_id, "cancelled")
+            database.update_emission_status(emission_id, EMISSION_PHASE_CANCELLED)
         else:
             logger.info("Выброс #%d: переход в фазу IMPACT", emission_id)
             _apply_emission_impact(vk, emission_id)

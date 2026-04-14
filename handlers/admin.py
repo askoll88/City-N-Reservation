@@ -181,14 +181,16 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         return True
 
     if text == "⛔ отменить выброс":
-        from emission import EMISSION_PHASE_IMPACT
+        from emission import EMISSION_PHASE_IMPACT, _announce_emission_cancelled
         emission = database.get_active_emission()
         if not emission:
             _send(vk, user_id, "ℹ️ Нет активного выброса.", create_admin_emission_keyboard()); return True
         if emission["status"] == EMISSION_PHASE_IMPACT:
             _send(vk, user_id, "❌ Нельзя отменить — выброс уже бьёт!", create_admin_emission_keyboard()); return True
-        database.update_emission_status(emission["id"], "cancelled")
-        _send(vk, user_id, f"✅ Выброс #{emission['id']} отменён.", create_admin_emission_keyboard()); return True
+        # Сначала оповещаем игроков, потом обновляем статус
+        _announce_emission_cancelled(vk, emission["id"])
+        database.update_emission_status(emission["id"], EMISSION_PHASE_CANCELLED)
+        _send(vk, user_id, f"✅ Выброс #{emission['id']} отменён. Игрокам отправлено оповещение.", create_admin_emission_keyboard()); return True
 
     if text == "📊 статус выброса":
         stats = database.get_emission_stats()
