@@ -445,10 +445,15 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
         show_market_listings,
         show_my_market_listings,
         show_my_market_transactions,
+        handle_market_input,
         handle_market_create_listing,
         handle_market_buy_listing,
         handle_market_cancel_listing,
     )
+
+    # Универсальный обработчик рынка (пагинация, сортировка, поиск, навигация)
+    if handle_market_input(player, vk, user_id, text):
+        return True
 
     # Команды P2P рынка (парсим первыми, чтобы не перехватились обычным "купить ...")
     if handle_market_create_listing(player, vk, user_id, text):

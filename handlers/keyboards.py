@@ -261,26 +261,120 @@ def create_artifact_shop_keyboard():
 # ============================================================
 
 def create_player_market_keyboard():
-    """Клавиатура P2P рынка"""
+    """Главная клавиатура P2P рынка"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Рынок показать", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Мои лоты", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("📈 Все лоты", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("🧾 Мои лоты", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("Рынок оружие", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Рынок броня", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("🔫 Оружие", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("🛡️ Броня", color=VkKeyboardColor.POSITIVE)
     keyboard.add_line()
-    keyboard.add_button("Рынок артефакты", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Мои сделки", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("💎 Артефакты", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("💊 Медицина", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
+    keyboard.add_button("🍖 Еда", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("📒 Мои сделки", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_market_pagination_keyboard(page: int, pages: int, category: str | None = None,
+                                       sort: str = "newest", search: str | None = None):
+    """Клавиатура с пагинацией и сортировкой для рынка."""
+    keyboard = VkKeyboard(one_time=False)
+
+    # Ряд пагинации
+    if pages > 1:
+        # Показываем до 5 кнопок страниц
+        start_page = max(1, page - 2)
+        end_page = min(pages, start_page + 4)
+        if end_page - start_page < 4:
+            start_page = max(1, end_page - 4)
+
+        for p in range(start_page, end_page + 1):
+            color = VkKeyboardColor.PRIMARY if p == page else VkKeyboardColor.SECONDARY
+            keyboard.add_button(f"📄 {p}", color=color)
+            if p < end_page and (p - start_page + 1) % 3 == 0 and p < end_page:
+                keyboard.add_line()
+
+        keyboard.add_line()
+
+    # Ряд навигации
+    if page > 1:
+        keyboard.add_button("◀️ Назад", color=VkKeyboardColor.SECONDARY)
+    if page < pages:
+        keyboard.add_button("▶️ Вперёд", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+
+    # Ряд сортировки
+    sort_labels = [
+        ("🆕 Новые", "newest"),
+        ("📅 Старые", "oldest"),
+        ("💰 Дешевле", "cheap"),
+        ("💎 Дороже", "expensive"),
+    ]
+    for label, sort_key in sort_labels:
+        color = VkKeyboardColor.POSITIVE if sort == sort_key else VkKeyboardColor.SECONDARY
+        keyboard.add_button(label, color=color)
+    keyboard.add_line()
+
+    # Ряд действий
+    keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
+    if category:
+        keyboard.add_button("✖️ Сбросить фильтр", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("🏠 Главная", color=VkKeyboardColor.NEGATIVE)
+
+    return keyboard
+
+
+def create_market_listing_keyboard(listing_id: int):
+    """Inline-подобная клавиатура для конкретного лота (через текст)."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button(f"🛒 Купить лот {listing_id}", color=VkKeyboardColor.POSITIVE)
+    return keyboard
+
+
+def create_my_listings_keyboard(page: int, pages: int):
+    """Клавиатура для управления своими лотами."""
+    keyboard = VkKeyboard(one_time=False)
+
+    if pages > 1:
+        start_page = max(1, page - 2)
+        end_page = min(pages, start_page + 4)
+        if end_page - start_page < 4:
+            start_page = max(1, end_page - 4)
+
+        for p in range(start_page, end_page + 1):
+            color = VkKeyboardColor.PRIMARY if p == page else VkKeyboardColor.SECONDARY
+            keyboard.add_button(f"📄 {p}", color=color)
+        keyboard.add_line()
+
+    keyboard.add_button("📋 Активные", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("✅ Проданные", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("📊 Все", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("📈 Все лоты", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("🏠 Главная", color=VkKeyboardColor.NEGATIVE)
+
+    return keyboard
+
+
+def create_market_search_keyboard():
+    """Клавиатура для режима поиска."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("🔍 Найти", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("✖️ Отмена", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
 def create_purchase_confirm_keyboard():
     """Подтверждение покупки P2P"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Подтвердить", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Отмена", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("✅ Подтвердить", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("❌ Отмена", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 

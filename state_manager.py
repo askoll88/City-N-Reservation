@@ -311,6 +311,47 @@ def clear_pending_purchase(user_id: int):
     _pending_purchase_state.pop(user_id, None)
 
 
+# === Состояние просмотра рынка (пагинация, фильтры, сортировка) ===
+_market_browse_state = LockedDict()  # {user_id: {category, page, sort, search, view}}
+
+
+def set_market_browse_state(user_id: int, category: str | None = None, page: int = 1,
+                              sort: str = "newest", search: str | None = None,
+                              view: str = "all"):
+    """Установить состояние просмотра рынка."""
+    _market_browse_state[user_id] = {
+        "category": category,
+        "page": page,
+        "sort": sort,
+        "search": search,
+        "view": view,
+    }
+
+
+def get_market_browse_state(user_id: int) -> dict | None:
+    """Получить состояние просмотра рынка."""
+    return _market_browse_state.get(user_id)
+
+
+def clear_market_browse_state(user_id: int):
+    """Очистить состояние просмотра рынка."""
+    _market_browse_state.pop(user_id, None)
+
+
+def set_market_my_listings_page(user_id: int, page: int = 1, status: str = "active"):
+    """Установить страницу для просмотра своих лотов."""
+    state = _market_browse_state.get(user_id, {})
+    state["my_listings_page"] = page
+    state["my_listings_status"] = status
+    _market_browse_state[user_id] = state
+
+
+def get_market_my_listings_page(user_id: int) -> tuple:
+    """Получить страницу и статус для своих лотов."""
+    state = _market_browse_state.get(user_id, {})
+    return state.get("my_listings_page", 1), state.get("my_listings_status", "active")
+
+
 # === Работа со случайными событиями ===
 _pending_event_state = LockedDict()  # {user_id: event_data}
 

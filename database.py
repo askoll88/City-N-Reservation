@@ -1535,6 +1535,163 @@ def get_market_listing_info(listing_id: int) -> dict | None:
         return dict(row)
 
 
+def count_market_listings(category: str | None = None, search: str | None = None) -> int:
+    """Посчитать количество активных лотов для пагинации."""
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+        if category and search:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt
+                FROM market_listings l
+                JOIN items i ON i.id = l.item_id
+                WHERE l.status = 'active'
+                  AND l.expires_at > NOW()
+                  AND i.category = %s
+                  AND LOWER(l.item_name) LIKE LOWER(%s)
+            """, (category, f"%{search}%"))
+        elif category:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt
+                FROM market_listings l
+                JOIN items i ON i.id = l.item_id
+                WHERE l.status = 'active'
+                  AND l.expires_at > NOW()
+                  AND i.category = %s
+            """, (category,))
+        elif search:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt
+                FROM market_listings l
+                WHERE l.status = 'active'
+                  AND l.expires_at > NOW()
+                  AND LOWER(l.item_name) LIKE LOWER(%s)
+            """, (f"%{search}%",))
+        else:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt
+                FROM market_listings l
+                WHERE l.status = 'active'
+                  AND l.expires_at > NOW()
+            """)
+        row = cursor.fetchone()
+        return row["cnt"] if row else 0
+
+
+def get_market_listings(page: int = 1, per_page: int = 8, category: str | None = None,
+                        sort: str = "newest", search: str | None = None) -> dict:
+    """
+    Получить страницу лотов рынка.
+    Возвращает dict: {listings, total, page, pages, per_page}
+    sort: newest|oldest|cheap|expensive
+    """
+    if not is_market_enabled():
+        return {"listings": [], "total": 0, "page": 1, "pages": 1, "per_page": per_page}
+
+    offset = (page - 1) * per_page
+    total = count_market_listings(category, search)
+    pages = max(1, (total + per_page - 1) // per_page)
+
+    # Определяем сортировку
+    order_clause = "l.created_at DESC"
+    if sort == "oldest":
+        order_clause = "l.created_at ASC"
+    elif sort == "cheap":
+        order_clause = "l.price_per_item ASC"
+    elif sort == "expensive":
+        order_clause = "l.price_per_item DESC"
+
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+
+        conditions = ["l.status = 'active'", "l.expires_at > NOW()"]
+        params: list = []
+
+        if category:
+            conditions.append("i.category = %s")
+            params.append(category)
+        if search:
+            conditions.append("LOWER(l.item_name) LIKE LOWER(%s)")
+            params.append(f"%{search}%")
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+            SELECT l.id, l.seller_vk_id, l.item_name, l.quantity, l.price_per_item,
+                   (l.quantity * l.price_per_item) AS total_price,
+                   l.expires_at, l.created_at, i.category, i.rarity
+            FROM market_listings l
+            JOIN items i ON i.id = l.item_id
+            WHERE {where_clause}
+            ORDER BY {order_clause}
+            LIMIT %s OFFSET %s
+        """
+        params.extend([per_page, offset])
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        return {
+            "listings": [dict(row) for row in rows],
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "per_page": per_page,
+        }
+
+
+def get_market_user_listings(vk_id: int, status: str = "active", page: int = 1, per_page: int = 8) -> dict:
+    """Получить лоты пользователя с пагинацией."""
+    offset = (page - 1) * per_page
+
+    with db_cursor() as (cursor, _):
+        _expire_market_listings_tx(cursor)
+
+        if status == "all":
+            cursor.execute("""
+                SELECT id, item_name, quantity, price_per_item,
+                       (quantity * price_per_item) AS total_price,
+                       status, created_at, expires_at, completed_at, cancelled_at
+                FROM market_listings
+                WHERE seller_vk_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+            """, (vk_id, per_page, offset))
+
+            cursor.execute("""
+                SELECT COUNT(*) as cnt
+                FROM market_listings
+                WHERE seller_vk_id = %s
+            """, (vk_id,))
+        else:
+            cursor.execute("""
+                SELECT id, item_name, quantity, price_per_item,
+                       (quantity * price_per_item) AS total_price,
+                       status, created_at, expires_at, completed_at, cancelled_at
+                FROM market_listings
+                WHERE seller_vk_id = %s
+                  AND status = %s
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+            """, (vk_id, status, per_page, offset))
+
+            cursor.execute("""
+                SELECT COUNT(*) as cnt
+                FROM market_listings
+                WHERE seller_vk_id = %s AND status = %s
+            """, (vk_id, status))
+
+        rows = cursor.fetchall()
+        total = cursor.fetchone()["cnt"] if cursor.description else 0
+        pages = max(1, (total + per_page - 1) // per_page)
+
+        return {
+            "listings": [dict(row) for row in rows],
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "per_page": per_page,
+        }
+
+
 def buy_market_listing(vk_id: int, listing_id: int) -> dict:
     if not is_market_enabled():
         return {"success": False, "message": "P2P рынок временно отключён администратором."}
@@ -1666,59 +1823,6 @@ def cancel_market_listing(vk_id: int, listing_id: int) -> dict:
         "success": True,
         "message": f"Лот #{listing_id} снят. Предмет возвращён в инвентарь.",
     }
-
-
-def get_market_listings(limit: int = 10, offset: int = 0, category: str | None = None) -> list[dict]:
-    if not is_market_enabled():
-        return []
-    with db_cursor() as (cursor, _):
-        _expire_market_listings_tx(cursor)
-        if category:
-            cursor.execute("""
-                SELECT l.id, l.seller_vk_id, l.item_name, l.quantity, l.price_per_item,
-                       (l.quantity * l.price_per_item) AS total_price,
-                       l.expires_at, i.category, i.rarity
-                FROM market_listings l
-                JOIN items i ON i.id = l.item_id
-                WHERE l.status = 'active'
-                  AND l.expires_at > NOW()
-                  AND i.category = %s
-                ORDER BY l.created_at DESC
-                LIMIT %s OFFSET %s
-            """, (category, limit, offset))
-        else:
-            cursor.execute("""
-                SELECT l.id, l.seller_vk_id, l.item_name, l.quantity, l.price_per_item,
-                       (l.quantity * l.price_per_item) AS total_price,
-                       l.expires_at, i.category, i.rarity
-                FROM market_listings l
-                JOIN items i ON i.id = l.item_id
-                WHERE l.status = 'active'
-                  AND l.expires_at > NOW()
-                ORDER BY l.created_at DESC
-                LIMIT %s OFFSET %s
-            """, (limit, offset))
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
-
-
-def get_market_user_listings(vk_id: int, status: str = "active", limit: int = 20) -> list[dict]:
-    if not is_market_enabled():
-        return []
-    with db_cursor() as (cursor, _):
-        _expire_market_listings_tx(cursor)
-        cursor.execute("""
-            SELECT id, item_name, quantity, price_per_item,
-                   (quantity * price_per_item) AS total_price,
-                   status, created_at, expires_at, completed_at, cancelled_at
-            FROM market_listings
-            WHERE seller_vk_id = %s
-              AND (%s = 'all' OR status = %s)
-            ORDER BY created_at DESC
-            LIMIT %s
-        """, (vk_id, status, status, limit))
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
 
 
 def get_market_user_transactions(vk_id: int, limit: int = 20) -> list[dict]:
