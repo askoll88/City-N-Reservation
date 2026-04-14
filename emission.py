@@ -13,7 +13,6 @@ import database
 from constants import SAFE_LOCATIONS, DANGEROUS_LOCATIONS
 from state_manager import (
     set_emission_pending, get_emission_pending, clear_emission_pending,
-    set_pending_event, get_pending_event, clear_pending_event,
 )
 from handlers.keyboards import (
     create_emission_warning_keyboard,
@@ -162,29 +161,59 @@ def emission_tick(vk):
     end_time = emission["end_time"]
     status = emission["status"]
 
+    logger.debug(
+        "Выброс #%d: tick | status=%s | now=%s | warning=%s | impact=%s | end=%s",
+        emission_id, status, now, warning_time, impact_time, end_time,
+    )
+
     # Переход: pending → warning
     if status == EMISSION_PHASE_PENDING and now >= warning_time:
-        logger.info("Выброс #%d: переход в фазу WARNING", emission_id)
-        _send_warning_to_all_players(vk, emission_id)
-        database.update_emission_status(emission_id, EMISSION_PHASE_WARNING)
+        logger.info("Выброс #%d: переход в фазу WARNING (now=%s >= warning=%s)", emission_id, now, warning_time)
+        try:
+            _send_warning_to_all_players(vk, emission_id)
+            database.update_emission_status(emission_id, EMISSION_PHASE_WARNING)
+            logger.info("Выброс #%d: успешно перешёл в WARNING", emission_id)
+        except Exception as e:
+            logger.error("Выброс #%d: ОШИБКА при переходе в WARNING: %s", emission_id, e, exc_info=True)
 
     # Переход: warning → impact
     elif status == EMISSION_PHASE_WARNING and now >= impact_time:
-        # Проверяем шанс отмены (как в S.T.A.L.K.E.R.)
-        if random.random() < config.EMISSION_CANCEL_CHANCE:
-            logger.info("Выброс #%d: ОТМЕНЁН (шанс %.0f%%)", emission_id, config.EMISSION_CANCEL_CHANCE * 100)
-            _announce_emission_cancelled(vk, emission_id)
-            database.update_emission_status(emission_id, EMISSION_PHASE_CANCELLED)
-        else:
-            logger.info("Выброс #%d: переход в фазу IMPACT", emission_id)
-            _apply_emission_impact(vk, emission_id)
-            database.update_emission_status(emission_id, EMISSION_PHASE_IMPACT)
+        logger.info("Выброс #%d: переход в фазу IMPACT (now=%s >= impact=%s)", emission_id, now, impact_time)
+        try:
+            # Проверяем шанс отмены (как в S.T.A.L.K.E.R.)
+            cancel_roll = random.random()
+            logger.info("Выброс #%d: шанс отмены %.0f%%, rolled %.2f", emission_id, config.EMISSION_CANCEL_CHANCE * 100, cancel_roll)
+            
+            if cancel_roll < config.EMISSION_CANCEL_CHANCE:
+                logger.info("Выброс #%d: ОТМЕНЁН (шанс %.0f%%)", emission_id, config.EMISSION_CANCEL_CHANCE * 100)
+                _announce_emission_cancelled(vk, emission_id)
+                database.update_emission_status(emission_id, EMISSION_PHASE_CANCELLED)
+            else:
+                logger.info("Выброс #%d: применяю урон", emission_id)
+                _apply_emission_impact(vk, emission_id)
+                database.update_emission_status(emission_id, EMISSION_PHASE_IMPACT)
+                logger.info("Выброс #%d: успешно перешёл в IMPACT", emission_id)
+        except Exception as e:
+            logger.error("Выброс #%d: ОШИБКА при переходе в IMPACT: %s", emission_id, e, exc_info=True)
 
     # Переход: impact → finished (aftermath начинается автоматически)
     elif status == EMISSION_PHASE_IMPACT and now >= end_time:
-        logger.info("Выброс #%d: переход в фазу FINISHED (aftermath активен)", emission_id)
-        database.update_emission_status(emission_id, EMISSION_PHASE_FINISHED)
-        _announce_aftermath(vk, emission_id)
+        logger.info("Выброс #%d: переход в фазу FINISHED (now=%s >= end=%s)", emission_id, now, end_time)
+        try:
+            database.update_emission_status(emission_id, EMISSION_PHASE_FINISHED)
+            _announce_aftermath(vk, emission_id)
+            logger.info("Выброс #%d: успешно перешёл в FINISHED (aftermath активен)", emission_id)
+        except Exception as e:
+            logger.error("Выброс #%d: ОШИБКА при переходе в FINISHED: %s", emission_id, e, exc_info=True)
+    else:
+        logger.debug(
+            "Выброс #%d: нет перехода | status=%s, now=%s | "
+            "pending_check=%s, warning_check=%s, impact_check=%s",
+            emission_id, status, now,
+            status == EMISSION_PHASE_PENDING and now >= warning_time,
+            status == EMISSION_PHASE_WARNING and now >= impact_time,
+            status == EMISSION_PHASE_IMPACT and now >= end_time,
+        )
 
 
 # =========================================================================
@@ -217,8 +246,8 @@ def _send_warning_to_all_players(vk, emission_id: int):
                     ),
                     random_id=0,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Выброс #%d: не удалось отправить warning (safe) игроку %s: %s", emission_id, vk_id, e)
         else:
             warned_count += 1
             # Игрок в опасности — ставим pending событие
@@ -257,8 +286,8 @@ def _send_warning_to_all_players(vk, emission_id: int):
                     keyboard=create_emission_warning_keyboard().get_keyboard(),
                     random_id=0,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Выброс #%d: не удалось отправить warning игроку %s: %s", emission_id, vk_id, e)
 
     logger.info(
         "Выброс #%d: предупреждение отправлено. В опасности: %d, в безопасности: %d",
@@ -506,8 +535,8 @@ def _apply_emission_impact(vk, emission_id: int):
                 keyboard=create_emission_impact_keyboard(location).get_keyboard(),
                 random_id=0,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Выброс #%d: не удалось отправить impact игроку %s: %s", emission_id, vk_id, e)
 
     logger.info(
         "Выброс #%d: удар применён. Повреждено: %d, погибло: %d, в безопасности: %d",
