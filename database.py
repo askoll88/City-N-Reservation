@@ -2296,91 +2296,95 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
     Забрать награду за ежедневные задания.
     Возвращает dict с наградой или None, если нельзя забрать.
     """
-    with db_cursor() as (cursor, conn):
-        cursor.execute("""
-            SELECT quest_json, progress_json, streak, claimed
-            FROM daily_quests
-            WHERE vk_id = %s AND quest_date = CURRENT_DATE
-            FOR UPDATE
-        """, (vk_id,))
-        row = cursor.fetchone()
-        if not row:
-            return None
-        if row["claimed"]:
-            return {"error": "already_claimed"}
+    try:
+        with db_cursor() as (cursor, conn):
+            cursor.execute("""
+                SELECT quest_json, progress_json, streak, claimed
+                FROM daily_quests
+                WHERE vk_id = %s AND quest_date = CURRENT_DATE
+                FOR UPDATE
+            """, (vk_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if row["claimed"]:
+                return {"error": "already_claimed"}
 
-        quests = row["quest_json"]
-        progress = row["progress_json"]
-        streak = row["streak"]
+            quests = row["quest_json"]
+            progress = row["progress_json"] or {}
+            streak = row["streak"] or 0
 
-        # Проверяем, все ли задания выполнены
-        all_done = True
-        for q in quests:
-            qid = q["id"]
-            target = q.get("target", 1)
-            if progress.get(qid, 0) < target:
-                all_done = False
-                break
+            # Проверяем, все ли задания выполнены
+            all_done = True
+            for q in quests:
+                qid = q["id"]
+                target = q.get("target", 1)
+                if progress.get(qid, 0) < target:
+                    all_done = False
+                    break
 
-        if not all_done:
-            return {"error": "not_all_complete"}
+            if not all_done:
+                return {"error": "not_all_complete"}
 
-        # Считаем награду
-        total_xp = 0
-        total_money = 0
-        bonus_items = []
+            # Считаем награду
+            total_xp = 0
+            total_money = 0
+            bonus_items = []
 
-        for q in quests:
-            qid = q["id"]
-            prog = progress.get(qid, 0)
-            target = q.get("target", 1)
-            xp = q.get("reward_xp", 0)
-            money = q.get("reward_money", 0)
+            for q in quests:
+                qid = q["id"]
+                prog = progress.get(qid, 0)
+                target = q.get("target", 1)
+                xp = q.get("reward_xp", 0)
+                money = q.get("reward_money", 0)
 
-            # Пропорциональная награда за частичный прогресс
-            ratio = min(prog, target) / target
-            total_xp += int(xp * ratio)
-            total_money += int(money * ratio)
+                # Пропорциональная награда за частичный прогресс
+                ratio = min(prog, target) / target
+                total_xp += int(xp * ratio)
+                total_money += int(money * ratio)
 
-        # Бонус за streak
-        from daily_quests import STREAK_BONUSES
-        if streak in STREAK_BONUSES:
-            bonus = STREAK_BONUSES[streak]
-            mult = bonus["multiplier"]
-            total_xp = int(total_xp * mult)
-            total_money = int(total_money * mult)
-            if bonus.get("bonus_item"):
-                bonus_items.append(bonus["bonus_item"])
+            # Бонус за streak
+            from daily_quests import STREAK_BONUSES
+            if streak in STREAK_BONUSES:
+                bonus = STREAK_BONUSES[streak]
+                mult = bonus["multiplier"]
+                total_xp = int(total_xp * mult)
+                total_money = int(total_money * mult)
+                if bonus.get("bonus_item"):
+                    bonus_items.append(bonus["bonus_item"])
 
-        # Обновляем streak и claimed
-        new_streak = streak + 1
-        cursor.execute("""
-            UPDATE daily_quests
-            SET claimed = TRUE,
-                streak = %s,
-                last_complete = CURRENT_DATE
-            WHERE vk_id = %s AND quest_date = CURRENT_DATE
-        """, (new_streak, vk_id))
+            # Обновляем streak и claimed
+            new_streak = streak + 1
+            cursor.execute("""
+                UPDATE daily_quests
+                SET claimed = TRUE,
+                    streak = %s,
+                    last_complete = CURRENT_DATE
+                WHERE vk_id = %s AND quest_date = CURRENT_DATE
+            """, (new_streak, vk_id))
 
-        # Обновляем деньги и XP игрока
-        cursor.execute("""
-            UPDATE users
-            SET money = money + %s,
-                experience = experience + %s
-            WHERE vk_id = %s
-            RETURNING money, experience
-        """, (total_money, total_xp, vk_id))
-        user_row = cursor.fetchone()
+            # Обновляем деньги и XP игрока
+            cursor.execute("""
+                UPDATE users
+                SET money = money + %s,
+                    experience = experience + %s
+                WHERE vk_id = %s
+                RETURNING money, experience
+            """, (total_money, total_xp, vk_id))
+            user_row = cursor.fetchone()
 
-        return {
-            "success": True,
-            "xp": total_xp,
-            "money": total_money,
-            "bonus_items": bonus_items,
-            "new_streak": new_streak,
-            "new_money": user_row["money"] if user_row else 0,
-            "new_xp": user_row["experience"] if user_row else 0,
-        }
+            return {
+                "success": True,
+                "xp": total_xp,
+                "money": total_money,
+                "bonus_items": bonus_items,
+                "new_streak": new_streak,
+                "new_money": user_row["money"] if user_row else 0,
+                "new_xp": user_row["experience"] if user_row else 0,
+            }
+    except Exception as e:
+        logger.error("claim_daily_rewards ошибка для vk_id=%s: %s", vk_id, e)
+        return {"error": "exception", "detail": str(e)}
 
 
 def reset_daily_quests_if_needed(vk_id: int):
