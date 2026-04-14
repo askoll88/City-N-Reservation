@@ -382,49 +382,43 @@ class Player:
         loc = self.location
         exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[20])
         current_weight = self.inventory.total_weight
-        weight_status = "ОК" if current_weight <= self.max_weight else "ПЕРЕГРУЗ"
+        weight_status = "✅ В норме" if current_weight <= self.max_weight else "❌ ПЕРЕГРУЗ"
 
         # ═══════════════════════════════════════════════════
-        # КРАСИВЫЕ ПРОГРЕСС-БАРЫ
+        # ПРОГРЕСС-БАРЫ
         # ═══════════════════════════════════════════════════
         def create_bar(current: int, max_val: int, length: int = 10) -> str:
-            """Создать красивый прогресс-бар"""
+            """Создать прогресс-бар"""
             percent = current / max_val
             filled = int(percent * length)
-
-            # Символы для бара
             if percent >= 0.7:
-                fill_char = "🟩"  # Зелёный
+                fill_char = "🟩"
             elif percent >= 0.3:
-                fill_char = "🟨"  # Жёлтый
+                fill_char = "🟨"
             else:
-                fill_char = "🟥"  # Красный
-
-            empty_char = "⬜"  # Пустой
+                fill_char = "🟥"
+            empty_char = "⬛"
             return fill_char * filled + empty_char * (length - filled)
 
         def create_rad_bar(current: int, max_val: int = 100, length: int = 10) -> str:
             """Прогресс-бар радиации (инвертированный)"""
             percent = current / max_val
             filled = int(percent * length)
-
-            # Для радиации: зелёный → жёлтый → красный
             if percent <= 0.3:
-                fill_char = "🟩"  # Мало радиации
+                fill_char = "🟩"
             elif percent <= 0.7:
-                fill_char = "🟨"  # Средне
+                fill_char = "🟨"
             else:
-                fill_char = "🟥"  # Опасно
-
-            empty_char = "⬜"
+                fill_char = "🟥"
+            empty_char = "⬛"
             return fill_char * filled + empty_char * (length - filled)
 
         def create_exp_bar(current: int, max_val: int, length: int = 10) -> str:
             """Прогресс-бар опыта (синий)"""
             percent = current / max_val
             filled = int(percent * length)
-            fill_char = "🔵"  # Синий для опыта
-            empty_char = "⬜"
+            fill_char = "🔹"
+            empty_char = "⬛"
             return fill_char * filled + empty_char * (length - filled)
 
         # Прогресс-бары
@@ -433,222 +427,159 @@ class Player:
         rad_bar = create_rad_bar(self.radiation)
         exp_bar = create_exp_bar(self.experience, exp_needed)
 
-        # Формируем строку экипировки
-        equip_parts = []
-
-        # Оружие с общей атакой
+        # ═══════════════════════════════════════════════════
+        # СНАРЯЖЕНИЕ
+        # ═══════════════════════════════════════════════════
         total_attack = 0
         if self.equipped_weapon:
             weapon_item = database.get_item_by_name(self.equipped_weapon)
             attack = weapon_item.get('attack', 0) if weapon_item else 0
             total_attack = attack
-            equip_parts.append(f"🔫 Оружие: {self.equipped_weapon} (атака {attack})")
-        else:
-            equip_parts.append("🔫 Оружие: нет")
 
-        # Броня с общей защитой
-        armor_parts = []
+        # Броня по слотам
+        armor_slots = []
         total_armor = 0
+        slot_icons = {
+            'equipped_armor_head': '🧢',
+            'equipped_armor_body': '🧥',
+            'equipped_armor_legs': '👖',
+            'equipped_armor_hands': '🧤',
+            'equipped_armor_feet': '👟',
+        }
+        slot_names = {
+            'equipped_armor_head': 'Голова',
+            'equipped_armor_body': 'Тело',
+            'equipped_armor_legs': 'Ноги',
+            'equipped_armor_hands': 'Руки',
+            'equipped_armor_feet': 'Ноги (обувь)',
+        }
 
-        # Загружаем данные из БД для всех слотов брони
         if user_data:
-            head = user_data.get('equipped_armor_head')
-            body = user_data.get('equipped_armor_body')
-            legs = user_data.get('equipped_armor_legs')
-            hands = user_data.get('equipped_armor_hands')
-            feet = user_data.get('equipped_armor_feet')
-
-            if head:
-                item = database.get_item_by_name(head)
-                def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"   🧢 {head} (броня {def_val})")
-                total_armor += def_val
-            if body:
-                item = database.get_item_by_name(body)
-                def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"   🧥 {body} (броня {def_val})")
-                total_armor += def_val
-            if legs:
-                item = database.get_item_by_name(legs)
-                def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"   👖 {legs} (броня {def_val})")
-                total_armor += def_val
-            if hands:
-                item = database.get_item_by_name(hands)
-                def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"   🧤 {hands} (броня {def_val})")
-                total_armor += def_val
-            if feet:
-                item = database.get_item_by_name(feet)
-                def_val = item.get('defense', 0) if item else 0
-                armor_parts.append(f"   👟 {feet} (броня {def_val})")
-                total_armor += def_val
-
-        if armor_parts:
-            armor_text = "\n".join(armor_parts)
-            equip_parts.append(f"🛡️ Броня:\n{armor_text}\n   ────────\n📊 Всего брони: {total_armor}")
-        else:
-            equip_parts.append("🛡️ Броня: нет\n📊 Всего брони: 0")
-
-        # Добавляем итоговую атаку
-        equip_parts.append(f"📊 Всего атаки: {total_attack}")
+            for slot, icon in slot_icons.items():
+                item_name = user_data.get(slot)
+                if item_name:
+                    item = database.get_item_by_name(item_name)
+                    def_val = item.get('defense', 0) if item else 0
+                    armor_slots.append(f"{icon} {item_name} (+{def_val})")
+                    total_armor += def_val
 
         # Артефакты
         equipped_artifacts_count = len(self.equipped_artifacts)
-        if equipped_artifacts_count > 0:
-            artifact_list = []
-            for art_name in self.equipped_artifacts:
-                art_item = database.get_item_by_name(art_name)
-                if art_item:
-                    bonuses = []
-                    if art_item.get('crit_bonus'):
-                        bonuses.append(f"крит:+{art_item['crit_bonus']}%")
-                    if art_item.get('find_bonus'):
-                        bonuses.append(f"находка:+{art_item['find_bonus']}%")
-                    if art_item.get('radiation'):
-                        bonuses.append(f"рад:{art_item['radiation']}")
-                    if art_item.get('energy_bonus'):
-                        bonuses.append(f"энергия:+{art_item['energy_bonus']}")
-                    if art_item.get('defense_bonus'):
-                        bonuses.append(f"защита:+{art_item['defense_bonus']}%")
-                    if art_item.get('dodge_bonus'):
-                        bonuses.append(f"уклон:+{art_item['dodge_bonus']}%")
 
-                    bonus_str = f" ({', '.join(bonuses)})" if bonuses else ""
-                    artifact_list.append(f"   🔮 {art_name}{bonus_str}")
-
-            artifacts_text = "\n".join(artifact_list)
-            equip_parts.append(f"🔮 Артефакты ({equipped_artifacts_count}/{self.artifact_slots}):")
-            equip_parts.append(artifacts_text)
-        else:
-            equip_parts.append(f"🔮 Артефакты: 0/{self.artifact_slots}")
-
-        if self.equipped_backpack:
-            bp_item = database.get_item_by_name(self.equipped_backpack)
-            bp_bonus = bp_item.get('backpack_bonus', 0) if bp_item else 0
-            equip_parts.append(f"🎒 Рюкзак: {self.equipped_backpack} (+{bp_bonus}кг)")
-        else:
-            equip_parts.append("🎒 Рюкзак: нет")
+        # Рюкзак
+        backpack_display = self.equipped_backpack or "—"
 
         # Детектор
-        if self.equipped_device:
-            equip_parts.append(f"📡 Детектор: {self.equipped_device}")
-        else:
-            equip_parts.append("📡 Детектор: нет")
+        detector_display = self.equipped_device or "—"
 
-        # Защита: броня + артефакты
-        artifact_def = self._get_artifact_bonuses().get('defense', 0)
-        defense_info = f"+{self.total_defense}"
-        if artifact_def > 0 and self.armor_defense > 0:
-            defense_info = f"+{self.total_defense} (броня: {self.armor_defense}, артефакты: {artifact_def})"
-        elif artifact_def > 0:
-            defense_info = f"+{self.total_defense} (артефакты: {artifact_def})"
-        elif self.armor_defense > 0:
-            defense_info = f"+{self.total_defense} (броня: {self.armor_defense})"
-
-        equip_text = "\n".join(equip_parts)
-
-        # Получаем информацию о гильзах
+        # ═══════════════════════════════════════════════════
+        # ГИЛЬЗЫ
+        # ═══════════════════════════════════════════════════
         shells_info = database.get_shells_info(self.user_id)
         shells_current = shells_info['current']
         shells_capacity = shells_info['capacity']
-        shells_bag = shells_info['equipped_bag'] or "нет"
-
-        shells_text = f"Гильзы: {shells_current}/{shells_capacity}"
-        if shells_bag != "нет":
-            shells_text += f" (мешочек: {shells_bag})"
-
-        # Получаем бонусы от пассивных навыков
-        passive_bonuses = self._get_passive_bonuses()
-        passive_info = ""
-        if passive_bonuses and self.player_class:
-            passive_info = "\n🎓Бонусы класса:\n"
-            bonus_parts = []
-            if passive_bonuses.get('dodge'):
-                bonus_parts.append(f"Уклонение: +{passive_bonuses['dodge']}%")
-            if passive_bonuses.get('crit_chance'):
-                bonus_parts.append(f"Крит: +{passive_bonuses['crit_chance']}%")
-            if passive_bonuses.get('sell_bonus'):
-                bonus_parts.append(f"Продажа: +{passive_bonuses['sell_bonus']}%")
-            if passive_bonuses.get('weapon_damage'):
-                bonus_parts.append(f"Урон оружия: +{passive_bonuses['weapon_damage']}%")
-            if passive_bonuses.get('max_weight'):
-                bonus_parts.append(f"Перенос: +{passive_bonuses['max_weight']}кг")
-            if passive_bonuses.get('defense'):
-                bonus_parts.append(f"Защита: +{passive_bonuses['defense']}")
-            if passive_bonuses.get('strength'):
-                bonus_parts.append(f"Сила: +{passive_bonuses['strength']}")
-            if passive_bonuses.get('crit_damage'):
-                bonus_parts.append(f"Крит урон: +{passive_bonuses['crit_damage']}%")
-            passive_info += ", ".join(bonus_parts) if bonus_parts else "нет"
-
-        class_info = f"\n🎭 Класс: {self.player_class.upper()}" if self.player_class else ""
-
-                # === HUD СТИЛЬ ===
-
-        def fmt_bar(bar: str) -> str:
-            return bar
-
-        weapon_text = self.equipped_weapon or "—"
-        armor_text = self.equipped_armor or "—"
-        backpack_text = self.equipped_backpack or "—"
-        detector_text = self.equipped_device or "—"
-
-        artifacts_count = len(self.equipped_artifacts)
-
-        # Вес
-        weight_status = "✅" if current_weight <= self.max_weight else "❌"
-
-        # Гильзы
         shells_bag = shells_info['equipped_bag'] or "—"
 
-        return (
-f"""📊 СТАТУС ПЕРСОНАЖА
-━━━━━━━━━━━━━━━━━━━
+        # ═══════════════════════════════════════════════════
+        # ПАССИВНЫЕ БОНУСЫ
+        # ═══════════════════════════════════════════════════
+        passive_bonuses = self._get_passive_bonuses()
+        class_info = f"🎭 <b>{self.player_class.upper()}</b>" if self.player_class else "🎭 Нет класса"
 
-❤️ Здоровье   {self.health}/{self.max_health}  {fmt_bar(hp_bar)}
-⚡ Энергия     {self.energy}/100  {fmt_bar(energy_bar)}
-☢️ Радиация     {self.radiation}%     {fmt_bar(rad_bar)}
+        # ═══════════════════════════════════════════════════
+        # ХАРАКТЕРИСТИКИ (derived)
+        # ═══════════════════════════════════════════════════
+        loc_name = loc.name if loc else "—"
 
-🎯 Уровень {self.level}
-Опыт: {self.experience} / {exp_needed}
-{fmt_bar(exp_bar)}
+        # ═══════════════════════════════════════════════════
+        # ФОРМИРОВАНИЕ HUD
+        # ═══════════════════════════════════════════════════
 
-💰 Деньги: {self.money:,} ₽
+        # --- Верхний блок: основное ---
+        lines = []
+        lines.append(f"📊 <b>СТАТУС ПЕРСОНАЖА</b>")
+        lines.append(f"📍 {loc_name}")
+        lines.append(f"🎯 Ур. {self.level}  |  {class_info}")
+        lines.append("")
 
-━━━━━━━━━━━━━━━━━━━
-🎒 ЭКИПИРОВКА
+        # --- Жизненные показатели ---
+        hp_pct = int(self.health / self.max_health * 100)
+        en_pct = self.energy
+        rad_pct = self.radiation
+        lines.append(f"❤️ <b>HP</b> {self.health}/{self.max_health} ({hp_pct}%)")
+        lines.append(f"   {hp_bar}")
+        lines.append(f"⚡ <b>Энергия</b> {self.energy}/100")
+        lines.append(f"   {energy_bar}")
+        lines.append(f"☢️ <b>Радиация</b> {self.radiation}%")
+        lines.append(f"   {rad_bar}")
+        lines.append("")
 
-🔫 Оружие:     {weapon_text}
-🛡️ Броня:      {armor_text}
-🔮 Артефакты:  {artifacts_count} / {self.artifact_slots}
-🎒 Рюкзак:     {backpack_text}
-📡 Детектор:   {detector_text}
+        # --- Опыт и деньги ---
+        exp_pct = int(self.experience / exp_needed * 100) if exp_needed > 0 else 0
+        lines.append(f"⭐ <b>Опыт</b> {self.experience}/{exp_needed} ({exp_pct}%)")
+        lines.append(f"   {exp_bar}")
+        lines.append(f"💰 <b>{self.money:,} ₽</b>")
+        lines.append("")
 
-📊 Итог:
-   Атака: {self.melee_damage}   |   Броня: {self.total_defense}
+        # --- Снаряжение ---
+        lines.append(f"🎒 <b>СНАРЯЖЕНИЕ</b>")
+        lines.append(f"🔫 {self.equipped_weapon or '—'}  |  ⚔️ Атака: {total_attack}")
 
-━━━━━━━━━━━━━━━━━━━
-💪 ХАРАКТЕРИСТИКИ
+        if armor_slots:
+            for slot_line in armor_slots:
+                lines.append(f"🛡️ {slot_line}")
+            lines.append(f"   📊 Всего брони: <b>{total_armor}</b>")
+        else:
+            lines.append(f"🛡️ Броня: —")
 
-Сила:         {self.strength}  → урон {self.melee_damage} | +{self.strength * 2} кг
-Выносливость: {self.stamina}  → HP {self.max_health}
-Восприятие:   {self.perception}  → лут {self.find_chance}%
-Удача:        {self.luck}  → крит {self.crit_chance}% | редкое {self.rare_find_chance}%
-Уклонение:    {self.dodge_chance}%
+        if equipped_artifacts_count > 0:
+            art_names = ", ".join(self.equipped_artifacts)
+            lines.append(f"🔮 Артефакты ({equipped_artifacts_count}/{self.artifact_slots}): {art_names}")
+        else:
+            lines.append(f"🔮 Артефакты: 0/{self.artifact_slots}")
 
-━━━━━━━━━━━━━━━━━━━
-📦 ГРУЗ
+        lines.append(f"🎒 Рюкзак: {backpack_display}  |  📡 {detector_display}")
+        lines.append("")
 
-Защита: +{self.total_defense} ({self.armor_defense})
-Вес: {current_weight} / {self.max_weight} кг  {weight_status}
+        # --- Характеристики ---
+        lines.append(f"💪 <b>ХАРАКТЕРИСТИКИ</b>")
+        lines.append(f"⚔️ Сила: <b>{self.strength}</b>  |  🏃 Выносливость: <b>{self.stamina}</b>")
+        lines.append(f"👁️ Восприятие: <b>{self.perception}</b>  |  🍀 Удача: <b>{self.luck}</b>")
+        lines.append("")
+        lines.append(f"📊 Урон: <b>{self.melee_damage}</b>  |  Броня: <b>{self.total_defense}</b>")
+        lines.append(f"🎯 Крит: <b>{self.crit_chance}%</b>  |  Уклонение: <b>{self.dodge_chance}%</b>")
+        lines.append(f"🔍 Находки: <b>{self.find_chance}%</b>  |  Редкое: <b>{self.rare_find_chance}%</b>")
+        lines.append("")
 
-━━━━━━━━━━━━━━━━━━━
-🎯 ГИЛЬЗЫ
+        # --- Груз ---
+        lines.append(f"📦 <b>ГРУЗ</b>")
+        lines.append(f"⚖️ {current_weight:.1f} / {self.max_weight} кг  {weight_status}")
+        lines.append(f"🎯 Гильзы: <b>{shells_current}</b> / {shells_capacity}  ({shells_bag})")
 
-{shells_current} / {shells_capacity}  ({shells_bag})
-"""
-        )
+        # --- Пассивные бонусы класса ---
+        if passive_bonuses and self.player_class:
+            bonus_parts = []
+            if passive_bonuses.get('dodge'):
+                bonus_parts.append(f"уклон +{passive_bonuses['dodge']}%")
+            if passive_bonuses.get('crit_chance'):
+                bonus_parts.append(f"крит +{passive_bonuses['crit_chance']}%")
+            if passive_bonuses.get('sell_bonus'):
+                bonus_parts.append(f"продажа +{passive_bonuses['sell_bonus']}%")
+            if passive_bonuses.get('weapon_damage'):
+                bonus_parts.append(f"урон +{passive_bonuses['weapon_damage']}%")
+            if passive_bonuses.get('max_weight'):
+                bonus_parts.append(f"вес +{passive_bonuses['max_weight']}кг")
+            if passive_bonuses.get('defense'):
+                bonus_parts.append(f"защита +{passive_bonuses['defense']}")
+            if passive_bonuses.get('strength'):
+                bonus_parts.append(f"сила +{passive_bonuses['strength']}")
+            if passive_bonuses.get('crit_damage'):
+                bonus_parts.append(f"крит.урон +{passive_bonuses['crit_damage']}%")
+            if bonus_parts:
+                lines.append("")
+                lines.append(f"🎓 <b>Бонусы {self.player_class}:</b> {'  '.join(bonus_parts)}")
+
+        return "\n".join(lines)
 
     def update_stats(self, health: int = None, energy: int = None, radiation: int = None, money: int = None, level: int = None, experience: int = None, strength: int = None, stamina: int = None, perception: int = None, luck: int = None, armor_defense: int = None, max_weight: int = None):
         """Обновить характеристики"""
