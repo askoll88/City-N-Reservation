@@ -66,6 +66,9 @@ def db_cursor():
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # Ensure DB session uses UTC so NOW() returns UTC.
+            # This prevents timezone mismatches when server TZ != UTC.
+            cursor.execute("SET timezone = 'UTC'")
             yield cursor, conn
             conn.commit()
     except Exception:

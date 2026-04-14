@@ -40,6 +40,13 @@ EMISSION_PHASE_CANCELLED = "cancelled"  # Отменён
 # Планирование выброса
 # =========================================================================
 
+def _to_naive_utc(dt: datetime) -> datetime:
+    """Convert a timezone-aware datetime to naive UTC for consistent DB storage."""
+    if dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+
 def schedule_next_emission():
     """
     Запланировать следующий выброс.
@@ -48,7 +55,7 @@ def schedule_next_emission():
     if not config.EMISSION_ENABLED:
         return None
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC
 
     # Случайный интервал
     interval_hours = random.uniform(
@@ -88,11 +95,16 @@ def schedule_next_emission():
 
 def schedule_admin_emission(vk):
     """Мгновенный выброс по команде админа (warning=now, impact=+15 мин)"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC
     warning_time = now
     impact_time = now + timedelta(minutes=config.EMISSION_WARNING_MINUTES)
     end_time = impact_time + timedelta(minutes=config.EMISSION_DURATION_MINUTES)
     aftermath_end = end_time + timedelta(minutes=config.EMISSION_AFTERMATH_MINUTES)
+
+    logger.info(
+        "schedule_admin_emission: now(UTC)=%s warning=%s impact=%s end=%s",
+        now, warning_time, impact_time, end_time,
+    )
 
     emission_id = database.create_emission_schedule(
         warning_time=warning_time,
