@@ -302,10 +302,8 @@ def apply_event_choice(event: dict, choice_index: int, player) -> str:
         if random.randint(1, 100) <= 40:
             common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
             item_name, qty = random.choice(common_items)
-            item = database.get_item_by_name(item_name)
-            if item:
-                database.add_user_item(player.user_id, item["id"], qty)
-                item_msg = f"{item_name} x{qty}"
+            database.add_item_to_inventory(player.user_id, item_name, qty)
+            item_msg = f"{item_name} x{qty}"
         return effect["message"].format(money=money_reward, item=item_msg)
 
     # Шанс артефакта
@@ -322,13 +320,11 @@ def apply_event_choice(event: dict, choice_index: int, player) -> str:
     # Случайный артефакт
     if effect.get("random_artifact"):
         from anomalies import get_artifact_from_anomaly
+        import database
         anomaly_type = random.choice(["жарка", "электра", "воронка", "туман", "магнит"])
         artifact = get_artifact_from_anomaly(anomaly_type)
         if artifact:
-            import database
-            item = database.get_item_by_name(artifact)
-            if item:
-                database.add_user_item(player.user_id, item["id"], 1)
+            database.add_item_to_inventory(player.user_id, artifact, 1)
             return effect["message"]
         return "Артефакт рассыпался в руках..."
 
@@ -344,9 +340,7 @@ def apply_event_choice(event: dict, choice_index: int, player) -> str:
         if has_item:
             # Удаляем предмет
             import database
-            item = database.get_item_by_name(item_name)
-            if item:
-                database.remove_user_item(player.user_id, item["id"], 1)
+            database.remove_item_from_inventory(player.user_id, item_name, 1)
             player.experience += effect.get("xp", 0)
             return effect["message"]
         else:

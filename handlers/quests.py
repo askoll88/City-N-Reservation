@@ -79,11 +79,7 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
         msg += "\n🎁 Бонусные предметы:\n"
         for item_name, qty in result["bonus_items"]:
             msg += f"   • {item_name} x{qty}\n"
-            # Даём предмет
-            import database
-            item = database.get_item_by_name(item_name)
-            if item:
-                database.add_user_item(user_id, item["id"], qty)
+            database.add_item_to_inventory(user_id, item_name, qty)
 
     msg += f"\n📊 Всего: {result['new_money']:,} руб., {result['new_xp']:,} XP\n"
     msg += f"🔥 Серия: {result['new_streak']} дн."
