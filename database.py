@@ -2678,7 +2678,14 @@ def get_active_emission():
             LIMIT 1
         """)
         row = cursor.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        result = dict(row)
+        # Нормализуем datetime — убираем tzinfo если есть (psycopg2 может вернуть aware)
+        for field in ('warning_time', 'impact_time', 'end_time', 'aftermath_end'):
+            if result.get(field) and hasattr(result[field], 'tzinfo') and result[field].tzinfo:
+                result[field] = result[field].replace(tzinfo=None)
+        return result
 
 
 def get_emission_aftermath_active():
