@@ -2286,18 +2286,29 @@ def equip_shells_bag(vk_id: int, bag_name: str) -> dict:
 
 
 def unequip_shells_bag(vk_id: int) -> dict:
-    """Снять мешочек для гильз"""
-    with db_cursor() as (cursor, _):
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+    """Снять мешочек для гильз — гильзы сохраняются (макс 100 без мешка)"""
+    with db_cursor() as (cursor, conn):
+        cursor.execute("SELECT id, shells FROM users WHERE vk_id = %s", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {'success': False, 'message': 'Пользователь не найден'}
 
         user_id = user['id']
-        cursor.execute("DELETE FROM user_equipment WHERE user_id = %s AND slot = 'shells_bag'", (user_id,))
-        cursor.execute("UPDATE users SET shells = 0 WHERE id = %s", (user_id,))
+        current_shells = user.get('shells', 0)
+        max_without_bag = 100
+        lost_shells = max(0, current_shells - max_without_bag)
+        new_shells = min(current_shells, max_without_bag)
 
-        return {'success': True, 'message': 'Мешочек для гильз снят. Гильзы потеряны.'}
+        cursor.execute("DELETE FROM user_equipment WHERE user_id = %s AND slot = 'shells_bag'", (user_id,))
+        cursor.execute("UPDATE users SET shells = %s WHERE id = %s", (new_shells, user_id))
+
+        msg = "Мешочек для гильз снят."
+        if lost_shells > 0:
+            msg += f"\n⚠️ Без мешка можно хранить до {max_without_bag} гильз. Потеряно: {lost_shells}."
+        else:
+            msg += f"\nГильзы сохранены: {new_shells} шт."
+
+        return {'success': True, 'message': msg}
 
 
 # ---------------------------------------------------------------------------

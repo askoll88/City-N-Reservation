@@ -1580,8 +1580,6 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
         success, msg = player.buy_item(artifact_name)
 
         if success:
-            # Добавляем в инвентарь как артефакт
-            database.add_item_to_inventory(user_id, artifact_name, 1)
             player.inventory.reload()
 
             vk.messages.send(

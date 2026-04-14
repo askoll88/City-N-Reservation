@@ -437,6 +437,7 @@ def _check_location_unique_mechanics(location_id: str, event_id: str, vk, user_i
         get_mutant_hunt_count,
     )
     _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
+    _combat_state_ref, _, _, _ = _get_main_imports()
 
     # === Военная дорога: ЗАСАДА ===
     if check_ambush(location_id):
@@ -452,7 +453,6 @@ def _check_location_unique_mechanics(location_id: str, event_id: str, vk, user_i
         )
         # Запускаем бой с засадой — модифицируем состояние
         # Удвоенный лут будет обработан в _handle_enemy_loot
-        _combat_state_ref, _, _, _ = _get_main_imports()
         combat_data = _combat_state_ref.get(user_id)
         if combat_data:
             combat_data["ambush"] = True  # Флаг для удвоенного лута
@@ -1204,7 +1204,7 @@ def create_skills_keyboard(player, user_id: int = None):
     if user_id is None:
         user_id = getattr(player, 'vk_id', None)
     cooldowns = _skill_cooldowns.get(user_id, {})
-    active_effects = _active_skill_effects.get(player.vk_id, {})
+    active_effects = _active_skill_effects.get(user_id, {})
 
     # Добавляем кнопки активных навыков
     for skill in player_class.active_skills:

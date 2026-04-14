@@ -557,8 +557,12 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         if market_passthrough:
             return False
 
-    # Обработка "Назад" из диалога
-    if text == 'назад' or text == 'к выбору npc':
+    # Обработка "Назад" из диалога — но НЕ из магазина (там свой обработчик)
+    if text == 'к выбору npc':
+        handle_npc_back(player, vk, user_id)
+        return True
+
+    if text == 'назад' and stage not in ("shop_weapons", "shop_armor", "shop_meds", "shop_food", "buy_artifacts", "sell_artifacts"):
         handle_npc_back(player, vk, user_id)
         return True
     

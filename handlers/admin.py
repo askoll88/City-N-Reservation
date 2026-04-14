@@ -181,7 +181,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         return True
 
     if text == "⛔ отменить выброс":
-        from emission import EMISSION_PHASE_IMPACT, _announce_emission_cancelled
+        from emission import EMISSION_PHASE_IMPACT, EMISSION_PHASE_CANCELLED, _announce_emission_cancelled
         emission = database.get_active_emission()
         if not emission:
             _send(vk, user_id, "ℹ️ Нет активного выброса.", create_admin_emission_keyboard()); return True

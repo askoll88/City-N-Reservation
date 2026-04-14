@@ -704,9 +704,9 @@ RANDOM_EVENTS = [
                     "Он пульсирует. Как сердце."
                 ),
                 "choices": [
-                    {"label": "Взять кристалл", "next_stage": 5, "effect": {"random_artifact": True}},
-                    {"label": "Не трогать и забрать остальное", "next_stage": 4, "effect": {"random_loot": True}},
-                    {"label": "Оставить всё и уйти", "next_stage": 6},
+                    {"label": "Взять кристалл", "next_stage": 6, "effect": {"random_artifact": True}},
+                    {"label": "Не трогать и забрать остальное", "next_stage": 6, "effect": {"random_loot": True}},
+                    {"label": "Оставить всё и уйти", "next_stage": 7},
                 ],
             },
             # Шаг 6: Источник
@@ -718,8 +718,8 @@ RANDOM_EVENTS = [
                     "Ты чувствуешь... зов. Как те сталкеры."
                 ),
                 "choices": [
-                    {"label": "Взять кристалл (риск!)", "next_stage": 6, "effect": {"artifact_chance": True}},
-                    {"label": "Засыпать яму и уйти", "next_stage": 6},
+                    {"label": "Взять кристалл (риск!)", "next_stage": 7, "effect": {"artifact_chance": True}},
+                    {"label": "Засыпать яму и уйти", "next_stage": 7},
                 ],
             },
             # Шаг 7: Развязка
@@ -2024,7 +2024,7 @@ def _apply_random_loot(player):
     if random.randint(1, 100) <= 40:
         common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
         item_name, qty = random.choice(common_items)
-        database.add_item_to_inventory(player.user_id, item_name, qty)
+        database.add_item_to_inventory(player.vk_id, item_name, qty)
 
 
 def _apply_random_artifact(player):
@@ -2033,7 +2033,7 @@ def _apply_random_artifact(player):
     anomaly_type = random.choice(["жарка", "электра", "воронка", "туман", "магнит"])
     artifact = get_artifact_from_anomaly(anomaly_type)
     if artifact:
-        database.add_item_to_inventory(player.user_id, artifact, 1)
+        database.add_item_to_inventory(player.vk_id, artifact, 1)
         return f"Ты нашёл {artifact}!"
     return "Артефакт рассыпался в руках..."
 
@@ -2078,7 +2078,7 @@ def _apply_need_item(player, effect):
     )
     if has_item:
         import database
-        database.remove_item_from_inventory(player.user_id, item_name, 1)
+        database.remove_item_from_inventory(player.vk_id, item_name, 1)
         player.experience += effect.get("xp", 0)
         return effect.get("message", f"Ты использовал {item_name}.")
     else:

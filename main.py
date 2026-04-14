@@ -187,19 +187,22 @@ def handle_message(event, vk):
         handle_inventory_command(player, vk, user_id)
         return
     
-    # Назад (возврат в предыдущую локацию)
+    # Назад (возврат в предыдущую локацию) — НО не из инвентаря (там свой обработчик)
     if text in ['назад', '⬅️ назад', 'назад в город', 'назад⬅️', 'back']:
-        prev_loc = player.previous_location
-        if prev_loc and prev_loc not in ['город', 'кпп', 'инвентарь']:
-            go_to_location(player, prev_loc, vk, user_id)
-            return
-        elif prev_loc == 'кпп':
-            go_to_location(player, 'кпп', vk, user_id)
-            return
+        if player.current_location_id == 'инвентарь':
+            pass  # Пусть _handle_item_commands обработает
         else:
-            # Возврат в город по умолчанию
-            go_to_location(player, 'город', vk, user_id)
-            return
+            prev_loc = player.previous_location
+            if prev_loc and prev_loc not in ['город', 'кпп', 'инвентарь']:
+                go_to_location(player, prev_loc, vk, user_id)
+                return
+            elif prev_loc == 'кпп':
+                go_to_location(player, 'кпп', vk, user_id)
+                return
+            else:
+                # Возврат в город по умолчанию
+                go_to_location(player, 'город', vk, user_id)
+                return
 
     # Действия в локации (лечение)
     if handle_location_actions(player, vk, user_id, text):
