@@ -4,6 +4,7 @@
 
 События случаются при перемещении между локациями.
 """
+from __future__ import annotations
 import random
 
 
@@ -631,31 +632,110 @@ RANDOM_EVENTS = [
         "chance_weight": 10,
     },
 
-    # --- Тихий ужас ---
+    # === МНОГОЭТАПНЫЙ: Тихий ужас (7 шагов) ===
     {
         "id": "silent_horror",
-        "text": (
-            "😨 Ты идёшь и вдруг замечаешь: на земле тела. Много тел.\n\n"
-            "Все сталкеры. Все мертвы. Но ни крови, ни ран. Лица спокойные.\n"
-            "Словно они уснули и не проснулись...\n\n"
-            "Рядом лежит включённый дозиметр. Фон в норме."
-        ),
-        "type": "story",
-        "choices": [
+        "type": "multi_stage",
+        "chance_weight": 7,
+        "stages": [
+            # Шаг 1: Обнаружение
             {
-                "label": "Обыскать тела",
-                "effect": {"random_loot": True, "message": "Ты забрал вещи мёртвых. +{money} руб., +{item}"},
+                "text": (
+                    "😨 Ты идёшь и вдруг замечаешь: на земле тела. Много тел.\n\n"
+                    "Все сталкеры. Все мертвы. Но ни крови, ни ран.\n"
+                    "Лица спокойные. Словно они уснули и не проснулись...\n\n"
+                    "Рядом лежит включённый дозиметр. Фон в норме."
+                ),
+                "choices": [
+                    {"label": "Осмотреть тела", "next_stage": 1},
+                    {"label": "Проверить дозиметр", "next_stage": 2},
+                    {"label": "Быстро уйти", "next_stage": 6},
+                ],
             },
+            # Шаг 2: Осмотр тел
             {
-                "label": "Попытаться понять причину",
-                "effect": {"xp": 120, "message": "Пси-излучение. Массовое. Кто-то убил их всех силой разума. +120 XP"},
+                "text": (
+                    "Ты подходишь ближе. Пять тел. Один — женщина.\n\n"
+                    "На всех — одинаковое выражение лица. Не страх. Не боль.\n"
+                    "Словно... они увидели что-то прекрасное и умерли от счастья.\n\n"
+                    "У одного сталкера — дневник в кармане."
+                ),
+                "choices": [
+                    {"label": "Прочитать дневник", "next_stage": 3},
+                    {"label": "Обыскать карманы", "next_stage": 4},
+                    {"label": "Уйти, пока не поздно", "next_stage": 6},
+                ],
             },
+            # Шаг 3: Дозиметр
             {
-                "label": "Быстро уйти",
-                "effect": {"message": "Ты ушёл. Это место проклято. Лучше не знать слишком много."},
+                "text": (
+                    "Дозиметр показывает норму. Но он включён — кто-то мониторил фон.\n\n"
+                    "На экране — странная запись. Пик радиации за секунду до смерти.\n"
+                    "Но не обычной... пси-радиации. Такой не бывает.\n\n"
+                    "Или бывает?"
+                ),
+                "choices": [
+                    {"label": "Забрать дозиметр и осмотреть тела", "next_stage": 1},
+                    {"label": "Изучить аномалии рядом", "next_stage": 5},
+                    {"label": "Уйти", "next_stage": 6},
+                ],
+            },
+            # Шаг 4: Дневник
+            {
+                "text": (
+                    "Последняя запись:\n\n"
+                    "\"День 12. Мы нашли что-то в аномалии. Не артефакт.\n"
+                    "Что-то... живое. Оно говорит. Все слышат.\n"
+                    "Мы идём к нему. Мы все идём. Это прекрасно.\"\n\n"
+                    "Запись обрывается. Дата — вчера."
+                ),
+                "choices": [
+                    {"label": "Искать то, что они нашли", "next_stage": 5},
+                    {"label": "Обыскать тела и уйти", "next_stage": 4},
+                    {"label": "Уничтожить дневник и бежать", "next_stage": 6},
+                ],
+            },
+            # Шаг 5: Обыскать тела
+            {
+                "text": (
+                    "Ты находишь у сталкеров: оружие, патроны, артефакты.\n\n"
+                    "Все вещи целы. Никто не дрался. Они просто... легли.\n\n"
+                    "Но у женщины в руке — странный кристалл.\n"
+                    "Он пульсирует. Как сердце."
+                ),
+                "choices": [
+                    {"label": "Взять кристалл", "next_stage": 5, "effect": {"random_artifact": True}},
+                    {"label": "Не трогать и забрать остальное", "next_stage": 4, "effect": {"random_loot": True}},
+                    {"label": "Оставить всё и уйти", "next_stage": 6},
+                ],
+            },
+            # Шаг 6: Источник
+            {
+                "text": (
+                    "Ты следуешь по следам сталкеров. Они ведут к аномалии.\n\n"
+                    "В центре — яма. В яме — кристалл. Тот, что в дневнике.\n"
+                    "Он светится мягким светом. Красивым. Опасным.\n\n"
+                    "Ты чувствуешь... зов. Как те сталкеры."
+                ),
+                "choices": [
+                    {"label": "Взять кристалл (риск!)", "next_stage": 6, "effect": {"artifact_chance": True}},
+                    {"label": "Засыпать яму и уйти", "next_stage": 6},
+                ],
+            },
+            # Шаг 7: Развязка
+            {
+                "text": (
+                    "Ты покидаешь это место. За спиной — пять мёртвых сталкеров.\n\n"
+                    "И что-то, что позвало их на смерть.\n\n"
+                    "Ты не знаешь, что это было. Но знаешь одно:\n"
+                    "Зона полна вещей, которые лучше не трогать."
+                ),
+                "choices": [
+                    {"label": "Уйти и забыть", "is_final": True},
+                ],
+                "final_effect": {"xp": 300, "energy": -10},
             },
         ],
-        "chance_weight": 7,
     },
 
     # --- Находка: модификация оружия ---
@@ -701,7 +781,7 @@ RANDOM_EVENTS = [
             },
             {
                 "label": "Оставить припасы и уйти",
-                "effect": {"message": "Ты оставил Кедр воду и еду. Он справится. Ты не нянька."},
+                "effect": {"message": "Ты оставил Кедру воду и еду. Он справится. Ты не нянька."},
             },
         ],
         "chance_weight": 5,
@@ -1422,35 +1502,138 @@ RANDOM_EVENTS = [
         "chance_weight": 8,
     },
 
-    # --- Голос Зоны (финальный ивент-загадка) ===
+    # === МНОГОЭТАПНЫЙ: Голос Зоны (10 шагов) ===
     {
         "id": "zone_voice",
-        "text": (
-            "🌌 Тишина. Потом голос. Не снаружи — внутри тебя.\n\n"
-            "\"Ты прошёл многое, сталкер. Зона помнит тех, кто слушает.\n"
-            "Ответь: что ты ищешь в Зоне?\"\n\n"
-            "Голос ждёт. Это не иллюзия. Это... Зона."
-        ),
-        "type": "story",
-        "choices": [
+        "type": "multi_stage",
+        "chance_weight": 3,
+        "stages": [
+            # Шаг 1: Пробуждение
             {
-                "label": "\"Ищу богатство\"",
-                "effect": {"money": 500, "message": "\"Жадность — путь в никуда. Но вот тебе старт.\" +500 руб."},
+                "text": (
+                    "🌌 Тишина. Ветер стих. Птицы замолчали.\n\n"
+                    "Потом — голос. Не снаружи. Внутри тебя.\n"
+                    "Он звучит как эхо, как память, как что-то древнее.\n\n"
+                    "\"Сталкер... Ты слышишь меня. Это редко случается.\""
+                ),
+                "choices": [
+                    {"label": "\"Кто ты?\"", "next_stage": 1},
+                    {"label": "\"Я схожу с ума\"", "next_stage": 1},
+                    {"label": "Молчать и слушать", "next_stage": 1},
+                ],
             },
+            # Шаг 2: Представление
             {
-                "label": "\"Ищу истину\"",
-                "effect": {"xp": 300, "message": "\"Истина — опасный путь. Но Зона уважает смелых.\" +300 XP"},
+                "text": (
+                    "Голос усмехнулся — или тебе показалось.\n\n"
+                    "\"Кто я? Я — то, что было до тебя. То, что будет после.\n"
+                    "Зона... это не место. Зона — это состояние.\n"
+                    "Ты пришёл сюда не случайно.\""
+                ),
+                "choices": [
+                    {"label": "\"Зачем я здесь?\"", "next_stage": 2},
+                    {"label": "\"Докажи, что ты реальна\"", "next_stage": 2},
+                    {"label": "\"Что ты хочешь?\"", "next_stage": 2},
+                ],
             },
+            # Шаг 3: Вопрос Зоны
             {
-                "label": "\"Ищу дом\"",
-                "effect": {"energy": 30, "reputation": 20, "message": "\"Дом — это не место. Это состояние души.\" +30 энергии, +20 репутации"},
+                "text": (
+                    "\"Реальна? Я реальнее, чем твои раны. Я старше, чем твои мечты.\n\n"
+                    "Ты пришёл сюда, потому что что-то искал.\n"
+                    "Скажи мне, сталкер — что ты ищешь в Зоне?\""
+                ),
+                "choices": [
+                    {"label": "\"Ищу богатство\"", "next_stage": 4, "tag": "greed"},
+                    {"label": "\"Ищу истину\"", "next_stage": 5, "tag": "truth"},
+                    {"label": "\"Ищу то, что потерял\"", "next_stage": 6, "tag": "loss"},
+                    {"label": "\"Сам не знаю\"", "next_stage": 7, "tag": "lost"},
+                ],
             },
+            # Шаг 4: Путь Жадности
             {
-                "label": "\"Не знаю\"",
-                "effect": {"xp": 150, "energy": 15, "message": "\"Честность — редкость. Запомни: Зона — это ты сам.\" +150 XP, +15 энергии"},
+                "text": (
+                    "\"Богатство...\" — голос звучит почти с грустью.\n\n"
+                    "\"Тысячи сталикеров пришли за артефактами. Многие нашли.\n"
+                    "Ещё больше — потеряли. Зона даёт, но забирает дороже.\n\n"
+                    "Скажи — ты готов заплатить цену?\""
+                ),
+                "choices": [
+                    {"label": "\"Да, я готов\"", "next_stage": 8},
+                    {"label": "\"А что, если нет?\"", "next_stage": 7},
+                    {"label": "\"Мне не нужны артефакты\"", "next_stage": 5},
+                ],
+            },
+            # Шаг 5: Путь Истины
+            {
+                "text": (
+                    "\"Истина...\" — в голосе что-то вроде уважения.\n\n"
+                    "\"Ты из тех, кто смотрит в бездну. А она — в тебя.\n"
+                    "Вот что я скажу: Зона не враг. Зона не друг.\n"
+                    "Зона — это зеркало. Она показывает, кто ты.\""
+                ),
+                "choices": [
+                    {"label": "\"Что она показывает во мне?\"", "next_stage": 8},
+                    {"label": "\"А что в Центре Зоны?\"", "next_stage": 8},
+                    {"label": "\"Это всё, что ты можешь сказать?\"", "next_stage": 8},
+                ],
+            },
+            # Шаг 6: Путь Потери
+            {
+                "text": (
+                    "Голос замолчал. Надолго.\n\n"
+                    "\"Потеря... Я знаю о потерях. Зона забрала сотни.\n"
+                    "Но знаешь что? То, что ты ищешь — может быть ближе, чем думаешь.\n"
+                    "Иногда потерянное — не уничтожено. Оно просто ждёт.\""
+                ),
+                "choices": [
+                    {"label": "\"Где искать?\"", "next_stage": 8},
+                    {"label": "\"Это надежда или ложь?\"", "next_stage": 8},
+                    {"label": "\"Спасибо... мне нужно подумать\"", "next_stage": 8},
+                ],
+            },
+            # Шаг 7: Путь Незнания
+            {
+                "text": (
+                    "\"Не знаешь...\" — голос звучит почти тепло.\n\n"
+                    "\"Это самый честный ответ, который я слышала за долгое время.\n"
+                    "Большинство врёт — себе и Зоне. Ты — нет.\n\n"
+                    "Вот почему я говорю с тобой.\""
+                ),
+                "choices": [
+                    {"label": "\"Что мне делать дальше?\"", "next_stage": 8},
+                    {"label": "\"Почему именно я?\"", "next_stage": 8},
+                    {"label": "\"Может, мне просто уйти?\"", "next_stage": 8},
+                ],
+            },
+            # Шаг 8: Испытание
+            {
+                "text": (
+                    "\"Ты хочешь знать? Тогда ответь на последнее.\n\n"
+                    "Зона предлагает сделку. Ты отдаёшь что-то ценное —\n"
+                    "и получаешь что-то большее. Но выбор — за тобой.\n\n"
+                    "Что ты отдашь Зоне?\""
+                ),
+                "choices": [
+                    {"label": "\"Свою энергию (-30 энергии, +400 XP)\"", "next_stage": 8, "effect": {"energy": -30, "xp": 400}},
+                    {"label": "\"Своё здоровье (-30 HP, +500 XP)\"", "next_stage": 8, "effect": {"hp": -30, "xp": 500}},
+                    {"label": "\"Свои деньги (-300 руб., +350 XP)\"", "next_stage": 8, "effect": {"money": -300, "xp": 350}},
+                    {"label": "\"Ничего. Я не торгуюсь с Зоной\"", "next_stage": 8},
+                ],
+            },
+            # Шаг 9: Ответ Зоны
+            {
+                "text": (
+                    "Голос затихает. Ветер возвращается. Мир становится обычным.\n\n"
+                    "\"Запомни этот момент, сталкер. Зона не забудет тебя.\n"
+                    "А теперь — иди. У тебя есть путь. Даже если ты его не видишь.\""
+                ),
+                "choices": [
+                    {"label": "\"Спасибо, Зона\"", "next_stage": 8, "is_final": True},
+                ],
+                "final_effect": {"xp": 200, "energy": 15},
             },
         ],
-        "chance_weight": 3,
     },
 ]
 
@@ -1579,25 +1762,53 @@ def _mark_quest_complete(user_id: int, chain_key: str):
     _set_quest_cooldown(user_id, chain_key, cooldown_until)
 
 
+# Редкие «вау» события — случаются сами, без активного выбора.
+# Они создают атмосферу «живой Зоны».
+RARE_WOW_EVENTS = [
+    "zone_voice",          # Голос Зоны
+    "anomaly_eclipse",     # Аномальное затмение
+    "portal_anomaly",      # Портал
+    "companion_artifact",  # Артефакт-компаньон
+    "controller_distance", # Контролёр вдали
+    "legend_stalker",      # Сталкер-легенда
+    "artifact_rain",       # Дождь из артефактов
+    "emission_warning",    # Выброс
+]
+
+
+def _is_rare_wow_event(event_id: str) -> bool:
+    return event_id in RARE_WOW_EVENTS
+
+
 def get_random_event(user_id: int = None) -> dict | None:
     """
     Получить случайное событие.
     Если передан user_id — учитываются квестовые цепочки.
-    Возвращает None, если событие не触发лось.
-    Шанс любого события ~25% при каждом вызове.
+    Возвращает None, если событие не сработало.
+    Шанс обычного события ~18%, редкого «вау» — ~5%.
     """
-    if random.randint(1, 100) > 25:
-        return None
+    import random
 
-    # Сначала пробуем квестовое событие (если есть активное)
+    # Сначала квест (если есть)
     if user_id is not None:
         quest_event = _get_next_quest_event(user_id)
         if quest_event:
             return quest_event
 
-    # Взвешенный выбор из обычных событий (исключая квестовые)
+    # Редкий «вау» — отдельный ролл 5%
+    if random.randint(1, 100) <= 5:
+        wow_events = [e for e in RANDOM_EVENTS if _is_rare_wow_event(e["id"])]
+        if wow_events:
+            return random.choice(wow_events)
+
+    # Обычные события — 18% шанс
+    if random.randint(1, 100) > 18:
+        return None
+
+    # Взвешенный выбор из обычных событий (исключая квестовые и вау)
     quest_event_ids = set(_EVENT_TO_QUEST.keys())
-    non_quest_events = [e for e in RANDOM_EVENTS if e["id"] not in quest_event_ids]
+    non_quest_events = [e for e in RANDOM_EVENTS
+                        if e["id"] not in quest_event_ids and not _is_rare_wow_event(e["id"])]
     weights = [e["chance_weight"] for e in non_quest_events]
 
     if not non_quest_events:
@@ -1606,40 +1817,130 @@ def get_random_event(user_id: int = None) -> dict | None:
     return random.choices(non_quest_events, weights=weights, k=1)[0]
 
 
-def format_event_message(event: dict) -> str:
-    """Форматировать событие для отображения"""
-    msg = f"{event['text']}\n\n"
+# Фразы-вступления для контекста ивента
+_EVENT_INTROS = [
+    "Ты шёл по дороге... и вдруг заметил:",
+    "Что-то привлекло твоё внимание:",
+    "Зона решила напомнить о себе:",
+    "Тишина нарушилась странным событием:",
+    "Неожиданно на твоём пути:",
+    "Впереди произошло нечто необычное:",
+    "Зона живёт своей жизнью. Сегодня она показывает тебе:",
+    "Ты остановился. Впереди что-то происходит:",
+]
+
+
+def get_event_intro() -> str:
+    """Случайная фраза-вступление перед ивентом."""
+    return random.choice(_EVENT_INTROS)
+
+
+def format_event_message(event: dict, stage_index: int = 0) -> str:
+    """Форматировать событие для отображения.
+    Для многоэтапных событий — показывает текущую стадию.
+    """
+    # Многоэтапное событие
+    if event.get("type") == "multi_stage":
+        stages = event.get("stages", [])
+        if stage_index >= len(stages):
+            stage_index = len(stages) - 1
+        stage = stages[stage_index]
+        msg = f"{stage['text']}\n\n"
+        msg += "Выбери действие:\n"
+        for i, choice in enumerate(stage.get("choices", []), 1):
+            msg += f"{i}. {choice['label']}\n"
+        # Показать номер этапа
+        if len(stages) > 1:
+            msg += f"\n📍 Этап {stage_index + 1} из {len(stages)}"
+        return msg
+
+    # Обычное событие
+    intro = get_event_intro()
+    msg = f"{intro}\n\n{event['text']}\n\n"
     msg += "Выбери действие:\n"
     for i, choice in enumerate(event["choices"], 1):
         msg += f"{i}. {choice['label']}\n"
     return msg
 
 
-def apply_event_choice(event: dict, choice_index: int, player, user_id: int = None) -> str:
+def apply_event_choice(event: dict, choice_index: int, player, user_id: int = None, stage_index: int = 0) -> dict:
     """
     Применить выбор игрока к событию.
-    Возвращает текст результата.
+    Возвращает dict:
+      - message: текст результата
+      - next_stage: индекс следующей стадии (None если событие завершено)
+      - is_final: True если это последний этап
     Если передан user_id — продвигает квестовые цепочки.
     """
-    if choice_index < 0 or choice_index >= len(event["choices"]):
-        return "Неверный выбор."
+    if choice_index < 0:
+        return {"message": "Неверный выбор.", "next_stage": None}
+
+    # Многоэтапное событие
+    if event.get("type") == "multi_stage":
+        stages = event.get("stages", [])
+        if stage_index >= len(stages):
+            stage_index = len(stages) - 1
+
+        stage = stages[stage_index]
+        choices = stage.get("choices", [])
+
+        if choice_index >= len(choices):
+            return {"message": "Неверный выбор.", "next_stage": None}
+
+        choice = choices[choice_index]
+
+        # Применяем немедленные эффекты выбора
+        if "effect" in choice:
+            eff = choice["effect"]
+            if "xp" in eff:
+                player.experience += eff["xp"]
+            if "money" in eff:
+                player.money += eff.get("money", 0)
+            if "energy" in eff:
+                player.energy = max(0, player.energy + eff["energy"])
+            if "hp" in eff:
+                player.health = max(1, player.health + eff["hp"])
+            if eff.get("random_loot"):
+                _apply_random_loot(player)
+            if eff.get("random_artifact"):
+                _apply_random_artifact(player)
+            if eff.get("artifact_chance"):
+                _apply_artifact_chance(player)
+            if eff.get("risk_combat"):
+                _apply_risk_combat(player)
+            if eff.get("risk_damage"):
+                _apply_risk_damage(player)
+
+        # Проверяем, последний ли это этап
+        if choice.get("is_final") or stage_index == len(stages) - 1:
+            # Применяем финальные эффекты
+            final_effect = stage.get("final_effect", {})
+            if "xp" in final_effect:
+                player.experience += final_effect["xp"]
+            if "money" in final_effect:
+                player.money += final_effect.get("money", 0)
+            if "energy" in final_effect:
+                player.energy = max(0, player.energy + final_effect["energy"])
+            if "hp" in final_effect:
+                player.health = max(1, player.health + final_effect["hp"])
+
+            # Квестовая цепочка
+            _check_quest_progression(event, user_id)
+
+            return {"message": stage["text"], "next_stage": None, "is_final": True}
+        else:
+            next_stage = choice.get("next_stage", stage_index + 1)
+            return {"message": stage["text"], "next_stage": next_stage, "is_final": False}
+
+    # Обычное событие
+    if choice_index >= len(event.get("choices", [])):
+        return {"message": "Неверный выбор.", "next_stage": None}
 
     choice = event["choices"][choice_index]
-    effect = choice["effect"]
+    effect = choice.get("effect", {})
 
-    # Проверяем, является ли событие частью квестовой цепочки
-    quest_info = _EVENT_TO_QUEST.get(event["id"])
-    if quest_info and user_id is not None:
-        chain_key, stage_idx = quest_info
-        chain_data = QUEST_CHAINS[chain_key]
-        total_stages = len(chain_data["stages"])
-
-        # Если это финал — завершаем квест
-        if stage_idx == total_stages - 1:
-            _mark_quest_complete(user_id, chain_key)
-        else:
-            # Продвигаем к следующей стадии
-            _set_quest_stage(user_id, chain_key, stage_idx + 1)
+    # Квестовая цепочка
+    _check_quest_progression(event, user_id)
 
     # Простое сообщение
     if "message" in effect and not any(k in effect for k in ["risk_damage", "risk_combat", "random_loot", "artifact_chance", "random_artifact", "random_dialog", "need_item", "shop_discount", "money_loss"]):
@@ -1651,91 +1952,57 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
             player.energy = max(0, player.energy + effect["energy"])
         if "shells" in effect:
             player.shells = getattr(player, 'shells', 0) + effect["shells"]
-        return effect["message"]
+        return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # Риск - получение урона
     if effect.get("risk_damage"):
         if random.randint(1, 100) <= 40:
             player.health = max(1, player.health - 20)
             player.energy = max(0, player.energy - 15)
-            return effect.get("message_fail", "Тебе не повезло!")
+            return {"message": effect.get("message_fail", "Тебе не повезло!"), "next_stage": None, "is_final": True}
         else:
-            return effect.get("message_ok", "Тебе повезло!")
+            return {"message": effect.get("message_ok", "Тебе повезло!"), "next_stage": None, "is_final": True}
 
     # Риск - бой
     if effect.get("risk_combat"):
         if random.randint(1, 100) <= 60:
             if "money" in effect:
                 player.money += effect.get("money", 0)
-            return effect.get("message_ok", "Всё прошло успешно!")
+            return {"message": effect.get("message_ok", "Всё прошло успешно!"), "next_stage": None, "is_final": True}
         else:
             player.health = max(1, player.health - 30)
-            return effect.get("message_fail", "Что-то пошло не так!")
+            return {"message": effect.get("message_fail", "Что-то пошло не так!"), "next_stage": None, "is_final": True}
 
     # Случайный лут
     if effect.get("random_loot"):
-        import database
-        money_reward = random.randint(50, 300)
-        player.money += money_reward
-        # Шанс найти предмет
-        item_msg = "ничего"
-        if random.randint(1, 100) <= 40:
-            common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
-            item_name, qty = random.choice(common_items)
-            database.add_item_to_inventory(player.user_id, item_name, qty)
-            item_msg = f"{item_name} x{qty}"
-        return effect["message"].format(money=money_reward, item=item_msg)
+        _apply_random_loot(player)
+        return {"message": effect.get("message", "Ты нашёл припасы."), "next_stage": None, "is_final": True}
 
     # Шанс артефакта
     if effect.get("artifact_chance"):
-        if random.randint(1, 100) <= 30:
-            from anomalies import get_random_anomaly, get_artifact_from_anomaly
-            anomaly = get_random_anomaly()
-            artifact = get_artifact_from_anomaly(anomaly["type"])
-            return effect["message_ok"].format(artifact=artifact or "странный артефакт")
-        else:
-            player.health = max(1, player.health - 25)
-            return effect.get("message_fail", "Буря слишком сильна!")
+        msg = _apply_artifact_chance(player, effect)
+        return {"message": msg, "next_stage": None, "is_final": True}
 
     # Случайный артефакт
     if effect.get("random_artifact"):
-        from anomalies import get_artifact_from_anomaly
-        import database
-        anomaly_type = random.choice(["жарка", "электра", "воронка", "туман", "магнит"])
-        artifact = get_artifact_from_anomaly(anomaly_type)
-        if artifact:
-            database.add_item_to_inventory(player.user_id, artifact, 1)
-            return effect["message"]
-        return "Артефакт рассыпался в руках..."
+        msg = _apply_random_artifact(player)
+        return {"message": msg or effect.get("message", "Ты нашёл артефакт."), "next_stage": None, "is_final": True}
 
     # Нужен предмет
     if effect.get("need_item"):
-        item_name = effect["need_item"]
-        player.inventory.reload()
-        has_item = any(
-            item["name"].lower() == item_name.lower()
-            for cat in [player.inventory.other, player.inventory.artifacts]
-            for item in cat
-        )
-        if has_item:
-            # Удаляем предмет
-            import database
-            database.remove_item_from_inventory(player.user_id, item_name, 1)
-            player.experience += effect.get("xp", 0)
-            return effect["message"]
-        else:
-            return f"У тебя нет {item_name}. Ты не можешь помочь."
+        msg = _apply_need_item(player, effect)
+        return {"message": msg, "next_stage": None, "is_final": True}
 
     # Скидка
     if effect.get("shop_discount"):
         player.experience += effect.get("xp", 0)
-        return effect["message"]
+        return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # Потеря денег
     if effect.get("money_loss"):
         loss = effect["money_loss"]
         player.money = max(0, player.money - loss)
-        return effect["message"]
+        return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # XP + money
     if "xp" in effect:
@@ -1745,4 +2012,90 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     if "energy" in effect:
         player.energy = max(0, player.energy + effect["energy"])
 
-    return effect.get("message", "Ничего не произошло.")
+    return {"message": effect.get("message", "Ничего не произошло."), "next_stage": None, "is_final": True}
+
+
+# --- Вспомогательные функции для apply_event_choice ---
+
+def _apply_random_loot(player):
+    import database
+    money_reward = random.randint(50, 300)
+    player.money += money_reward
+    if random.randint(1, 100) <= 40:
+        common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
+        item_name, qty = random.choice(common_items)
+        database.add_item_to_inventory(player.user_id, item_name, qty)
+
+
+def _apply_random_artifact(player):
+    from anomalies import get_artifact_from_anomaly
+    import database
+    anomaly_type = random.choice(["жарка", "электра", "воронка", "туман", "магнит"])
+    artifact = get_artifact_from_anomaly(anomaly_type)
+    if artifact:
+        database.add_item_to_inventory(player.user_id, artifact, 1)
+        return f"Ты нашёл {artifact}!"
+    return "Артефакт рассыпался в руках..."
+
+
+def _apply_artifact_chance(player, effect=None):
+    from anomalies import get_random_anomaly, get_artifact_from_anomaly
+    anomaly = get_random_anomaly()
+    artifact = get_artifact_from_anomaly(anomaly["type"])
+    if random.randint(1, 100) <= 30:
+        return effect.get("message_ok", f"Ты нашёл {artifact or 'артефакт'}!") if effect else f"Ты нашёл {artifact or 'артефакт'}!"
+    else:
+        player.health = max(1, player.health - 25)
+        return effect.get("message_fail", "Буря слишком сильна!") if effect else "Не повезло!"
+
+
+def _apply_risk_combat(player, effect=None):
+    if random.randint(1, 100) <= 60:
+        if effect and "money" in effect:
+            player.money += effect.get("money", 0)
+        return effect.get("message_ok", "Всё прошло успешно!") if effect else "Всё прошло успешно!"
+    else:
+        player.health = max(1, player.health - 30)
+        return effect.get("message_fail", "Что-то пошло не так!") if effect else "Что-то пошло не так!"
+
+
+def _apply_risk_damage(player, effect=None):
+    if random.randint(1, 100) <= 40:
+        player.health = max(1, player.health - 20)
+        player.energy = max(0, player.energy - 15)
+        return effect.get("message_fail", "Тебе не повезло!") if effect else "Тебе не повезло!"
+    else:
+        return effect.get("message_ok", "Тебе повезло!") if effect else "Тебе повезло!"
+
+
+def _apply_need_item(player, effect):
+    item_name = effect["need_item"]
+    player.inventory.reload()
+    has_item = any(
+        item["name"].lower() == item_name.lower()
+        for cat in [player.inventory.other, player.inventory.artifacts]
+        for item in cat
+    )
+    if has_item:
+        import database
+        database.remove_item_from_inventory(player.user_id, item_name, 1)
+        player.experience += effect.get("xp", 0)
+        return effect.get("message", f"Ты использовал {item_name}.")
+    else:
+        return f"У тебя нет {item_name}. Ты не можешь помочь."
+
+
+def _check_quest_progression(event, user_id):
+    """Проверить и продвинуть квестовую цепочку."""
+    if user_id is None:
+        return
+    quest_info = _EVENT_TO_QUEST.get(event.get("id"))
+    if not quest_info:
+        return
+    chain_key, stage_idx = quest_info
+    chain_data = QUEST_CHAINS[chain_key]
+    total_stages = len(chain_data["stages"])
+    if stage_idx == total_stages - 1:
+        _mark_quest_complete(user_id, chain_key)
+    else:
+        _set_quest_stage(user_id, chain_key, stage_idx + 1)

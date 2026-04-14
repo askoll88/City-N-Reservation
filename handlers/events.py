@@ -1,9 +1,10 @@
+from __future__ import annotations
 """
 Обработчики случайных событий
 """
 import database
 from random_events import apply_event_choice, format_event_message
-from state_manager import get_pending_event, clear_pending_event
+from state_manager import get_pending_event, set_pending_event, clear_pending_event
 from handlers.keyboards import create_random_event_keyboard, create_location_keyboard
 
 
@@ -26,25 +27,41 @@ def handle_event_response(player, vk, user_id: int, text: str) -> bool:
         )
         return True
 
-    # Цифра - выбор варианта
+    # Определяем номер выбора
+    choice_idx = None
     if text_lower.isdigit():
         choice_idx = int(text_lower) - 1
-        return _process_event_choice(player, vk, user_id, event, choice_idx)
+    else:
+        # Текстовое совпадение с выбором
+        stage_index = event.get("_stage_index", 0)
+        if event.get("type") == "multi_stage":
+            stages = event.get("stages", [])
+            if stage_index < len(stages):
+                choices = stages[stage_index].get("choices", [])
+            else:
+                choices = []
+        else:
+            choices = event.get("choices", [])
 
-    # Текстовое совпадение с выбором
-    for i, choice in enumerate(event.get("choices", [])):
-        if choice["label"].lower() == text_lower:
-            return _process_event_choice(player, vk, user_id, event, i)
-        # Частичное совпадение
-        if text_lower in choice["label"].lower():
-            return _process_event_choice(player, vk, user_id, event, i)
+        for i, choice in enumerate(choices):
+            if choice["label"].lower() == text_lower:
+                choice_idx = i
+                break
+            if text_lower in choice["label"].lower():
+                choice_idx = i
+                break
 
-    return False
+    if choice_idx is None:
+        return False
+
+    return _process_event_choice(player, vk, user_id, event, choice_idx)
 
 
 def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: int) -> bool:
     """Обработать выбор игрока в событии"""
-    result_msg = apply_event_choice(event, choice_index, player, user_id=user_id)
+    stage_index = event.get("_stage_index", 0)
+
+    result = apply_event_choice(event, choice_index, player, user_id=user_id, stage_index=stage_index)
 
     # Сохраняем изменения игрока
     database.update_user_stats(
@@ -56,11 +73,28 @@ def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: i
         shells=getattr(player, 'shells', 0),
     )
 
+    # Проверяем, есть ли следующая стадия
+    next_stage = result.get("next_stage")
+    if next_stage is not None:
+        # Многоэтапное событие — обновляем стадию и показываем следующий этап
+        event["_stage_index"] = next_stage
+        set_pending_event(user_id, event)
+
+        msg = format_event_message(event, next_stage)
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_random_event_keyboard(event).get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    # Событие завершено — очиpending
     clear_pending_event(user_id)
 
     vk.messages.send(
         user_id=user_id,
-        message=result_msg,
+        message=result["message"],
         keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
         random_id=0,
     )
