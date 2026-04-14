@@ -1,6 +1,7 @@
 """
 Механики локаций — уникальные свойства каждой исследовательской зоны
 """
+from __future__ import annotations
 import random
 import database
 from constants import RESEARCH_LOCATIONS

@@ -2,6 +2,7 @@
 Модуль управления состоянием бота
 Централизованное хранение состояний игроков, боев, диалогов
 """
+from __future__ import annotations
 import threading
 import time
 from typing import Any

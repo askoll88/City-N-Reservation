@@ -1,23 +1,16 @@
 ﻿"""
 База данных для игры "Город N: Запретная Зона"
-PostgreSQL с пулом соединений, нормальной схемой и корректной обработкой ошибок.
-
-Ключевые изменения по сравнению с предыдущей версией:
-- Экипировка вынесена в отдельную таблицу user_equipment (slot/item_name)
-- menu_state и inventory_section убраны из БД — они в state_manager
-- update_user_stats() переписан на **kwargs — добавление поля не требует трогать сигнатуру
-- Все функции используют контекстный менеджер db_cursor() — соединения не утекают
-- Покупка/продажа атомарны — нельзя потерять деньги без предмета
-- Убраны дубли предметов в init_db()
-- get_user_by_vk() возвращает плоский dict совместимый со старым кодом
 """
+from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+from typing import Any
 
 import psycopg2
 from psycopg2 import pool, OperationalError, DatabaseError
