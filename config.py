@@ -80,9 +80,9 @@ BOT_QUEUE_PUT_TIMEOUT = float(os.getenv('BOT_QUEUE_PUT_TIMEOUT', '0.2'))
 EMISSION_ENABLED = os.getenv('EMISSION_ENABLED', 'true').lower() == 'true'
 EMISSION_MIN_INTERVAL_HOURS = int(os.getenv('EMISSION_MIN_INTERVAL_HOURS', '4'))   # мин интервал между выбросами
 EMISSION_MAX_INTERVAL_HOURS = int(os.getenv('EMISSION_MAX_INTERVAL_HOURS', '10'))  # макс интервал
-EMISSION_WARNING_MINUTES = int(os.getenv('EMISSION_WARNING_MINUTES', '15'))       # время предупреждения
-EMISSION_DURATION_MINUTES = int(os.getenv('EMISSION_DURATION_MINUTES', '30'))     # длительность выброса
-EMISSION_AFTERMATH_MINUTES = int(os.getenv('EMISSION_AFTERMATH_MINUTES', '60'))   # время последствий (бонусы)
+EMISSION_WARNING_MINUTES = int(os.getenv('EMISSION_WARNING_MINUTES', '5'))       # время предупреждения
+EMISSION_DURATION_MINUTES = int(os.getenv('EMISSION_DURATION_MINUTES', '3'))     # длительность выброса
+EMISSION_AFTERMATH_MINUTES = int(os.getenv('EMISSION_AFTERMATH_MINUTES', '6'))   # время последствий (бонусы)
 
 # Шанс отмены выброса (как в игре S.T.A.L.K.E.R.)
 EMISSION_CANCEL_CHANCE = float(os.getenv('EMISSION_CANCEL_CHANCE', '0.15'))  # 15% шанс отмены
