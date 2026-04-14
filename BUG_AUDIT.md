@@ -9,7 +9,7 @@
 
 ---
 
-## ✅ Исправленные (10)
+## ✅ Исправленные (12)
 
 | # | Файл | Severity | Баг |
 |---|------|----------|-----|
@@ -23,6 +23,8 @@
 | 8 | `handlers/commands.py` | HIGH | "Назад" в магазине — мёртвый код (`clear_shop_cache` не вызывается) |
 | 9 | `main.py` | HIGH | "Назад" из инвентаря → город вместо кпп |
 | 10 | `handlers/combat.py` | HIGH | `_skill_cooldowns` по `user_id`, `_active_skill_effects` по `player.vk_id` |
+| 11 | `emission.py` | CRITICAL | Timezone mismatch в `emission_tick` — `datetime.now(timezone.utc)` (aware) vs TIMESTAMP из БД (naive) → `TypeError`, статус застревает в `warning` |
+| 12 | `emission.py` | CRITICAL | Timezone mismatch в `check_emission_during_action` — та же проблема |
 
 ---
 
@@ -76,9 +78,9 @@
 
 | Приоритет | Кол-во | Рекомендация |
 |-----------|--------|--------------|
-| 🔴 CRITICAL | 0 (было 4) | ✅ Все исправлены |
+| 🔴 CRITICAL | 0 (было 6) | ✅ Все исправлены |
 | 🟠 HIGH | 0 (было 6) | ✅ Все исправлены |
-| 🟡 MEDIUM | 9 | Исправить в ближайшем обновлении |
+| 🟡 MEDIUM | 4 | Исправить в ближайшем обновлении |
 | 🟢 LOW | 18 | Исправить по мере возможности |
 
 ---

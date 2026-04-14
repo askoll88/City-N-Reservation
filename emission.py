@@ -153,7 +153,8 @@ def emission_tick(vk):
     if not emission:
         return
 
-    now = datetime.now(timezone.utc)
+    # БД хранит TIMESTAMP (без tz) — делаем now тоже наивным для сравнения
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     emission_id = emission["id"]
     warning_time = emission["warning_time"]
@@ -652,7 +653,8 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
     if not emission:
         return False
 
-    now = datetime.now(timezone.utc)
+    # БД хранит TIMESTAMP (без tz) — делаем now тоже наивным
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     impact_time = emission["impact_time"]
     end_time = emission["end_time"]
 
