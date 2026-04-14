@@ -442,12 +442,27 @@ def create_daily_quests_keyboard():
 # Случайные события
 # ============================================================
 
-def create_random_event_keyboard(event: dict):
-    """Выбор в случайном событии"""
+def create_random_event_keyboard(event: dict, stage_index: int = 0):
+    """Выбор в случайном событии
+
+    Для мульти-стадийных событий берёт choices из текущей стадии.
+    """
     keyboard = VkKeyboard(one_time=False)
-    for i, choice in enumerate(event.get("choices", []), 1):
+
+    # Мульти-стадийные события: choices внутри каждой стадии
+    if event.get("type") == "multi_stage":
+        stages = event.get("stages", [])
+        if stage_index >= len(stages):
+            stage_index = len(stages) - 1
+        if stage_index < 0:
+            stage_index = 0
+        choices = stages[stage_index].get("choices", [])
+    else:
+        choices = event.get("choices", [])
+
+    for i, choice in enumerate(choices, 1):
         # Последний вариант обычно «отказ/риск» — красным
-        if i == len(event["choices"]) and event.get("type") == "danger":
+        if i == len(choices) and event.get("type") == "danger":
             color = VkKeyboardColor.NEGATIVE
         else:
             color = VkKeyboardColor.PRIMARY

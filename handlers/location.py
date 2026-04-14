@@ -1,15 +1,54 @@
 """
 Обработчики локаций и навигации
 """
+import time
 import database
 from constants import RESEARCH_LOCATIONS, NPC_LOCATIONS
+
+# Кулдаун рандомных событий
+EVENT_COOLDOWN_SECONDS = 15 * 60        # 15 минут — базовый кулдаун
+EVENT_CHANCE_RAMP_UP = 10 * 60          # каждые 10 минут после кулдауна
+EVENT_CHANCE_INCREMENT = 1.5            # +1.5% шанс за каждый интервал
+EVENT_MAX_CHANCE = 100                  # макс шанс
+
+
+def _check_event_cooldown(user_id: int) -> bool:
+    """
+    Проверить кулдаун рандомных событий.
+    Возвращает True если можно выдавать событие, False если на кулдауне.
+
+    Механика:
+    - После получения события — кулдаун 15 минут
+    - После кулдауна — шанс растёт на 1.5% каждые 10 минут
+    - Максимум 100%
+    """
+    last_event_time = database.get_user_flag(user_id, "last_random_event_time", 0)
+    now = int(time.time())
+
+    if last_event_time == 0:
+        # Первый раз — всегда можно
+        return True
+
+    elapsed = now - last_event_time
+
+    # Базовый кулдаун
+    if elapsed < EVENT_COOLDOWN_SECONDS:
+        return False
+
+    # После кулдауна — нарастающий шанс
+    time_after_cooldown = elapsed - EVENT_COOLDOWN_SECONDS
+    intervals_passed = int(time_after_cooldown / EVENT_CHANCE_RAMP_UP)
+    chance = min(EVENT_MAX_CHANCE, intervals_passed * EVENT_CHANCE_INCREMENT)
+
+    import random
+    return random.randint(1, 100) <= chance
 
 
 def go_to_location(player, location_id: str, vk, user_id: int):
     """Переход в локацию"""
     from main import create_location_keyboard
     from random_events import get_random_event, format_event_message
-    from state_manager import set_pending_event, clear_pending_event
+    from state_manager import set_pending_event, has_pending_event, get_pending_event
     from handlers.keyboards import create_random_event_keyboard
     from handlers.quests import track_quest_explore, track_quest_visit
 
@@ -52,18 +91,44 @@ def go_to_location(player, location_id: str, vk, user_id: int):
         track_quest_explore(user_id, location_id)
 
     # Случайное событие при переходе на дороги
-    clear_pending_event(user_id)
+    # НЕ очищаем pending event — если игрок в середине мульти-стадии, сохраняем
     if location_id in RESEARCH_LOCATIONS:
-        event = get_random_event(user_id=user_id)
-        if event:
-            set_pending_event(user_id, event)
-            vk.messages.send(
-                user_id=user_id,
-                message=f"{loc.name}\n\n{loc.description}\n\n{format_event_message(event)}",
-                keyboard=create_random_event_keyboard(event).get_keyboard(),
-                random_id=0,
-            )
-            return
+        # Проверяем кулдаун (нельзя спамить перезаходами)
+        if _check_event_cooldown(user_id):
+            # Проверяем нет ли уже активного события (мульти-стадия)
+            if not has_pending_event(user_id):
+                event = get_random_event(user_id=user_id)
+                if event:
+                    set_pending_event(user_id, event)
+                    # Записываем время получения события
+                    database.set_user_flag(user_id, "last_random_event_time", int(time.time()))
+                    # Отправляем и сохраняем ID сообщения для редактирования
+                    msg_id = vk.messages.send(
+                        user_id=user_id,
+                        message=f"{loc.name}\n\n{loc.description}\n\n{format_event_message(event)}",
+                        keyboard=create_random_event_keyboard(event).get_keyboard(),
+                        random_id=0,
+                    )
+                    # Сохраняем conversation_message_id для редактирования
+                    if event.get("type") == "multi_stage":
+                        event["_msg_id"] = msg_id
+                        set_pending_event(user_id, event)
+                    return
+            else:
+                # Уже есть активное событие — показываем его
+                existing_event = get_pending_event(user_id)
+                if existing_event:
+                    stage_idx = existing_event.get("_stage_index", 0)
+                    msg_id = vk.messages.send(
+                        user_id=user_id,
+                        message=f"{loc.name}\n\n{loc.description}\n\nУ тебя есть активное событие — заверши его!\n\n{format_event_message(existing_event, stage_idx)}",
+                        keyboard=create_random_event_keyboard(existing_event, stage_index=stage_idx).get_keyboard(),
+                        random_id=0,
+                    )
+                    if existing_event.get("type") == "multi_stage":
+                        existing_event["_msg_id"] = msg_id
+                        set_pending_event(user_id, existing_event)
+                    return
 
     # Обычное сообщение о локации
     npc_message = ""
@@ -72,9 +137,32 @@ def go_to_location(player, location_id: str, vk, user_id: int):
         npc_list = ", ".join([f"{npc}" for npc in npcs])
         npc_message = f"\n\nNPC: {npc_list}"
 
+    # Добавляем информацию о модификаторах локации (для исследовательских зон)
+    location_info = ""
+    from location_mechanics import get_location_modifier, get_zone_mutation_state
+    mod = get_location_modifier(location_id)
+    if mod:
+        parts = []
+        if mod.get("danger_mult", 1.0) > 1.0:
+            parts.append(f"⚠️ Опасность +{int((mod['danger_mult'] - 1.0) * 100)}%")
+        if mod.get("find_chance_mult", 1.0) > 1.0:
+            parts.append(f"🔍 Находки +{int((mod['find_chance_mult'] - 1.0) * 100)}%")
+        if mod.get("radiation_mult", 1.0) > 1.0:
+            parts.append(f"☢️ Радиация +{int((mod['radiation_mult'] - 1.0) * 100)}%")
+        if mod.get("energy_cost_mult", 1.0) > 1.0:
+            parts.append(f"⚡ Энергия +{int((mod['energy_cost_mult'] - 1.0) * 100)}%")
+
+        # Проверяем мутацию Зоны (НИИ)
+        mutation_state = get_zone_mutation_state(location_id)
+        if mutation_state.get("active"):
+            parts.append(f"🌀 **МУТАЦИЯ ЗОНЫ!** Находки +{int(mutation_state['bonus_find'] * 100)}%")
+
+        if parts:
+            location_info = f"\n\n📊 **Параметры зоны:**\n" + "\n".join(f"• {p}" for p in parts)
+
     vk.messages.send(
         user_id=user_id,
-        message=f"{loc.name}\n\n{loc.description}{npc_message}",
+        message=f"{loc.name}\n\n{loc.description}{npc_message}{location_info}",
         keyboard=create_location_keyboard(location_id, player_level).get_keyboard(),
         random_id=0
     )

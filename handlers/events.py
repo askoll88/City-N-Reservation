@@ -88,15 +88,35 @@ def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: i
         set_pending_event(user_id, event)
 
         msg = format_event_message(event, next_stage)
-        vk.messages.send(
-            user_id=user_id,
-            message=msg,
-            keyboard=create_random_event_keyboard(event).get_keyboard(),
-            random_id=0,
-        )
+        keyboard = create_random_event_keyboard(event, stage_index=next_stage).get_keyboard()
+
+        # Для мульти-стадийных событий — редактируем сообщение вместо нового
+        msg_id = event.get("_msg_id")
+        if msg_id:
+            try:
+                vk.messages.edit(
+                    conversation_message_id=msg_id,
+                    message=msg,
+                    keyboard=keyboard,
+                )
+            except Exception:
+                # Если редактирование не удалось — отправляем новое
+                vk.messages.send(
+                    user_id=user_id,
+                    message=msg,
+                    keyboard=keyboard,
+                    random_id=0,
+                )
+        else:
+            vk.messages.send(
+                user_id=user_id,
+                message=msg,
+                keyboard=keyboard,
+                random_id=0,
+            )
         return True
 
-    # Событие завершено — очиpending
+    # Событие завершено — очищаем pending
     clear_pending_event(user_id)
 
     vk.messages.send(

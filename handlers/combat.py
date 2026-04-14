@@ -284,8 +284,11 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
         )
         return
 
-    # Проверка энергии
-    energy_cost = RESEARCH_ENERGY_COST.get(time_sec, 2)
+    # Проверка энергии (с модификатором локации)
+    from location_mechanics import get_energy_cost_mult
+    energy_cost_base = RESEARCH_ENERGY_COST.get(time_sec, 2)
+    energy_cost = max(1, int(energy_cost_base * get_energy_cost_mult(player.current_location_id)))
+
     if player.energy < energy_cost:
         vk.messages.send(
             user_id=user_id,
@@ -371,8 +374,8 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
     chance_mult = multiplier['chance']
     danger_mult = multiplier['danger']
 
-    # Выбираем событие
-    event = _select_research_event_by_chance(find_chance, chance_mult, danger_mult)
+    # Выбираем событие (с модификаторами локации)
+    event = _select_research_event_by_chance(find_chance, chance_mult, danger_mult, location_id)
 
     # Создаём временный объект игрока для обработки
     class TempPlayer:
@@ -423,11 +426,76 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
     # Обрабатываем событие
     _handle_research_event(temp_player, vk, user_id, event, time_sec)
 
+    # === Уникальные механики локаций ===
+    _check_location_unique_mechanics(location_id, event, vk, user_id)
 
-def _select_research_event_by_chance(find_chance: float, chance_mult: float, danger_mult: float):
-    """Выбрать событие исследования на основе шансов"""
-    # Базовый шанс найти что-то (увеличили базовый множитель)
-    base_find_chance = min(95, find_chance * chance_mult * 1.5)  # max 95%
+
+def _check_location_unique_mechanics(location_id: str, event_id: str, vk, user_id: int):
+    """Проверить и применить уникальные механики локаций после исследования"""
+    from location_mechanics import (
+        check_ambush, check_zone_mutation, check_mutant_hunt,
+        get_mutant_hunt_count,
+    )
+    _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
+
+    # === Военная дорога: ЗАСАДА ===
+    if check_ambush(location_id):
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "💀 **ЗАСАДА!**\n\n"
+                "Ты попал в военную засаду! Солдаты заметили тебя...\n"
+                "Будет бой — но награда стоит риска.\n\n"
+                "⚔️ Лут после победы: x2"
+            ),
+            random_id=0,
+        )
+        # Запускаем бой с засадой — модифицируем состояние
+        # Удвоенный лут будет обработан в _handle_enemy_loot
+        _combat_state_ref, _, _, _ = _get_main_imports()
+        combat_data = _combat_state_ref.get(user_id)
+        if combat_data:
+            combat_data["ambush"] = True  # Флаг для удвоенного лута
+
+    # === НИИ: МУТАЦИЯ ЗОНЫ ===
+    mutation = check_zone_mutation(location_id)
+    if mutation and mutation.get("active"):
+        vk.messages.send(
+            user_id=user_id,
+            message=mutation["message"],
+            random_id=0,
+        )
+
+    # === Заражённый лес: ОХОТА МУТАНТОВ ===
+    if check_mutant_hunt() and event_id and "enemy" in str(RESEARCH_EVENTS.get(event_id, {}).get("type", "")):
+        hunt_count = get_mutant_hunt_count()
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                f"🐺 **ОХОТА МУТАНТОВ!**\n\n"
+                "Ты убил мутанта, но его сородичи пришли мстить!\n"
+                f"Стая из {hunt_count} мутантов атакует тебя!\n\n"
+                "Приготовься к бою!"
+            ),
+            random_id=0,
+        )
+        # Запускаем дополнительный бой
+        # (будет обработано через состояние боя)
+        if _combat_state_ref.get(user_id):
+            _combat_state_ref[user_id]["mutant_hunt"] = hunt_count
+
+
+def _select_research_event_by_chance(find_chance: float, chance_mult: float, danger_mult: float, location_id: str = None):
+    """Выбрать событие исследования на основе шансов и модификаторов локации"""
+    from location_mechanics import get_event_weights, get_find_chance_mult, get_danger_mult
+
+    # Применяем модификаторы локации
+    loc_find_mult = get_find_chance_mult(location_id) if location_id else 1.0
+    loc_danger_mult = get_danger_mult(location_id) if location_id else 1.0
+    loc_event_weights = get_event_weights(location_id) if location_id else {}
+
+    # Базовый шанс найти что-то (с модификатором локации)
+    base_find_chance = min(95, find_chance * chance_mult * 1.5 * loc_find_mult)  # max 95%
 
     # Проверяем, нашли ли что-то
     if random.randint(1, 100) > base_find_chance:
@@ -444,9 +512,20 @@ def _select_research_event_by_chance(find_chance: float, chance_mult: float, dan
         base_chance = event_data["chance"]
 
         if event_data.get("danger", 0) > 0:
-            weight = base_chance * danger_mult
+            weight = base_chance * danger_mult * loc_danger_mult
         else:
             weight = base_chance * chance_mult
+
+        # Применяем веса локации (если есть)
+        if loc_event_weights:
+            # Проверяем прямой вес для этого события
+            loc_weight = loc_event_weights.get(event_id)
+            if loc_weight is not None:
+                weight *= loc_weight
+            # Проверяем общий вес для типа события (например "enemy")
+            event_type = event_data.get("type")
+            if event_type and event_type in loc_event_weights:
+                weight *= loc_event_weights[event_type]
 
         weights.append(weight)
         event_ids.append(event_id)
@@ -591,8 +670,9 @@ def _handle_anomaly(player, vk, user_id: int):
         )
         return
 
-    # Получаем случайную аномалию
-    anomaly = anomalies_module.get_random_anomaly()
+    # Получаем случайную аномалию (с учётом локации)
+    from location_mechanics import get_random_anomaly_for_location
+    anomaly = get_random_anomaly_for_location(player.current_location_id)
     anomaly_type = anomaly["type"]
     anomaly_name = anomaly["name"]
     anomaly_icon = anomaly["icon"]
@@ -815,7 +895,8 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 
 
 def _handle_radiation(player, vk, user_id: int):
-    """Обработка радиоактивного заражения"""
+    """Обработка радиоактивного заражения (с модификатором локации)"""
+    from location_mechanics import get_radiation_mult
     _, create_location_keyboard, _, _ = _get_main_imports()
 
     # Получаем реальные данные игрока
@@ -823,19 +904,23 @@ def _handle_radiation(player, vk, user_id: int):
     if not user:
         return
 
-    rad_damage = random.randint(15, 35)
+    rad_mult = get_radiation_mult(player.current_location_id)
+    rad_damage = int(random.randint(15, 35) * rad_mult)
+    rad_gain = int(random.randint(10, 25) * rad_mult)
     new_health = max(0, user['health'] - rad_damage)
-    new_radiation = user['radiation'] + random.randint(10, 25)
+    new_radiation = user['radiation'] + rad_gain
 
     database.update_user_stats(user_id, health=new_health, radiation=new_radiation)
+
+    rad_mult_text = f" (x{rad_mult:.1f} зона)" if rad_mult != 1.0 else ""
 
     vk.messages.send(
         user_id=user_id,
         message=(
             f"РАДИАЦИЯ!\n\n"
-            f"Ты вошёл в зону повышенной радиации!\n\n"
+            f"Ты вошёл в зону повышенной радиации!{rad_mult_text}\n\n"
             f"Получен урон: {rad_damage}\n"
-            f"Радиация: +{new_radiation}\n"
+            f"Радиация: +{rad_gain}\n"
             f"HP: {new_health}/100"
         ),
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
@@ -1004,8 +1089,13 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None):
 
 
 def _spawn_item(player, vk, user_id: int):
-    """Спавн предмета"""
+    """Спавн предмета (с учётом локации)"""
     _combat_state, create_location_keyboard, _, _ = _get_main_imports()
+    from location_mechanics import get_location_loot_bias, get_location_loot_bias_chance
+
+    # Проверяем бонус локации
+    bias_items = get_location_loot_bias(player.current_location_id)
+    bias_chance = get_location_loot_bias_chance(player.current_location_id)
 
     category = random.choice(['weapons', 'armor', 'artifacts', 'other'])
     items_in_category = database.get_items_by_category(category)
@@ -1018,23 +1108,39 @@ def _spawn_item(player, vk, user_id: int):
             random_id=0
         )
         return
-    
+
+    # Проверяем бонус локации — шанс получить тематический предмет
+    found_item = None
     is_rare = random.randint(1, 100) <= player.rare_find_chance
-    
-    if is_rare and category in ['weapons', 'armor']:
-        items_in_category = sorted(items_in_category, key=lambda x: x.get('price', 0), reverse=True)
-        found_item = items_in_category[0] if items_in_category else None
-        rarity_text = "РЕДКАЯ НАХОДКА!\n\n"
+
+    if bias_items and random.random() < bias_chance:
+        # Пытаемся найти предмет из бонусного списка
+        for bias_name in bias_items:
+            for item in items_in_category:
+                if bias_name.lower() in item['name'].lower():
+                    found_item = item
+                    break
+            if found_item:
+                break
+
+    # Если не нашли бонусный — выбираем случайно
+    if not found_item:
+        if is_rare and category in ['weapons', 'armor']:
+            items_in_category = sorted(items_in_category, key=lambda x: x.get('price', 0), reverse=True)
+            found_item = items_in_category[0] if items_in_category else None
+            rarity_text = "РЕДКАЯ НАХОДКА!\n\n"
+        else:
+            found_item = random.choice(items_in_category)
+            rarity_text = ""
     else:
-        found_item = random.choice(items_in_category)
-        rarity_text = ""
-    
+        rarity_text = "🎯 **ТЕМАТИЧЕСКАЯ НАХОДКА!**\n\n"
+
     if not found_item:
         return
-    
+
     item_weight = found_item.get('weight', 1.0)
     current_weight = player.inventory.total_weight
-    
+
     if current_weight + item_weight > player.max_weight:
         message = (
             f"Ты обыскал территорию!\n\n"
@@ -1045,7 +1151,7 @@ def _spawn_item(player, vk, user_id: int):
     else:
         database.add_item_to_inventory(user_id, found_item['name'], 1)
         player.inventory.reload()
-        
+
         item_info = f"{found_item['name']}"
         if found_item.get('attack'):
             item_info += f" УРН:{found_item['attack']}"
