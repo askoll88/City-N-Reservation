@@ -84,6 +84,9 @@ EMISSION_WARNING_MINUTES = int(os.getenv('EMISSION_WARNING_MINUTES', '15'))     
 EMISSION_DURATION_MINUTES = int(os.getenv('EMISSION_DURATION_MINUTES', '30'))     # длительность выброса
 EMISSION_AFTERMATH_MINUTES = int(os.getenv('EMISSION_AFTERMATH_MINUTES', '60'))   # время последствий (бонусы)
 
+# Шанс отмены выброса (как в игре S.T.A.L.K.E.R.)
+EMISSION_CANCEL_CHANCE = float(os.getenv('EMISSION_CANCEL_CHANCE', '0.15'))  # 15% шанс отмены
+
 # Урон выброса для игроков в Зоне
 EMISSION_DAMAGE_PCT_MIN = float(os.getenv('EMISSION_DAMAGE_PCT_MIN', '0.30'))  # 30% HP
 EMISSION_DAMAGE_PCT_MAX = float(os.getenv('EMISSION_DAMAGE_PCT_MAX', '0.60'))  # 60% HP

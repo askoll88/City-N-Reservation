@@ -167,9 +167,15 @@ def emission_tick(vk):
 
     # Переход: warning → impact
     elif status == EMISSION_PHASE_WARNING and now >= impact_time:
-        logger.info("Выброс #%d: переход в фазу IMPACT", emission_id)
-        _apply_emission_impact(vk, emission_id)
-        database.update_emission_status(emission_id, EMISSION_PHASE_IMPACT)
+        # Проверяем шанс отмены (как в S.T.A.L.K.E.R.)
+        if random.random() < config.EMISSION_CANCEL_CHANCE:
+            logger.info("Выброс #%d: ОТМЕНЁН (шанс %.0f%%)", emission_id, config.EMISSION_CANCEL_CHANCE * 100)
+            _announce_emission_cancelled(vk, emission_id)
+            database.update_emission_status(emission_id, "cancelled")
+        else:
+            logger.info("Выброс #%d: переход в фазу IMPACT", emission_id)
+            _apply_emission_impact(vk, emission_id)
+            database.update_emission_status(emission_id, EMISSION_PHASE_IMPACT)
 
     # Переход: impact → finished (aftermath начинается автоматически)
     elif status == EMISSION_PHASE_IMPACT and now >= end_time:
@@ -533,6 +539,51 @@ def _remove_random_items(vk_id: int, count: int) -> str:
 # =========================================================================
 # Фаза 3: Последствия (aftermath)
 # =========================================================================
+
+def _announce_emission_cancelled(vk, emission_id: int):
+    """Объявить об отмене выброса — Зона передумала"""
+    cancel_messages = [
+        (
+            "📻 **ВНИМАНИЕ! Выброс отменён!**\n\n"
+            "Приборы затихли. Зона... передумала.\n"
+            "Аномальная активность пошла на спад.\n\n"
+            "Сталкеры, выдыхайте. Но Зона не прощает беспечность — "
+            "она может передумать снова."
+        ),
+        (
+            "📻 **Отбой тревоги! Выброс отменён!**\n\n"
+            "Детекторы показывают спад. Выброс растворился\n"
+            "так же внезапно, как и начался.\n\n"
+            "Удача улыбнулась тебе, сталкер.\n"
+            "Но в Зоне удаче не доверяют..."
+        ),
+        (
+            "📻 **Выброс отменён!**\n\n"
+            "Неизвестные причины. Зона аномально спокойна.\n"
+            "Может, кто-то наверху решил за нас?\n\n"
+            "Продолжай работу, сталкер.\n"
+            "Но будь готов — следующий может не отмениться."
+        ),
+    ]
+
+    players = database.get_all_active_players()
+
+    for player_data in players:
+        vk_id = player_data["vk_id"]
+        # Очищаем pending событие выброса
+        clear_emission_pending(vk_id)
+
+        try:
+            vk.messages.send(
+                user_id=vk_id,
+                message=random.choice(cancel_messages),
+                random_id=0,
+            )
+        except Exception:
+            pass
+
+    logger.info("Выброс #%d: отменён, сообщения отправлены", emission_id)
+
 
 def _announce_aftermath(vk, emission_id: int):
     """Объявить о фазе последствий — бонусы для всех"""
