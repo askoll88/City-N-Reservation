@@ -473,22 +473,111 @@ def create_random_event_keyboard(event: dict, stage_index: int = 0):
 
 
 # ============================================================
-# Админка
+# Админка — категории и подменю
 # ============================================================
 
 def create_admin_keyboard():
-    """Админ-панель"""
+    """Главная админ-панель — категории"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Админ: Пользователи", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Админ: Баны", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("👥 Пользователи", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("☢️ Выброс", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
-    keyboard.add_button("Админ: Маркет ON", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Админ: Маркет OFF", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("📦 Выдача", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("🎲 Ивенты", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("Админ: Лоты", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("Админ: Помощь", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("🏪 Маркет", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("❓ Помощь", color=VkKeyboardColor.SECONDARY)
+    return keyboard
+
+
+# ---------- Пользователи ----------
+
+def create_admin_users_keyboard():
+    """Подменю: Пользователи"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Последние пользователи", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Забаненные", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
-    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Профиль (по vk_id)", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Инвентарь (по vk_id)", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Права on/off", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("Локация (телепорт)", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+# ---------- Выброс ----------
+
+def create_admin_emission_keyboard():
+    """Подменю: Выброс"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("☢️ Запустить выброс", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("⛔ Отменить выброс", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("📊 Статус выброса", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+# ---------- Выдача ----------
+
+def create_admin_give_keyboard():
+    """Подменю: Выдача"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("🎁 Выдать предмет", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("🗑️ Удалить предмет", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("📝 Set поле (статы)", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+# ---------- Ивенты ----------
+
+def create_admin_events_keyboard():
+    """Подменю: Ивенты"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("🎲 Рандом ивент игроку", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("📋 Квесты игрока", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("⏰ Кулдаун инфо", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("⏰ Кулдаун снять", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("👥 Онлайн", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+# ---------- Маркет ----------
+
+def create_admin_market_keyboard():
+    """Подменю: Маркет"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("📋 Активные лоты", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("🗂️ Все лоты", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("✅ Маркет ON", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("⛔ Маркет OFF", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("✖️ Снять лот", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+# ---------- Помощь ----------
+
+def create_admin_help_keyboard():
+    """Подменю: Помощь"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("❓ Справка", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
