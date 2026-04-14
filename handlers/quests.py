@@ -8,6 +8,7 @@ from handlers.keyboards import create_daily_quests_keyboard
 
 def handle_daily_quests_command(player, vk, user_id: int, text: str) -> bool:
     """Обработка команд daily quests"""
+    from state_manager import try_edit_or_send
     text_lower = text.strip().lower()
 
     if text_lower not in ("задания", "ежедневные задания", "квесты", "daily", "/daily", "задания показать", "квесты показать"):
@@ -18,11 +19,10 @@ def handle_daily_quests_command(player, vk, user_id: int, text: str) -> bool:
 
     msg = format_daily_quests_header(quests, progress, streak)
 
-    vk.messages.send(
-        user_id=user_id,
+    try_edit_or_send(
+        vk, user_id,
         message=msg,
-        keyboard=create_daily_quests_keyboard().get_keyboard(),
-        random_id=0,
+        keyboard=create_daily_quests_keyboard(),
     )
     return True
 

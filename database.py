@@ -1288,6 +1288,43 @@ def admin_give_item(vk_id: int, item_name: str, quantity: int = 1) -> dict:
     }
 
 
+def admin_remove_item(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+    """Удалить предмет из инвентаря игрока"""
+    if quantity <= 0:
+        return False
+    with db_cursor() as (cursor, conn):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return False
+
+        cursor.execute("SELECT id, name FROM items WHERE LOWER(name) = LOWER(%s)", (item_name,))
+        item = cursor.fetchone()
+        if not item:
+            return False
+
+        cursor.execute("""
+            SELECT quantity FROM user_inventory
+            WHERE user_id = %s AND item_id = %s
+        """, (user["id"], item["id"]))
+        row = cursor.fetchone()
+        if not row or row["quantity"] < quantity:
+            return False
+
+        new_qty = row["quantity"] - quantity
+        if new_qty <= 0:
+            cursor.execute("""
+                DELETE FROM user_inventory
+                WHERE user_id = %s AND item_id = %s
+            """, (user["id"], item["id"]))
+        else:
+            cursor.execute("""
+                UPDATE user_inventory SET quantity = %s
+                WHERE user_id = %s AND item_id = %s
+            """, (new_qty, user["id"], item["id"]))
+    return True
+
+
 _ADMIN_EDITABLE_FIELDS = frozenset({
     "money", "level", "experience",
     "health", "energy", "radiation",

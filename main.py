@@ -322,8 +322,17 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         handle_use_item(player, item_name, vk, user_id)
         return True
 
-    # Купить предмет
+    # Купить предмет — только на КПП или Черном рынке
     if text.startswith('купить '):
+        if player.current_location_id not in ('кпп', 'черный рынок'):
+            vk.messages.send(
+                user_id=user_id,
+                message="⛠ Купить предметы можно только на КПП или Чёрном рынке.",
+                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0
+            )
+            return True
+
         item_name = text.replace('купить ', '')
 
         if item_name in ['слот', 'слот артефакта']:
@@ -346,8 +355,17 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         handle_buy_item(player, item_name, vk, user_id)
         return True
 
-    # Продать предмет
+    # Продать предмет — только на КПП или Черном рынке
     if text.startswith('продать '):
+        if player.current_location_id not in ('кпп', 'черный рынок'):
+            vk.messages.send(
+                user_id=user_id,
+                message="⛠ Продать предметы можно только на КПП или Чёрном рынке.",
+                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0
+            )
+            return True
+
         item_name = text.replace('продать ', '')
 
         # Продажа артефактов по номеру

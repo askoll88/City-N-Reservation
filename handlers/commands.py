@@ -666,19 +666,33 @@ def handle_buy_sell_commands(player, vk, user_id: int, text: str, in_dialog: boo
 
     if in_dialog:
         return False
-    
+
     if text == 'купить':
+        if player.current_location_id not in ('кпп', 'черный рынок'):
+            vk.messages.send(
+                user_id=user_id,
+                message="⛠ Купить предметы можно только на КПП или Чёрном рынке.",
+                random_id=0
+            )
+            return True
         vk.messages.send(
             user_id=user_id,
             message="💰 Чтобы купить предмет, напиши 'купить <название предмета>'.\n\nПример: купить нож",
             random_id=0
         )
         return True
-    
+
     if text == 'продать':
+        if player.current_location_id not in ('кпп', 'черный рынок'):
+            vk.messages.send(
+                user_id=user_id,
+                message="⛠ Продать предметы можно только на КПП или Чёрном рынке.",
+                random_id=0
+            )
+            return True
         show_weapons(player, vk, user_id)
         return True
-    
+
     return False
 
 

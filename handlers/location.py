@@ -321,10 +321,10 @@ def handle_heal(player, vk, user_id: int):
 
 def get_status(player, vk, user_id: int):
     """Показать статус персонажа"""
-    vk.messages.send(
-        user_id=user_id,
+    from state_manager import try_edit_or_send
+    try_edit_or_send(
+        vk, user_id,
         message=player.get_status(),
-        random_id=0
     )
 
 

@@ -398,3 +398,54 @@ def get_emission_pending(user_id: int) -> dict | None:
 def clear_emission_pending(user_id: int):
     """Очистить ожидающее событие выброса"""
     _emission_pending_state.pop(user_id, None)
+
+
+# === Редактирование последнего сообщения ===
+_last_message_state = LockedDict()  # {user_id: {"msg_id": int, "peer_id": int}}
+
+
+def get_last_message(user_id: int) -> dict | None:
+    """Получить последнее отправленное сообщение пользователя"""
+    return _last_message_state.get(user_id)
+
+
+def set_last_message(user_id: int, msg_id: int, peer_id: int = None):
+    """Запомнить последнее сообщение для редактирования"""
+    _last_message_state[user_id] = {
+        "msg_id": msg_id,
+        "peer_id": peer_id,
+    }
+
+
+def clear_last_message(user_id: int):
+    """Очистить последнее сообщение"""
+    _last_message_state.pop(user_id, None)
+
+
+def try_edit_or_send(vk, user_id: int, message: str, keyboard=None):
+    """
+    Попытаться редактировать последнее сообщение.
+    Если не удалось — отправить новое.
+    """
+    last_msg = get_last_message(user_id)
+    kwargs = {"message": message}
+    if keyboard:
+        kwargs["keyboard"] = keyboard.get_keyboard() if hasattr(keyboard, "get_keyboard") else keyboard
+
+    if last_msg and last_msg.get("msg_id"):
+        try:
+            vk.messages.edit(
+                conversation_message_id=last_msg["msg_id"],
+                **kwargs,
+            )
+            return  # Успешно отредактировано
+        except Exception:
+            pass
+
+    # Fallback: отправить новое
+    kwargs["random_id"] = 0
+    try:
+        msg_id = vk.messages.send(user_id=user_id, **kwargs)
+        set_last_message(user_id, msg_id)
+    except Exception:
+        pass
