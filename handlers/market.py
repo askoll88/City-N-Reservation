@@ -522,10 +522,17 @@ def handle_market_input(player, vk, user_id, text):
             keyboard=create_market_search_keyboard().get_keyboard(),
             random_id=0,
         )
-        state["searching"] = True
-        set_market_browse_state(user_id, category=category, page=page, sort=sort, search=search)
-        if user_id in _market_browse_state:
-            _market_browse_state[user_id]["searching"] = True
+        # Атомарно обновляем состояние с флагом поиска
+        def updater(s):
+            s = s or {}
+            s["category"] = category
+            s["page"] = page
+            s["sort"] = sort
+            s["search"] = search
+            s["searching"] = True
+            return s
+        from state_manager import _market_browse_state
+        _market_browse_state.update(user_id, updater)
         return True
 
     # --- Мои лоты ---

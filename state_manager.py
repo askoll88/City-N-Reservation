@@ -49,6 +49,16 @@ class LockedDict:
         with self._lock:
             return list(self._data.items())
 
+    def update(self, key, func):
+        """Атомарно прочитать, модифицировать и записать значение.
+
+        func получает текущее значение (или default если ключа нет)
+        и должен вернуть новое значение.
+        """
+        with self._lock:
+            value = self._data.get(key)
+            self._data[key] = func(value)
+
     def __len__(self):
         with self._lock:
             return len(self._data)
@@ -339,11 +349,13 @@ def clear_market_browse_state(user_id: int):
 
 
 def set_market_my_listings_page(user_id: int, page: int = 1, status: str = "active"):
-    """Установить страницу для просмотра своих лотов."""
-    state = _market_browse_state.get(user_id, {})
-    state["my_listings_page"] = page
-    state["my_listings_status"] = status
-    _market_browse_state[user_id] = state
+    """Атомарно обновить страницу и статус своих лотов."""
+    def updater(state):
+        state = state or {}
+        state["my_listings_page"] = page
+        state["my_listings_status"] = status
+        return state
+    _market_browse_state.update(user_id, updater)
 
 
 def get_market_my_listings_page(user_id: int) -> tuple:

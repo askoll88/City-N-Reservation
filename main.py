@@ -583,36 +583,37 @@ def _process_callback_event(event, vk):
     user_id = getattr(event.obj, "user_id", 0)
     lock = _get_user_lock(user_id) if user_id else None
 
-    try:
-        if lock:
-            lock.acquire()
+    if lock:
+        with lock:
+            _do_callback_processing(event, vk)
+    else:
+        _do_callback_processing(event, vk)
 
-        payload = event.obj.payload
 
-        if payload and payload.get("command") == "back":
-            player = get_player(user_id)
-            return_location = payload.get("location") or player.previous_location or 'город'
+def _do_callback_processing(event, vk):
+    """Основная логика обработки callback-события."""
+    payload = event.obj.payload
 
-            vk.messages.send(
-                user_id=user_id,
-                message=f"↩️ Возвращаемся в {return_location}...",
-                keyboard=create_location_keyboard(return_location, player.level).get_keyboard(),
-                random_id=0
-            )
+    if payload and payload.get("command") == "back":
+        user_id = getattr(event.obj, "user_id", 0)
+        player = get_player(user_id)
+        return_location = payload.get("location") or player.previous_location or 'город'
 
-            player.current_location_id = return_location
-            database.update_user_location(user_id, return_location)
-
-        vk.messages.send_message_event_answer(
-            event_id=event.obj.event_id,
-            user_id=event.obj.user_id,
-            peer_id=event.obj.peer_id,
+        vk.messages.send(
+            user_id=user_id,
+            message=f"↩️ Возвращаемся в {return_location}...",
+            keyboard=create_location_keyboard(return_location, player.level).get_keyboard(),
+            random_id=0
         )
-    except Exception as e:
-        logger.error(f"Ошибка при обработке callback: {e}")
-    finally:
-        if lock and lock.locked():
-            lock.release()
+
+        player.current_location_id = return_location
+        database.update_user_location(user_id, return_location)
+
+    vk.messages.send_message_event_answer(
+        event_id=event.obj.event_id,
+        user_id=event.obj.user_id,
+        peer_id=event.obj.peer_id,
+    )
 
 
 def _event_worker(task_queue: "queue.Queue[tuple[str, object]]", vk):

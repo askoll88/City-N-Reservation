@@ -1464,7 +1464,8 @@ def handle_sell_artifact(player, artifact_name: str, vk, user_id: int) -> bool:
             return True
 
         base_price = item_info.get('price', 100) // 2
-        sell_price = int(base_price * player.sell_bonus)
+        # sell_bonus — это процент бонуса (напр. 15 = +15%), формула: base * (1 + bonus/100)
+        sell_price = int(base_price * (1 + player.sell_bonus / 100))
 
         # Продаем
         success, msg = player.sell_item(artifact_name)
