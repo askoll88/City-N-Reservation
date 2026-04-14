@@ -150,6 +150,7 @@ def emission_tick(vk):
 
     emission = database.get_active_emission()
     if not emission:
+        logger.debug("emission_tick: нет активных выбросов")
         return
 
     # БД хранит TIMESTAMP (без tz) — делаем now тоже наивным для сравнения
@@ -161,9 +162,13 @@ def emission_tick(vk):
     end_time = emission["end_time"]
     status = emission["status"]
 
-    logger.debug(
-        "Выброс #%d: tick | status=%s | now=%s | warning=%s | impact=%s | end=%s",
+    logger.info(
+        "Выброс #%d: tick | status=%s | now=%s | warning=%s | impact=%s | end=%s | "
+        "pending_chk=%s | warning_chk=%s | impact_chk=%s",
         emission_id, status, now, warning_time, impact_time, end_time,
+        status == EMISSION_PHASE_PENDING and now >= warning_time,
+        status == EMISSION_PHASE_WARNING and now >= impact_time,
+        status == EMISSION_PHASE_IMPACT and now >= end_time,
     )
 
     # Переход: pending → warning
@@ -203,6 +208,10 @@ def emission_tick(vk):
             database.update_emission_status(emission_id, EMISSION_PHASE_FINISHED)
             _announce_aftermath(vk, emission_id)
             logger.info("Выброс #%d: успешно перешёл в FINISHED (aftermath активен)", emission_id)
+
+            # Планируем следующий выброс
+            next_id = schedule_next_emission()
+            logger.info("Выброс #%d: следующий выброс запланирован, id=%s", emission_id, next_id)
         except Exception as e:
             logger.error("Выброс #%d: ОШИБКА при переходе в FINISHED: %s", emission_id, e, exc_info=True)
     else:
