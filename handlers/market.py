@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import re
 import time
-import math
 
 import config
 import database
@@ -27,6 +26,7 @@ from state_manager import (
     clear_market_browse_state,
     set_market_my_listings_page,
     get_market_my_listings_page,
+    _market_browse_state,
 )
 
 # Категория-маппинг для кнопок
@@ -51,7 +51,8 @@ PER_PAGE = 8  # Лотов на страницу
 
 def _format_listing(row: dict) -> str:
     """Компактный формат одного лота."""
-    rarity_emoji = {"common": "⚪", "rare": "🔵", "unique": "🟣", "legendary": "🟡"}.get(row.get("rarity", "common"), "⚪")
+    rarity_emoji = {"common": "⚪", "rare": "🔵", "unique": "🟣", "legendary": "🟡"}.get(
+        row.get("rarity", "common"), "⚪")
     category_name = {
         "weapons": "🔫 Оружие",
         "rare_weapons": "🔫 Редкое оружие",
@@ -64,16 +65,15 @@ def _format_listing(row: dict) -> str:
     }.get(row.get("category", ""), row.get("category", ""))
 
     lines = [
-        f"📦 <b>#{row['id']}</b> | {row['item_name']} × {row['quantity']}",
-        f"💵 {row['price_per_item']:,} руб/шт | Итого: <b>{row['total_price']:,} руб.</b>",
+        f"📦 #{row['id']} | {row['item_name']} x{row['quantity']}",
+        f"💵 {row['price_per_item']:,} руб/шт | Итого: {row['total_price']:,} руб.",
         f"{category_name} | {rarity_emoji}",
     ]
     return "\n".join(lines)
 
 
-def _show_market_listings_page(player, vk, user_id: int, page: int,
-                                category: str | None = None, sort: str = "newest",
-                                search: str | None = None):
+def _show_market_listings_page(player, vk, user_id, page,
+                                category=None, sort="newest", search=None):
     """Показать страницу лотов рынка с пагинацией."""
     data = database.get_market_listings(page=page, per_page=PER_PAGE,
                                          category=category, sort=sort, search=search)
@@ -83,12 +83,15 @@ def _show_market_listings_page(player, vk, user_id: int, page: int,
     cur_page = data["page"]
 
     # Сохраняем состояние
-    set_market_browse_state(user_id, category=category, page=cur_page, sort=sort, search=search)
+    set_market_browse_state(user_id, category=category, page=cur_page,
+                            sort=sort, search=search, view="all")
+    if user_id in _market_browse_state:
+        _market_browse_state[user_id]["searching"] = False
 
     if not listings:
         msg_parts = ["📭 На рынке пока нет подходящих лотов."]
         if search:
-            msg_parts.append(f"По запросу «{search}» ничего не найдено.")
+            msg_parts.append(f"По запросу '{search}' ничего не найдено.")
         if category:
             msg_parts.append("Попробуй другую категорию или отключи фильтр.")
 
@@ -106,7 +109,7 @@ def _show_market_listings_page(player, vk, user_id: int, page: int,
         cat_name = {v: k for k, v in CATEGORY_MAP.items() if v}.get(category, category)
         header += f" | {cat_name.capitalize()}"
     if search:
-        header += f" | 🔍 «{search}»"
+        header += f" | 🔍 '{search}'"
 
     sort_name = {"newest": "🆕 Новые", "oldest": "📅 Старые",
                  "cheap": "💰 Дешевле", "expensive": "💎 Дороже"}.get(sort, "")
@@ -118,9 +121,9 @@ def _show_market_listings_page(player, vk, user_id: int, page: int,
         lines.append(_format_listing(row))
         lines.append("─" * 20)
 
-    lines.append(f"\n💡 Чтобы купить: <b>купить лот &lt;id&gt;</b>")
-    lines.append(f"💡 Чтобы выставить: <b>выставить &lt;предмет&gt; &lt;цена&gt; [кол-во]</b>")
-    lines.append(f"💡 Чтобы снять: <b>снять лот &lt;id&gt;</b>")
+    lines.append(f"\n💡 Чтобы купить: купить лот <id>")
+    lines.append(f"💡 Чтобы выставить: выставить <предмет> <цена> [кол-во]")
+    lines.append(f"💡 Чтобы снять: снять лот <id>")
 
     keyboard = create_market_pagination_keyboard(cur_page, pages, category=category,
                                                    sort=sort, search=search)
@@ -133,7 +136,7 @@ def _show_market_listings_page(player, vk, user_id: int, page: int,
     )
 
 
-def show_market_menu(player, vk, user_id: int):
+def show_market_menu(player, vk, user_id):
     """Главное меню рынка."""
     if not database.is_market_enabled():
         vk.messages.send(
@@ -147,7 +150,7 @@ def show_market_menu(player, vk, user_id: int):
     vk.messages.send(
         user_id=user_id,
         message=(
-            "📈 <b>РЫНОК СТАЛКЕРОВ</b>\n\n"
+            "📈 РЫНОК СТАЛКЕРОВ\n\n"
             "Здесь сталкеры торгуют между собой через эскроу.\n"
             "Рынок берет комиссию за безопасность сделки.\n\n"
             f"🔒 Доступ с {config.MARKET_MIN_LEVEL} уровня\n"
@@ -161,13 +164,12 @@ def show_market_menu(player, vk, user_id: int):
     )
 
 
-def show_market_listings(player, vk, user_id: int, category: str | None = None,
-                          page: int = 1, sort: str = "newest", search: str | None = None):
+def show_market_listings(player, vk, user_id, category=None, page=1, sort="newest", search=None):
     """Показать лоты рынка с пагинацией."""
     _show_market_listings_page(player, vk, user_id, page, category, sort, search)
 
 
-def show_my_market_listings(player, vk, user_id: int, page: int = 1, status: str = "active"):
+def show_my_market_listings(player, vk, user_id, page=1, status="active"):
     """Показать свои лоты с пагинацией."""
     data = database.get_market_user_listings(user_id, status=status, page=page, per_page=PER_PAGE)
     listings = data["listings"]
@@ -191,18 +193,18 @@ def show_my_market_listings(player, vk, user_id: int, page: int = 1, status: str
                     "cancelled": "СНЯТЫЕ ЛОТЫ", "expired": "ИСТЁКШИЕ ЛОТЫ",
                     "all": "ВСЕ ЛОТЫ"}.get(status, "ЛОТЫ")
 
-    lines = [f"🧾 <b>МОИ {status_title}</b>",
+    lines = [f"🧾 МОИ {status_title}",
              f"Страница {cur_page}/{pages} | Всего: {total}", ""]
 
     for row in listings:
         status_emoji = {"active": "🟢", "sold": "✅", "cancelled": "❌", "expired": "⏰"}.get(row["status"], "⚪")
         lines.append(
-            f"{status_emoji} <b>#{row['id']}</b> | {row['item_name']} × {row['quantity']} | "
+            f"{status_emoji} #{row['id']} | {row['item_name']} x{row['quantity']} | "
             f"{row['price_per_item']:,} руб/шт | Итого {row['total_price']:,} руб."
         )
 
     if status == "active":
-        lines.append(f"\n💡 Снять лот: <b>снять лот &lt;id&gt;</b>")
+        lines.append(f"\n💡 Снять лот: снять лот <id>")
 
     keyboard = create_my_listings_keyboard(cur_page, pages)
     vk.messages.send(
@@ -213,7 +215,7 @@ def show_my_market_listings(player, vk, user_id: int, page: int = 1, status: str
     )
 
 
-def show_my_market_transactions(player, vk, user_id: int):
+def show_my_market_transactions(player, vk, user_id):
     """Показать историю сделок."""
     rows = database.get_market_user_transactions(user_id, limit=30)
     if not rows:
@@ -225,11 +227,11 @@ def show_my_market_transactions(player, vk, user_id: int):
         )
         return
 
-    lines = ["📒 <b>МОИ СДЕЛКИ</b>\n"]
+    lines = ["📒 МОИ СДЕЛКИ\n"]
     for row in rows:
         side = "🟢 Покупка" if row["buyer_vk_id"] == user_id else "🔵 Продажа"
         lines.append(
-            f"{side} | Лот #{row['listing_id']} | {row['item_name']} × {row['quantity']} | "
+            f"{side} | Лот #{row['listing_id']} | {row['item_name']} x{row['quantity']} | "
             f"{row['total_price']:,} руб. | {row['created_at']:%d.%m.%Y %H:%M}"
         )
 
@@ -241,7 +243,7 @@ def show_my_market_transactions(player, vk, user_id: int):
     )
 
 
-def handle_market_create_listing(player, vk, user_id: int, text: str) -> bool:
+def handle_market_create_listing(player, vk, user_id, text):
     """Обработка создания лота: выставить <предмет> <цена> [кол-во]"""
     m = re.match(r"^выставить\s+(.+?)\s+(\d+)(?:\s+(\d+))?$", text.strip(), flags=re.IGNORECASE)
     if not m:
@@ -261,7 +263,7 @@ def handle_market_create_listing(player, vk, user_id: int, text: str) -> bool:
     return True
 
 
-def handle_market_buy_listing(player, vk, user_id: int, text: str) -> bool:
+def handle_market_buy_listing(player, vk, user_id, text):
     """Показать подтверждение покупки вместо мгновенной покупки"""
     m = re.match(r"^купить\s+лот\s+(\d+)$", text.strip(), flags=re.IGNORECASE)
     if not m:
@@ -329,10 +331,10 @@ def handle_market_buy_listing(player, vk, user_id: int, text: str) -> bool:
     vk.messages.send(
         user_id=user_id,
         message=(
-            f"🛒 <b>ПОДТВЕРЖДЕНИЕ ПОКУПКИ</b>\n\n"
-            f"📦 {lot_info['item_name']} × {lot_info['quantity']}\n"
+            f"🛒 ПОДТВЕРЖДЕНИЕ ПОКУПКИ\n\n"
+            f"📦 {lot_info['item_name']} x{lot_info['quantity']}\n"
             f"💵 {lot_info['price_per_item']:,} руб/шт\n"
-            f"💰 Итого: <b>{total_price:,} руб.</b>\n"
+            f"💰 Итого: {total_price:,} руб.\n"
             f"👤 Продавец: {lot_info['seller_vk_id']}\n"
             f"🏷️ {lot_info.get('category', 'unknown')} | ✨ {lot_info.get('rarity', 'common')}\n\n"
             f"У тебя: {player.money:,} руб.\n"
@@ -345,7 +347,7 @@ def handle_market_buy_listing(player, vk, user_id: int, text: str) -> bool:
     return True
 
 
-def handle_market_confirm_purchase(player, vk, user_id: int, text: str) -> bool:
+def handle_market_confirm_purchase(player, vk, user_id, text):
     """Обработка подтверждения или отмены покупки"""
     if not has_pending_purchase(user_id):
         return False
@@ -361,7 +363,7 @@ def handle_market_confirm_purchase(player, vk, user_id: int, text: str) -> bool:
                 user_id=user_id,
                 message=(
                     f"❌ Покупка отменена.\n\n"
-                    f"📦 {pending['item_name']} × {pending['quantity']} — {pending['total_price']:,} руб."
+                    f"📦 {pending['item_name']} x{pending['quantity']} — {pending['total_price']:,} руб."
                 ),
                 keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
@@ -415,7 +417,7 @@ def handle_market_confirm_purchase(player, vk, user_id: int, text: str) -> bool:
     return False
 
 
-def handle_market_cancel_listing(player, vk, user_id: int, text: str) -> bool:
+def handle_market_cancel_listing(player, vk, user_id, text):
     """Обработка снятия лота: снять лот <id>"""
     m = re.match(r"^(снять|отменить)\s+лот\s+(\d+)$", text.strip(), flags=re.IGNORECASE)
     if not m:
@@ -432,20 +434,26 @@ def handle_market_cancel_listing(player, vk, user_id: int, text: str) -> bool:
     return True
 
 
-def handle_market_input(player, vk, user_id: int, text: str) -> bool:
+def handle_market_input(player, vk, user_id, text):
     """
     Универсальный обработчик ввода на рынке.
     Обрабатывает кнопки пагинации, сортировки, поиска и навигации.
-    Возвращает True если обработал, False если нет.
     """
     text_lower = text.strip().lower()
 
-    # Получаем состояние просмотра
+    # Состояние просмотра
     state = get_market_browse_state(user_id) or {}
     category = state.get("category")
     page = state.get("page", 1)
     sort = state.get("sort", "newest")
     search = state.get("search")
+    searching = state.get("searching", False)
+
+    # --- Режим поиска: пользователь ввёл запрос ---
+    if searching:
+        clear_market_browse_state(user_id)
+        _show_market_listings_page(player, vk, user_id, 1, None, "newest", text.strip())
+        return True
 
     # --- Навигация по страницам ---
     if text_lower in ("◀️ назад", "назад") and page > 1:
@@ -456,7 +464,7 @@ def handle_market_input(player, vk, user_id: int, text: str) -> bool:
         _show_market_listings_page(player, vk, user_id, page + 1, category, sort, search)
         return True
 
-    # Номер страницы (число 1-999)
+    # Номер страницы
     if text_lower.isdigit():
         p = int(text_lower)
         if 1 <= p <= 999:
@@ -471,8 +479,7 @@ def handle_market_input(player, vk, user_id: int, text: str) -> bool:
         "💎 дороже": "expensive", "дороже": "expensive",
     }
     if text_lower in sort_mapping:
-        new_sort = sort_mapping[text_lower]
-        _show_market_listings_page(player, vk, user_id, 1, category, new_sort, search)
+        _show_market_listings_page(player, vk, user_id, 1, category, sort_mapping[text_lower], search)
         return True
 
     # --- Главная ---
@@ -496,8 +503,7 @@ def handle_market_input(player, vk, user_id: int, text: str) -> bool:
         "🍖 еда": "food", "еда": "food", "рынок еда": "food",
     }
     if text_lower in cat_mapping:
-        cat = cat_mapping[text_lower]
-        _show_market_listings_page(player, vk, user_id, 1, cat, sort, None)
+        _show_market_listings_page(player, vk, user_id, 1, cat_mapping[text_lower], sort, None)
         return True
 
     # --- Сбросить фильтр ---
@@ -509,33 +515,27 @@ def handle_market_input(player, vk, user_id: int, text: str) -> bool:
     if text_lower in ("🔍 поиск", "поиск"):
         vk.messages.send(
             user_id=user_id,
-            message="🔍 <b>ПОИСК ПО НАЗВАНИЮ</b>\n\nВведи название предмета для поиска.\n"
-                    "Например: <i>АК-74</i>, <i>Аптечка</i>, <i>Медуза</i>\n\n"
+            message="🔍 ПОИСК ПО НАЗВАНИЮ\n\n"
+                    "Введи название предмета для поиска.\n"
+                    "Например: АК-74, Аптечка, Медуза\n\n"
                     "Или нажми «Отмена» чтобы выйти.",
             keyboard=create_market_search_keyboard().get_keyboard(),
             random_id=0,
         )
-        # Устанавливаем флаг поиска в состоянии
         state["searching"] = True
-        set_market_browse_state(user_id, **{k: v for k, v in state.items() if k != "searching"})
-        from state_manager import _market_browse_state
-        _market_browse_state[user_id]["searching"] = True
-        return True
-
-    # --- Режим поиска: пользователь ввёл запрос ---
-    if state.get("searching"):
-        clear_market_browse_state(user_id)
-        _show_market_listings_page(player, vk, user_id, 1, None, "newest", text.strip())
+        set_market_browse_state(user_id, category=category, page=page, sort=sort, search=search)
+        if user_id in _market_browse_state:
+            _market_browse_state[user_id]["searching"] = True
         return True
 
     # --- Мои лоты ---
-    if text_lower in ("🧾 мои лоты", "мои лоты"):
+    if text_lower in ("🧾 мои лоты", "мои лоты", "мои лот"):
         my_page, my_status = get_market_my_listings_page(user_id)
         show_my_market_listings(player, vk, user_id, page=my_page, status=my_status)
         return True
 
     # --- Мои сделки ---
-    if text_lower in ("📒 мои сделки", "мои сделки"):
+    if text_lower in ("📒 мои сделки", "мои сделки", "сделки"):
         show_my_market_transactions(player, vk, user_id)
         return True
 
@@ -550,9 +550,15 @@ def handle_market_input(player, vk, user_id: int, text: str) -> bool:
         show_my_market_listings(player, vk, user_id, page=1, status="sold")
         return True
 
-    if text_lower in ("📊 все", "все"):
+    if text_lower in ("📊 все", "все мои лоты", "все мои"):
         set_market_my_listings_page(user_id, page=1, status="all")
         show_my_market_listings(player, vk, user_id, page=1, status="all")
+        return True
+
+    # --- Рынок игроков (меню) ---
+    if text_lower in ("рынок игроков",):
+        clear_market_browse_state(user_id)
+        show_market_menu(player, vk, user_id)
         return True
 
     # --- Купить лот <id> ---
@@ -565,12 +571,6 @@ def handle_market_input(player, vk, user_id: int, text: str) -> bool:
 
     # --- Выставить лот ---
     if handle_market_create_listing(player, vk, user_id, text):
-        return True
-
-    # --- Назад ---
-    if text_lower in ("назад", "⬅️ назад"):
-        clear_market_browse_state(user_id)
-        show_market_menu(player, vk, user_id)
         return True
 
     return False

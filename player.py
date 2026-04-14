@@ -484,7 +484,7 @@ class Player:
         # ПАССИВНЫЕ БОНУСЫ
         # ═══════════════════════════════════════════════════
         passive_bonuses = self._get_passive_bonuses()
-        class_info = f"🎭 <b>{self.player_class.upper()}</b>" if self.player_class else "🎭 Нет класса"
+        class_info = f"🎭 {self.player_class.upper()}" if self.player_class else "🎭 Нет класса"
 
         # ═══════════════════════════════════════════════════
         # ХАРАКТЕРИСТИКИ (derived)
@@ -497,7 +497,7 @@ class Player:
 
         # --- Верхний блок: основное ---
         lines = []
-        lines.append(f"📊 <b>СТАТУС ПЕРСОНАЖА</b>")
+        lines.append(f"📊 СТАТУС ПЕРСОНАЖА")
         lines.append(f"📍 {loc_name}")
         lines.append(f"🎯 Ур. {self.level}  |  {class_info}")
         lines.append("")
@@ -506,29 +506,29 @@ class Player:
         hp_pct = int(self.health / self.max_health * 100)
         en_pct = self.energy
         rad_pct = self.radiation
-        lines.append(f"❤️ <b>HP</b> {self.health}/{self.max_health} ({hp_pct}%)")
+        lines.append(f"❤️ HP {self.health}/{self.max_health} ({hp_pct}%)")
         lines.append(f"   {hp_bar}")
-        lines.append(f"⚡ <b>Энергия</b> {self.energy}/100")
+        lines.append(f"⚡ Энергия {self.energy}/100")
         lines.append(f"   {energy_bar}")
-        lines.append(f"☢️ <b>Радиация</b> {self.radiation}%")
+        lines.append(f"☢️ Радиация {self.radiation}%")
         lines.append(f"   {rad_bar}")
         lines.append("")
 
         # --- Опыт и деньги ---
         exp_pct = int(self.experience / exp_needed * 100) if exp_needed > 0 else 0
-        lines.append(f"⭐ <b>Опыт</b> {self.experience}/{exp_needed} ({exp_pct}%)")
+        lines.append(f"⭐ Опыт {self.experience}/{exp_needed} ({exp_pct}%)")
         lines.append(f"   {exp_bar}")
-        lines.append(f"💰 <b>{self.money:,} ₽</b>")
+        lines.append(f"💰 {self.money:,} ₽")
         lines.append("")
 
         # --- Снаряжение ---
-        lines.append(f"🎒 <b>СНАРЯЖЕНИЕ</b>")
+        lines.append(f"🎒 СНАРЯЖЕНИЕ")
         lines.append(f"🔫 {self.equipped_weapon or '—'}  |  ⚔️ Атака: {total_attack}")
 
         if armor_slots:
             for slot_line in armor_slots:
                 lines.append(f"🛡️ {slot_line}")
-            lines.append(f"   📊 Всего брони: <b>{total_armor}</b>")
+            lines.append(f"   📊 Всего брони: {total_armor}")
         else:
             lines.append(f"🛡️ Броня: —")
 
@@ -542,19 +542,19 @@ class Player:
         lines.append("")
 
         # --- Характеристики ---
-        lines.append(f"💪 <b>ХАРАКТЕРИСТИКИ</b>")
-        lines.append(f"⚔️ Сила: <b>{self.strength}</b>  |  🏃 Выносливость: <b>{self.stamina}</b>")
-        lines.append(f"👁️ Восприятие: <b>{self.perception}</b>  |  🍀 Удача: <b>{self.luck}</b>")
+        lines.append(f"💪 ХАРАКТЕРИСТИКИ")
+        lines.append(f"⚔️ Сила: {self.strength}  |  🏃 Выносливость: {self.stamina}")
+        lines.append(f"👁️ Восприятие: {self.perception}  |  🍀 Удача: {self.luck}")
         lines.append("")
-        lines.append(f"📊 Урон: <b>{self.melee_damage}</b>  |  Броня: <b>{self.total_defense}</b>")
-        lines.append(f"🎯 Крит: <b>{self.crit_chance}%</b>  |  Уклонение: <b>{self.dodge_chance}%</b>")
-        lines.append(f"🔍 Находки: <b>{self.find_chance}%</b>  |  Редкое: <b>{self.rare_find_chance}%</b>")
+        lines.append(f"📊 Урон: {self.melee_damage}  |  Броня: {self.total_defense}")
+        lines.append(f"🎯 Крит: {self.crit_chance}%  |  Уклонение: {self.dodge_chance}%")
+        lines.append(f"🔍 Находки: {self.find_chance}%  |  Редкое: {self.rare_find_chance}%")
         lines.append("")
 
         # --- Груз ---
-        lines.append(f"📦 <b>ГРУЗ</b>")
+        lines.append(f"📦 ГРУЗ")
         lines.append(f"⚖️ {current_weight:.1f} / {self.max_weight} кг  {weight_status}")
-        lines.append(f"🎯 Гильзы: <b>{shells_current}</b> / {shells_capacity}  ({shells_bag})")
+        lines.append(f"🎯 Гильзы: {shells_current} / {shells_capacity}  ({shells_bag})")
 
         # --- Пассивные бонусы класса ---
         if passive_bonuses and self.player_class:
@@ -577,7 +577,7 @@ class Player:
                 bonus_parts.append(f"крит.урон +{passive_bonuses['crit_damage']}%")
             if bonus_parts:
                 lines.append("")
-                lines.append(f"🎓 <b>Бонусы {self.player_class}:</b> {'  '.join(bonus_parts)}")
+                lines.append(f"🎓 Бонусы {self.player_class}: {'  '.join(bonus_parts)}")
 
         return "\n".join(lines)
 
