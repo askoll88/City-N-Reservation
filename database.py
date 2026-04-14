@@ -2197,8 +2197,43 @@ def give_newbie_kit(vk_id: int) -> dict:
             VALUES (%s, 'newbie_kit_received', 1)
             ON CONFLICT (user_id, flag_name) DO NOTHING
         """, (user_id,))
-    
+
     return {'success': True, 'message': '✅ Набор новичка получен! Проверь инвентарь.'}
+
+
+def get_user_flag(vk_id: int, flag_name: str, default: int = 0) -> int:
+    """Получить значение флага пользователя. Возвращает default если флага нет."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return default
+
+        cursor.execute(
+            "SELECT value FROM user_flags WHERE user_id = %s AND flag_name = %s",
+            (user['id'], flag_name),
+        )
+        row = cursor.fetchone()
+        return row['value'] if row else default
+
+
+def set_user_flag(vk_id: int, flag_name: str, value: int):
+    """Установить значение флага пользователя."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return
+
+        cursor.execute(
+            """
+            INSERT INTO user_flags (user_id, flag_name, value)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, flag_name) DO UPDATE
+            SET value = EXCLUDED.value
+            """,
+            (user['id'], flag_name, value),
+        )
 
 
 # ---------------------------------------------------------------------------

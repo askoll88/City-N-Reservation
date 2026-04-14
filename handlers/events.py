@@ -44,7 +44,7 @@ def handle_event_response(player, vk, user_id: int, text: str) -> bool:
 
 def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: int) -> bool:
     """Обработать выбор игрока в событии"""
-    result_msg = apply_event_choice(event, choice_index, player)
+    result_msg = apply_event_choice(event, choice_index, player, user_id=user_id)
 
     # Сохраняем изменения игрока
     database.update_user_stats(

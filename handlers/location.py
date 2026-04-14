@@ -54,7 +54,7 @@ def go_to_location(player, location_id: str, vk, user_id: int):
     # Случайное событие при переходе на дороги
     clear_pending_event(user_id)
     if location_id in RESEARCH_LOCATIONS:
-        event = get_random_event()
+        event = get_random_event(user_id=user_id)
         if event:
             set_pending_event(user_id, event)
             vk.messages.send(
