@@ -5,11 +5,18 @@ from __future__ import annotations
 import database
 from random_events import apply_event_choice, format_event_message
 from state_manager import get_pending_event, set_pending_event, clear_pending_event
+from state_manager import get_emission_pending, clear_emission_pending
 from handlers.keyboards import create_random_event_keyboard, create_location_keyboard
+from emission import handle_emission_warning_response
 
 
 def handle_event_response(player, vk, user_id: int, text: str) -> bool:
     """Обработка ответа на случайное событие"""
+
+    # Сначала проверяем выброс (приоритет над обычными событиями)
+    if handle_emission_warning_response(player, vk, user_id, text):
+        return True
+
     event = get_pending_event(user_id)
     if not event:
         return False

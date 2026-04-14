@@ -36,7 +36,10 @@ def _help_text() -> str:
         "Маркет:\n"
         "• админ маркет on|off\n"
         "• админ лоты [active|sold|cancelled|expired|all]\n"
-        "• админ снять лот <id>\n"
+        "• админ снять лот <id>\n\n"
+        "Выброс:\n"
+        "• админ выброс — запустить выброс\n"
+        "• админ выброс статус — статистика\n"
     )
 
 
@@ -57,6 +60,8 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             "админ: маркет off",
             "админ: лоты",
             "админ: помощь",
+            "админ: выброс",
+            "админ: выброс статус",
         }
     )
     if not admin_triggers:
@@ -221,6 +226,37 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         listing_id = int(m.group(1))
         result = database.admin_cancel_market_listing(listing_id)
         _send(vk, user_id, result["message"])
+        return True
+
+    # === Выброс ===
+    if text in {"админ: выброс", "админ выброс"}:
+        from emission import schedule_admin_emission
+        try:
+            emission_id = schedule_admin_emission(vk)
+            _send(
+                vk, user_id,
+                f"☢️ **Выброс запущен!**\n\n"
+                f"ID: {emission_id}\n"
+                f"Предупреждение отправлено всем игрокам в Зоне.\n"
+                f"Удар через 15 минут."
+            )
+        except Exception as e:
+            _send(vk, user_id, f"❌ Ошибка при запуске выброса: {e}")
+        return True
+
+    if text in {"админ: выброс статус", "админ выброс статус"}:
+        stats = database.get_emission_stats()
+        if not stats or stats.get("total_emissions", 0) == 0:
+            _send(vk, user_id, "📊 Выбросов ещё не было.")
+        else:
+            _send(
+                vk, user_id,
+                f"📊 **Статистика выбросов:**\n\n"
+                f"Всего: {stats['total_emissions']}\n"
+                f"Активных: {stats['active_emissions']}\n"
+                f"Админских: {stats['admin_triggered']}\n"
+                f"Последний: {stats['last_emission'] or '-'}"
+            )
         return True
 
     _send(vk, user_id, _help_text())

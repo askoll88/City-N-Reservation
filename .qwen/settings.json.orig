@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Read(//Users/kondiko/Gorod N/City-N-Reservation/**)"
+      "Read(//Users/kondiсo/Gorod N/City-N-Reservation/**)"
     ]
   }
 }

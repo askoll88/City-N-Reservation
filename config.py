@@ -76,6 +76,30 @@ BOT_WORKERS = int(os.getenv('BOT_WORKERS', '8'))
 BOT_QUEUE_MAX = int(os.getenv('BOT_QUEUE_MAX', '2000'))
 BOT_QUEUE_PUT_TIMEOUT = float(os.getenv('BOT_QUEUE_PUT_TIMEOUT', '0.2'))
 
+# === Выброс (Emission) ===
+EMISSION_ENABLED = os.getenv('EMISSION_ENABLED', 'true').lower() == 'true'
+EMISSION_MIN_INTERVAL_HOURS = int(os.getenv('EMISSION_MIN_INTERVAL_HOURS', '4'))   # мин интервал между выбросами
+EMISSION_MAX_INTERVAL_HOURS = int(os.getenv('EMISSION_MAX_INTERVAL_HOURS', '10'))  # макс интервал
+EMISSION_WARNING_MINUTES = int(os.getenv('EMISSION_WARNING_MINUTES', '15'))       # время предупреждения
+EMISSION_DURATION_MINUTES = int(os.getenv('EMISSION_DURATION_MINUTES', '30'))     # длительность выброса
+EMISSION_AFTERMATH_MINUTES = int(os.getenv('EMISSION_AFTERMATH_MINUTES', '60'))   # время последствий (бонусы)
+
+# Урон выброса для игроков в Зоне
+EMISSION_DAMAGE_PCT_MIN = float(os.getenv('EMISSION_DAMAGE_PCT_MIN', '0.30'))  # 30% HP
+EMISSION_DAMAGE_PCT_MAX = float(os.getenv('EMISSION_DAMAGE_PCT_MAX', '0.60'))  # 60% HP
+EMISSION_RADIATION = int(os.getenv('EMISSION_RADIATION', '25'))                 # радиация
+EMISSION_ITEM_LOSS_CHANCE = float(os.getenv('EMISSION_ITEM_LOSS_CHANCE', '0.15')) # шанс потерять предмет
+EMISSION_ITEM_LOSS_MAX = int(os.getenv('EMISSION_ITEM_LOSS_MAX', '2'))           # макс потерянных предметов
+
+# Бонусы после выброса
+EMISSION_BONUS_ARTIFACT_CHANCE = float(os.getenv('EMISSION_BONUS_ARTIFACT_CHANCE', '0.50'))  # +50% шанс артефактов
+EMISSION_BONUS_RARE_ENEMY_CHANCE = float(os.getenv('EMISSION_BONUS_RARE_ENEMY_CHANCE', '0.20'))  # шанс редкого врага
+
+# "Тихие часы" — когда выброс НЕ запускается (по UTC)
+# По умолчанию: 02:00–07:00 UTC (ночное время, когда большинство спит)
+EMISSION_QUIET_HOUR_START = int(os.getenv('EMISSION_QUIET_HOUR_START', '2'))
+EMISSION_QUIET_HOUR_END = int(os.getenv('EMISSION_QUIET_HOUR_END', '7'))
+
 # === P2P Рынок игроков ===
 MARKET_MIN_LEVEL = int(os.getenv('MARKET_MIN_LEVEL', '10'))
 MARKET_MAX_LISTINGS_PER_USER = int(os.getenv('MARKET_MAX_LISTINGS_PER_USER', '5'))

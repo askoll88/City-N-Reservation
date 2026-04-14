@@ -475,3 +475,30 @@ def create_admin_keyboard():
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
+
+
+# ============================================================
+# Выброс (Emission)
+# ============================================================
+
+def create_emission_warning_keyboard():
+    """Клавиатура для предупреждения о выбросе"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("🏃 Бежать в укрытие", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_line()
+    keyboard.add_button("😰 Остаться и рискнуть", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("Пропустить", color=VkKeyboardColor.SECONDARY)
+    return keyboard
+
+
+def create_emission_impact_keyboard(location: str):
+    """Клавиатура во время удара выброса"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("🏃 Бежать в укрытие", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_line()
+    keyboard.add_button("🩺 Лечиться", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("📦 Инвентарь", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Пропустить", color=VkKeyboardColor.SECONDARY)
+    return keyboard

@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 TOKEN = config.VK_TOKEN
 GROUP_ID = config.GROUP_ID
 
+# === Выброс (Emission) ===
+from emission import emission_tick, schedule_next_emission
+
 # === Импорт обработчиков ===
 from handlers.commands import (
     handle_start_command,
@@ -229,6 +232,11 @@ def handle_message(event, vk):
     # Ежедневные задания
     from handlers.commands import handle_quests_commands
     if handle_quests_commands(player, vk, user_id, text):
+        return
+
+    # Обработка ответа на выброс (impact phase — бежать в укрытие)
+    from handlers.events import handle_event_response
+    if handle_event_response(player, vk, user_id, text):
         return
 
     # === Работа с предметами (через player) ===
@@ -635,6 +643,33 @@ def main():
             name=f"event-worker-{idx + 1}",
             daemon=True,
         ).start()
+
+    # === Фоновый планировщик выбросов (каждую минуту) ===
+    def _emission_scheduler():
+        """Фоновый поток для управления выбросами"""
+        import time
+        # Планируем первый выброс
+        if config.EMISSION_ENABLED:
+            schedule_next_emission()
+
+        last_tick = time.time()
+        while True:
+            time.sleep(10)  # Проверяем каждые 10 секунд
+            now = time.time()
+            if now - last_tick >= 60:  # Но тик — раз в минуту
+                last_tick = now
+                try:
+                    emission_tick(vk)
+                except Exception as e:
+                    logger.error("Ошибка в emission_tick: %s", e)
+
+    if config.EMISSION_ENABLED:
+        threading.Thread(
+            target=_emission_scheduler,
+            name="emission-scheduler",
+            daemon=True,
+        ).start()
+        logger.info("Планировщик выбросов запущен")
 
     processed_events = set()
     MAX_PROCESSED = 1000

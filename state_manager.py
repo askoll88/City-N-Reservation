@@ -374,3 +374,27 @@ def get_pending_event(user_id: int) -> dict | None:
 def clear_pending_event(user_id: int):
     """Очистить состояние случайного события"""
     _pending_event_state.pop(user_id, None)
+
+
+# === Работа с состоянием выброса (Emission) ===
+_emission_pending_state = LockedDict()  # {user_id: emission_event_data}
+
+
+def has_emission_pending(user_id: int) -> bool:
+    """Проверить, есть ли ожидающее событие выброса"""
+    return user_id in _emission_pending_state
+
+
+def set_emission_pending(user_id: int, data: dict):
+    """Установить ожидающее событие выброса"""
+    _emission_pending_state[user_id] = data
+
+
+def get_emission_pending(user_id: int) -> dict | None:
+    """Получить ожидающее событие выброса"""
+    return _emission_pending_state.get(user_id)
+
+
+def clear_emission_pending(user_id: int):
+    """Очистить ожидающее событие выброса"""
+    _emission_pending_state.pop(user_id, None)

@@ -294,6 +294,9 @@ def init_db():
     # Инициализировать таблицу ежедневных заданий
     init_daily_quests_table()
 
+    # Инициализировать таблицу выбросов
+    init_emission_table()
+
     logger.info("База данных инициализирована")
 
 
@@ -2578,4 +2581,131 @@ def track_quest_progress(vk_id: int, quest_type: str, location: str = None, incr
 
         if matched:
             update_quest_progress(vk_id, qid, increment)
+
+
+# =========================================================================
+# Выбросы (Emissions)
+# =========================================================================
+
+def init_emission_table():
+    """Создать таблицу выбросов"""
+    with db_cursor() as (cursor, conn):
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS emissions (
+                id              SERIAL PRIMARY KEY,
+                emission_type   VARCHAR(20) NOT NULL DEFAULT 'normal',
+                warning_time    TIMESTAMP NOT NULL,
+                impact_time     TIMESTAMP NOT NULL,
+                end_time        TIMESTAMP NOT NULL,
+                aftermath_end   TIMESTAMP NOT NULL,
+                status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+                admin_triggered BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_emissions_status
+            ON emissions(status)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_emissions_impact
+            ON emissions(impact_time)
+        """)
+
+
+def create_emission_schedule(warning_time, impact_time, end_time, aftermath_end,
+                              emission_type='normal', admin_triggered=False):
+    """Создать расписание выброса"""
+    with db_cursor() as (cursor, conn):
+        cursor.execute("""
+            INSERT INTO emissions (warning_time, impact_time, end_time, aftermath_end,
+                                   emission_type, admin_triggered, status)
+            VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+            RETURNING id
+        """, (warning_time, impact_time, end_time, aftermath_end, emission_type, admin_triggered))
+        return cursor.fetchone()["id"]
+
+
+def get_active_emission():
+    """Получить текущий активный выброс (warning или impact phase)"""
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT * FROM emissions
+            WHERE status IN ('pending', 'warning', 'active')
+              AND end_time > NOW()
+            ORDER BY impact_time ASC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_emission_aftermath_active():
+    """Проверить, активна ли фаза последствий выброса"""
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT id, aftermath_end FROM emissions
+            WHERE status = 'finished'
+              AND aftermath_end > NOW()
+            ORDER BY aftermath_end DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def update_emission_status(emission_id: int, status: str):
+    """Обновить статус выброса"""
+    with db_cursor() as (cursor, conn):
+        cursor.execute("""
+            UPDATE emissions SET status = %s WHERE id = %s
+        """, (status, emission_id))
+
+
+def get_all_active_players():
+    """Получить всех активных игроков (vk_id, location, name, health)"""
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT vk_id, location, name, health, level
+            FROM users
+            WHERE is_banned = 0
+        """)
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_emission_stats():
+    """Получить статистику по выбросам"""
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total_emissions,
+                COUNT(*) FILTER (WHERE status = 'active') as active_emissions,
+                COUNT(*) FILTER (WHERE admin_triggered = TRUE) as admin_triggered,
+                MAX(created_at) as last_emission
+            FROM emissions
+        """)
+        row = cursor.fetchone()
+        return dict(row) if row else {}
+
+
+def record_emission_damage(vk_id: int, emission_id: int, damage: int, radiation: int,
+                           items_lost: int, was_safe: bool):
+    """Записать урон от выброса для игрока"""
+    with db_cursor() as (cursor, conn):
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS emission_damage_log (
+                id              SERIAL PRIMARY KEY,
+                vk_id           BIGINT NOT NULL,
+                emission_id     INTEGER NOT NULL REFERENCES emissions(id),
+                damage          INTEGER NOT NULL DEFAULT 0,
+                radiation       INTEGER NOT NULL DEFAULT 0,
+                items_lost      INTEGER NOT NULL DEFAULT 0,
+                was_safe        BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO emission_damage_log (vk_id, emission_id, damage, radiation, items_lost, was_safe)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (vk_id, emission_id, damage, radiation, items_lost, was_safe))
 

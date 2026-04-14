@@ -127,6 +127,23 @@ RESEARCH_LOCATIONS = [
 ]
 
 
+# === Безопасные локации (укрытия от Выброса) ===
+SAFE_LOCATIONS = [
+    LocationType.CITY.value,
+    LocationType.HOSPITAL.value,
+    LocationType.SHELTER.value,
+]
+
+# === Опасные локации (Зона — урон от Выброса) ===
+DANGEROUS_LOCATIONS = [
+    LocationType.MILITARY_ROAD.value,
+    LocationType.NII_ROAD.value,
+    LocationType.INFECTED_FOREST.value,
+    LocationType.KPP.value,
+    LocationType.BLACK_MARKET.value,
+]
+
+
 # === NPC-локации ===
 NPC_LOCATIONS = {
     'кпп': ['военный', 'ученый', 'барыга'],
