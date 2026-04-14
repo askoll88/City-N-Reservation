@@ -13,22 +13,25 @@ from handlers.keyboards import (
     create_admin_market_keyboard,
     create_admin_help_keyboard,
 )
-from state_manager import LockedDict
-
-# Состояние подменю админки: {user_id: "category"}
-_admin_menu_state = LockedDict()
+import database
 
 
 def _set_admin_menu(user_id: int, category: str):
-    _admin_menu_state[user_id] = category
+    # Храним как строку: 1=users, 2=emission, 3=give, 4=events, 5=market, 6=help
+    codes = {"users": 1, "emission": 2, "give": 3, "events": 4, "market": 5, "help": 6}
+    database.set_user_flag(user_id, "_admin_menu", codes.get(category, 0))
 
 
 def _get_admin_menu(user_id: int) -> str | None:
-    return _admin_menu_state.get(user_id)
+    val = database.get_user_flag(user_id, "_admin_menu", 0)
+    if val == 0:
+        return None
+    mapping = {1: "users", 2: "emission", 3: "give", 4: "events", 5: "market", 6: "help"}
+    return mapping.get(val)
 
 
 def _clear_admin_menu(user_id: int):
-    _admin_menu_state.pop(user_id, None)
+    database.set_user_flag(user_id, "_admin_menu", 0)
 
 
 def _send(vk, user_id: int, message: str, keyboard=None):
@@ -93,10 +96,26 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     text = (text or "").strip().lower()
     original_text = (original_text or "").strip()
 
-    if not (text.startswith("админ") or text.startswith("бан ") or text.startswith("разбан ")
-            or text in {"админка", "admin", "👥 пользователи", "☢️ выброс", "📦 выдача",
-                        "🎲 ивенты", "🏪 маркет", "❓ помощь", "⬅️ назад"}):
-        return False
+    # Админ — всегда ловим. Если в подменю — любое сообщение.
+    # Если нет подменю — проверяем триггеры.
+    if not _get_admin_menu(user_id):
+        if not (text.startswith("админ")
+                or text.startswith("бан ")
+                or text.startswith("разбан ")
+                or text in {"админка", "admin", "админ",
+                            " пользователи", " выброс", " выдача",
+                            " ивенты", " маркет", " помощь",
+                            "последние пользователи", "забаненные",
+                            "профиль (по vk_id)", "инвентарь (по vk_id)",
+                            "права on/off", "локация (телепорт)",
+                            "запустить выброс", "отменить выброс", "статус выброса",
+                            "выдать предмет", "удалить предмет", "set поле (статы)",
+                            "рандом ивент игроку", "квесты игрока",
+                            "кулдаун инфо", "кулдаун снять", "онлайн",
+                            "активные лоты", "все лоты",
+                            "маркет on", "маркет off", "снять лот",
+                            "назад"}):
+            return False
 
     if not database.is_user_admin(user_id):
         vk.messages.send(user_id=user_id, message="⛔ Нет доступа к админ-командам.", random_id=0)
