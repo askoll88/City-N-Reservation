@@ -2046,6 +2046,7 @@ def get_market_user_listings(vk_id: int, status: str = "active", page: int = 1, 
                 ORDER BY created_at DESC
                 LIMIT %s OFFSET %s
             """, (vk_id, per_page, offset))
+            rows = cursor.fetchall()
 
             cursor.execute("""
                 SELECT COUNT(*) as cnt
@@ -2063,15 +2064,16 @@ def get_market_user_listings(vk_id: int, status: str = "active", page: int = 1, 
                 ORDER BY created_at DESC
                 LIMIT %s OFFSET %s
             """, (vk_id, status, per_page, offset))
+            rows = cursor.fetchall()
 
             cursor.execute("""
                 SELECT COUNT(*) as cnt
                 FROM market_listings
                 WHERE seller_vk_id = %s AND status = %s
             """, (vk_id, status))
+        total_row = cursor.fetchone() or {}
+        total = int(total_row.get("cnt", 0))
 
-        rows = cursor.fetchall()
-        total = cursor.fetchone()["cnt"] if cursor.description else 0
         pages = max(1, (total + per_page - 1) // per_page)
 
         return {

@@ -87,6 +87,7 @@ def _show_market_listings_page(player, vk, user_id, page,
                             sort=sort, search=search, view="all")
     if user_id in _market_browse_state:
         _market_browse_state[user_id]["searching"] = False
+        _market_browse_state[user_id]["pages"] = pages
 
     if not listings:
         msg_parts = ["📭 На рынке пока нет подходящих лотов."]
@@ -157,7 +158,11 @@ def show_market_menu(player, vk, user_id):
             f"🧾 Комиссия выставления: {config.MARKET_LISTING_FEE_PCT}%\n"
             f"💸 Комиссия продажи: {config.MARKET_SALE_FEE_PCT}% (с продавца)\n"
             f"📦 Лимит лотов: {config.MARKET_MAX_LISTINGS_PER_USER}\n"
-            f"⏱️ Срок лота: {config.MARKET_LISTING_TTL_HOURS}ч"
+            f"⏱️ Срок лота: {config.MARKET_LISTING_TTL_HOURS}ч\n\n"
+            "Быстрый старт:\n"
+            "• Открыть лоты: «Все лоты»\n"
+            "• Продать: выставить <предмет> <цена> [кол-во]\n"
+            "• Купить: купить лот <id>"
         ),
         keyboard=create_player_market_keyboard().get_keyboard(),
         random_id=0,
@@ -453,11 +458,42 @@ def handle_market_input(player, vk, user_id, text):
     sort = state.get("sort", "newest")
     search = state.get("search")
     searching = state.get("searching", False)
+    pages = max(1, int(state.get("pages", 1) or 1))
+
+    if text_lower in ("✖️ отмена", "отмена", "отменить"):
+        if searching:
+            # Возврат к предыдущему состоянию ленты
+            _show_market_listings_page(player, vk, user_id, page, category, sort, search)
+        else:
+            show_market_menu(player, vk, user_id)
+        return True
 
     # --- Режим поиска: пользователь ввёл запрос ---
     if searching:
+        if text_lower in ("🏠 главная", "главная", "🏠"):
+            clear_market_browse_state(user_id)
+            show_market_menu(player, vk, user_id)
+            return True
+        # Повторная кнопка "Поиск" в режиме ввода - просто напоминаем, что нужен текст
+        if text_lower in ("🔍 поиск", "поиск", "🔍 найти", "найти"):
+            vk.messages.send(
+                user_id=user_id,
+                message="Введи текст для поиска (например: АК-74, Медуза, Аптечка) или нажми «Отмена».",
+                keyboard=create_market_search_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
+        query = text.strip()
+        if len(query) < 2:
+            vk.messages.send(
+                user_id=user_id,
+                message="Запрос слишком короткий. Введи минимум 2 символа.",
+                keyboard=create_market_search_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
         clear_market_browse_state(user_id)
-        _show_market_listings_page(player, vk, user_id, 1, None, "newest", text.strip())
+        _show_market_listings_page(player, vk, user_id, 1, None, "newest", query)
         return True
 
     # --- Навигация по страницам ---
@@ -465,14 +501,21 @@ def handle_market_input(player, vk, user_id, text):
         _show_market_listings_page(player, vk, user_id, page - 1, category, sort, search)
         return True
 
-    if text_lower in ("▶️ вперёд", "вперёд") and page < 999:
+    if text_lower in ("▶️ вперёд", "вперёд") and page < pages:
         _show_market_listings_page(player, vk, user_id, page + 1, category, sort, search)
         return True
 
-    # Номер страницы
+    # Номер страницы (кнопки "📄 2" или просто "2")
+    page_match = re.match(r"^📄\s*(\d+)$", text.strip())
+    if page_match:
+        p = int(page_match.group(1))
+        if 1 <= p <= pages:
+            _show_market_listings_page(player, vk, user_id, p, category, sort, search)
+            return True
+
     if text_lower.isdigit():
         p = int(text_lower)
-        if 1 <= p <= 999:
+        if 1 <= p <= pages:
             _show_market_listings_page(player, vk, user_id, p, category, sort, search)
             return True
 
@@ -523,7 +566,7 @@ def handle_market_input(player, vk, user_id, text):
             message="🔍 ПОИСК ПО НАЗВАНИЮ\n\n"
                     "Введи название предмета для поиска.\n"
                     "Например: АК-74, Аптечка, Медуза\n\n"
-                    "Или нажми «Отмена» чтобы выйти.",
+                    "Нажми «Отмена», чтобы вернуться к списку.",
             keyboard=create_market_search_keyboard().get_keyboard(),
             random_id=0,
         )

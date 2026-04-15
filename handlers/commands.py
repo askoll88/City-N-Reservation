@@ -96,7 +96,7 @@ def handle_navigation(player, vk, user_id: int, text: str):
         requested = 'кпп'
     elif 'больница' in text:
         requested = 'больница'
-    elif 'черный рынок' in text or text == 'рынок':
+    elif 'черный рынок' in text or (text == 'рынок' and current != 'черный рынок'):
         requested = 'черный рынок'
     elif 'убежище' in text:
         requested = 'убежище'
@@ -387,7 +387,7 @@ def handle_class_commands(player, vk, user_id: int, text: str):
 
 def handle_trade_commands(player, vk, user_id: int, text: str):
     """Обработка команд торговли"""
-    if text not in ['торговля', 'торг', 'магазин']:
+    if text not in ['торговля', 'торг', 'магазин', 'товары', 'товары барыги', 'лавка']:
         return False
     
     location_id = player.current_location_id
@@ -460,9 +460,6 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
     from handlers.keyboards import create_blackmarket_keyboard
     from handlers.market import (
         show_market_menu,
-        show_market_listings,
-        show_my_market_listings,
-        show_my_market_transactions,
         handle_market_input,
         handle_market_create_listing,
         handle_market_buy_listing,
@@ -481,36 +478,8 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
     if handle_market_cancel_listing(player, vk, user_id, text):
         return True
 
-    if text in ['рынок игроков', 'рынок', 'барахолка', 'рынок показать']:
+    if text in ['рынок игроков', 'барахолка']:
         show_market_menu(player, vk, user_id)
-        return True
-
-    if text in ['мои лоты', 'мои лот']:
-        show_my_market_listings(player, vk, user_id)
-        return True
-
-    if text in ['мои сделки', 'сделки']:
-        show_my_market_transactions(player, vk, user_id)
-        return True
-
-    if text in ['рынок оружие', 'рынок оружия']:
-        show_market_listings(player, vk, user_id, category='weapons')
-        return True
-
-    if text in ['рынок броня', 'рынок брони']:
-        show_market_listings(player, vk, user_id, category='armor')
-        return True
-
-    if text in ['рынок артефакты', 'рынок артефактов']:
-        show_market_listings(player, vk, user_id, category='artifacts')
-        return True
-
-    if text in ['рынок медицина', 'рынок лекарства']:
-        show_market_listings(player, vk, user_id, category='meds')
-        return True
-
-    if text in ['рынок еда', 'рынок энергетики']:
-        show_market_listings(player, vk, user_id, category='food')
         return True
 
     # Артефакты - меню
