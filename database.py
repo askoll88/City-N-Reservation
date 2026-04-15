@@ -10,6 +10,7 @@ import random
 import threading
 import time
 import hashlib
+import json
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -230,6 +231,18 @@ def init_db():
             )
         """)
 
+        # -- user_runtime_state --------------------------------------------
+        # JSON-состояния, которые должны переживать рестарты процесса бота.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_runtime_state (
+                user_id      INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                state_key    VARCHAR(50)  NOT NULL,
+                payload_json TEXT         NOT NULL,
+                updated_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, state_key)
+            )
+        """)
+
         # -- items ----------------------------------------------------------
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS items (
@@ -335,6 +348,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_market_trx_buyer       ON market_transactions(buyer_vk_id)",
             "CREATE INDEX IF NOT EXISTS idx_market_trx_seller      ON market_transactions(seller_vk_id)",
             "CREATE INDEX IF NOT EXISTS idx_npc_shop_stock_merchant_period ON npc_shop_stock(merchant_id, period_key)",
+            "CREATE INDEX IF NOT EXISTS idx_user_runtime_state_key  ON user_runtime_state(state_key)",
         ]:
             cursor.execute(ddl)
 
@@ -2806,6 +2820,113 @@ def set_user_flag(vk_id: int, flag_name: str, value: int):
             """,
             (user['id'], flag_name, value),
         )
+
+
+def set_runtime_state(vk_id: int, state_key: str, payload: dict):
+    """Сохранить runtime-состояние пользователя как JSON."""
+    if not state_key:
+        return
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return
+        try:
+            payload_json = json.dumps(payload or {}, ensure_ascii=False)
+        except Exception:
+            logger.exception("set_runtime_state: не удалось сериализовать payload key=%s vk_id=%s", state_key, vk_id)
+            return
+
+        cursor.execute(
+            """
+            INSERT INTO user_runtime_state (user_id, state_key, payload_json, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (user_id, state_key) DO UPDATE
+            SET payload_json = EXCLUDED.payload_json,
+                updated_at = NOW()
+            """,
+            (user["id"], state_key, payload_json),
+        )
+
+
+def get_runtime_state(vk_id: int, state_key: str) -> dict | None:
+    """Получить runtime-состояние пользователя."""
+    if not state_key:
+        return None
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return None
+
+        cursor.execute(
+            """
+            SELECT payload_json
+            FROM user_runtime_state
+            WHERE user_id = %s AND state_key = %s
+            """,
+            (user["id"], state_key),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        try:
+            data = json.loads(row["payload_json"] or "{}")
+            return data if isinstance(data, dict) else None
+        except Exception:
+            logger.exception("get_runtime_state: не удалось распарсить payload key=%s vk_id=%s", state_key, vk_id)
+            return None
+
+
+def clear_runtime_state(vk_id: int, state_key: str):
+    """Удалить runtime-состояние пользователя."""
+    if not state_key:
+        return
+    with db_cursor() as (cursor, _):
+        cursor.execute(
+            """
+            DELETE FROM user_runtime_state rs
+            USING users u
+            WHERE u.vk_id = %s
+              AND rs.user_id = u.id
+              AND rs.state_key = %s
+            """,
+            (vk_id, state_key),
+        )
+
+
+def get_all_runtime_states(state_key: str) -> list[dict]:
+    """Получить все runtime-состояния указанного типа."""
+    if not state_key:
+        return []
+    with db_cursor() as (cursor, _):
+        cursor.execute(
+            """
+            SELECT u.vk_id, rs.payload_json, rs.updated_at
+            FROM user_runtime_state rs
+            JOIN users u ON u.id = rs.user_id
+            WHERE rs.state_key = %s
+            """,
+            (state_key,),
+        )
+        rows = cursor.fetchall() or []
+
+    result: list[dict] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+            if not isinstance(payload, dict):
+                payload = {}
+        except Exception:
+            payload = {}
+        result.append(
+            {
+                "vk_id": int(row["vk_id"]),
+                "payload": payload,
+                "updated_at": row.get("updated_at"),
+            }
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------

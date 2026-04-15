@@ -3,9 +3,12 @@
 Централизованное хранение состояний игроков, боев, диалогов
 """
 from __future__ import annotations
+import logging
 import threading
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 class LockedDict:
     """Потокобезопасный dict с минимальным API, совместимым с текущим кодом."""
@@ -75,6 +78,11 @@ _pending_loot_choice_state = LockedDict()  # {user_id: loot_choice_data}
 _pending_emission_risk_exit_state = LockedDict()  # {user_id: risk_exit_data}
 _travel_state = LockedDict()  # {user_id: travel_data}
 _ui_state = LockedDict()  # {user_id: {"current": dict, "stack": [dict, ...]}}
+_runtime_loaded = LockedDict()  # {user_id: {"loaded_at": ts}}
+
+_RUNTIME_KEY_DIALOG = "dialog_state"
+_RUNTIME_KEY_TRAVEL = "travel_state"
+_RUNTIME_KEY_UI = "ui_state"
 
 # Кэш игроков
 _players_cache = {}
@@ -86,6 +94,24 @@ _MAX_CACHE_SIZE = 100
 def get_combat_state() -> dict:
     """Получить состояние боев (для импорта)"""
     return _combat_state
+
+
+def _persist_runtime_state(user_id: int, state_key: str, payload: dict):
+    """Сохранить runtime-состояние в БД (fail-safe)."""
+    try:
+        import database
+        database.set_runtime_state(user_id, state_key, payload or {})
+    except Exception:
+        logger.exception("Не удалось сохранить runtime state: user_id=%s key=%s", user_id, state_key)
+
+
+def _clear_runtime_state(user_id: int, state_key: str):
+    """Удалить runtime-состояние из БД (fail-safe)."""
+    try:
+        import database
+        database.clear_runtime_state(user_id, state_key)
+    except Exception:
+        logger.exception("Не удалось очистить runtime state: user_id=%s key=%s", user_id, state_key)
 
 
 def get_dialog_state() -> dict:
@@ -134,7 +160,9 @@ def is_in_dialog(user_id: int) -> bool:
 
 def set_dialog_state(user_id: int, npc_id: str, stage: str = "menu"):
     """Установить состояние диалога"""
-    _dialog_state[user_id] = {"npc": npc_id, "stage": stage}
+    payload = {"npc": npc_id, "stage": stage}
+    _dialog_state[user_id] = payload
+    _persist_runtime_state(user_id, _RUNTIME_KEY_DIALOG, payload)
 
 
 def get_dialog_info(user_id: int) -> dict:
@@ -145,6 +173,7 @@ def get_dialog_info(user_id: int) -> dict:
 def clear_dialog_state(user_id: int):
     """Очистить состояние диалога"""
     _dialog_state.pop(user_id, None)
+    _clear_runtime_state(user_id, _RUNTIME_KEY_DIALOG)
 
 
 # === Работа с исследованиями ===
@@ -395,10 +424,12 @@ def has_travel_state(user_id: int) -> bool:
 
 def set_travel_state(user_id: int, data: dict):
     """Установить состояние перемещения."""
-    _travel_state[user_id] = {
+    payload = {
         **data,
         "created_at": time.time(),
     }
+    _travel_state[user_id] = payload
+    _persist_runtime_state(user_id, _RUNTIME_KEY_TRAVEL, payload)
 
 
 def get_travel_data(user_id: int) -> dict | None:
@@ -414,12 +445,16 @@ def update_travel_data(user_id: int, patch: dict) -> dict | None:
         current.update(patch)
         return current
     _travel_state.update(user_id, updater)
-    return _travel_state.get(user_id)
+    updated = _travel_state.get(user_id)
+    if updated:
+        _persist_runtime_state(user_id, _RUNTIME_KEY_TRAVEL, updated)
+    return updated
 
 
 def clear_travel_state(user_id: int):
     """Очистить состояние перемещения."""
     _travel_state.pop(user_id, None)
+    _clear_runtime_state(user_id, _RUNTIME_KEY_TRAVEL)
 
 
 def get_all_travel_states() -> list[tuple[int, dict]]:
@@ -456,6 +491,7 @@ def set_ui_screen(user_id: int, screen: dict, push_current: bool = False, clear_
                 stack.append(prev)
         return {"current": dict(screen or {"name": "location"}), "stack": stack}
     _ui_state.update(user_id, updater)
+    _persist_runtime_state(user_id, _RUNTIME_KEY_UI, get_ui_state(user_id))
 
 
 def pop_ui_screen(user_id: int) -> dict | None:
@@ -473,7 +509,73 @@ def pop_ui_screen(user_id: int) -> dict | None:
         return {"current": prev, "stack": stack}
 
     _ui_state.update(user_id, updater)
+    _persist_runtime_state(user_id, _RUNTIME_KEY_UI, get_ui_state(user_id))
     return popped["value"]
+
+
+def ensure_runtime_state_loaded(user_id: int):
+    """
+    Ленивая загрузка runtime-состояний пользователя из БД.
+    Нужна после рестартов, т.к. in-memory словари пустые.
+    """
+    if user_id in _runtime_loaded:
+        return
+
+    try:
+        import database
+
+        if user_id not in _dialog_state:
+            dialog = database.get_runtime_state(user_id, _RUNTIME_KEY_DIALOG)
+            if isinstance(dialog, dict) and dialog.get("npc"):
+                _dialog_state[user_id] = {
+                    "npc": str(dialog.get("npc")),
+                    "stage": str(dialog.get("stage") or "menu"),
+                }
+
+        if user_id not in _travel_state:
+            travel = database.get_runtime_state(user_id, _RUNTIME_KEY_TRAVEL)
+            if isinstance(travel, dict):
+                required = {"from_location", "to_location", "start_time", "duration"}
+                if required.issubset(set(travel.keys())):
+                    _travel_state[user_id] = dict(travel)
+
+        if user_id not in _ui_state:
+            ui = database.get_runtime_state(user_id, _RUNTIME_KEY_UI)
+            if isinstance(ui, dict):
+                current = ui.get("current") or {"name": "location"}
+                stack = ui.get("stack") or []
+                if isinstance(current, dict) and isinstance(stack, list):
+                    _ui_state[user_id] = {"current": current, "stack": stack}
+    except Exception:
+        logger.exception("Не удалось восстановить runtime state: user_id=%s", user_id)
+    finally:
+        _runtime_loaded[user_id] = {"loaded_at": time.time()}
+
+
+def hydrate_travel_states_from_runtime() -> int:
+    """
+    Предзагрузить все активные travel-state из БД при старте процесса.
+    Возвращает число восстановленных переходов.
+    """
+    restored = 0
+    try:
+        import database
+        rows = database.get_all_runtime_states(_RUNTIME_KEY_TRAVEL)
+        for row in rows:
+            try:
+                uid = int(row.get("vk_id"))
+                payload = row.get("payload") or {}
+                required = {"from_location", "to_location", "start_time", "duration"}
+                if not isinstance(payload, dict) or not required.issubset(set(payload.keys())):
+                    continue
+                _travel_state[uid] = dict(payload)
+                _runtime_loaded[uid] = {"loaded_at": time.time()}
+                restored += 1
+            except Exception:
+                continue
+    except Exception:
+        logger.exception("Не удалось предзагрузить travel-state из runtime storage")
+    return restored
 
 
 # === Состояние просмотра рынка (пагинация, фильтры, сортировка) ===

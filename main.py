@@ -67,6 +67,7 @@ from state_manager import (
     has_pending_emission_risk_exit,
     has_travel_state, get_all_travel_states, clear_travel_state,
     get_ui_current_screen, set_ui_screen,
+    ensure_runtime_state_loaded, hydrate_travel_states_from_runtime,
 )
 from handlers.keyboards import (
     create_main_keyboard,
@@ -115,6 +116,7 @@ def handle_message(event, vk):
 
     # Получаем игрока
     player = get_player(user_id)
+    ensure_runtime_state_loaded(user_id)
 
     # Админские команды доступны в любой локации/состоянии
     if handle_admin_commands(player, vk, user_id, text, original_text):
@@ -820,6 +822,9 @@ def main():
     # Инициализация БД
     logger.info("Инициализация базы данных...")
     database.init_db()
+    restored_travel = hydrate_travel_states_from_runtime()
+    if restored_travel:
+        logger.info("Восстановлено переходов из runtime storage: %d", restored_travel)
 
     vk_session = vk_api.VkApi(token=TOKEN)
     vk = vk_session.get_api()
