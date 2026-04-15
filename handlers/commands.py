@@ -34,7 +34,7 @@ from handlers.keyboards import (
 )
 from npcs import get_npc_by_location
 from state_manager import (
-    is_in_combat, get_combat_data, clear_combat_state,
+    is_in_combat,
     is_in_dialog, get_dialog_info, clear_dialog_state,
     is_researching as is_in_research,
     get_research_data, clear_research_state,
@@ -178,24 +178,41 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
     """Обработка команд боя"""
     if not is_in_combat(user_id):
         return False
-    
-    combat_data = get_combat_data(user_id)
 
     # Атака
     if text in ['атаковать', 'атака']:
         handle_combat_attack(player, vk, user_id)
         return True
-    
+
     # Бегство
     if text in ['убежать', 'бежать']:
         handle_combat_flee(player, vk, user_id)
         return True
-    
+
     # Навыки
     if text in ['навыки', 'навык', 'скилы', 'скилл']:
         show_skills_in_combat(player, vk, user_id)
         return True
-    
+
+    # Боевой инвентарь (только использование предметов)
+    if text in ['инвентарь', 'инвентарь в бою', 'предметы', 'рюкзак']:
+        _show_combat_inventory(player, vk, user_id)
+        return True
+
+    if text.isdigit():
+        if _use_combat_item_by_index(player, vk, user_id, int(text)):
+            return True
+
+    if text.startswith(('использовать ', 'выпить ', 'съесть ')):
+        if text.startswith('использовать '):
+            target = text.replace('использовать ', '', 1).strip()
+        elif text.startswith('выпить '):
+            target = text.replace('выпить ', '', 1).strip()
+        else:
+            target = text.replace('съесть ', '', 1).strip()
+        if _use_combat_item(player, vk, user_id, target):
+            return True
+
     # Использование навыка по имени
     skill_keywords = ['двойной выстрел', 'точный выстрел', 'очередь', 'подавление', 
                       'прицельный выстрел', 'незримый', 'шквал огня', 'бронирование', 
@@ -203,7 +220,7 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
     if any(skill_name in text for skill_name in skill_keywords):
         use_skill(player, vk, user_id, original_text)
         return True
-    
+
     # Возврат в бой
     if text == 'назад':
         vk.messages.send(
@@ -213,17 +230,111 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
             random_id=0
         )
         return True
-    
-    # Выход из боя
-    if text in ['кпп', 'в кпп', 'выйти']:
-        clear_combat_state(user_id)
-        go_to_location(player, 'кпп', vk, user_id)
+
+    # Блок любых переходов/экранов во время боя
+    blocked_texts = {
+        'кпп', 'в кпп', 'город', 'в город', 'больница', 'убежище',
+        'черный рынок', 'рынок', 'персонаж', 'перс', 'статус', 'задания',
+        'поговорить', 'торговля', 'магазин', 'выйти',
+    }
+    if text in blocked_texts or text.startswith('дорога'):
+        vk.messages.send(
+            user_id=user_id,
+            message="⚔️ Пока идёт бой, нельзя менять экран или локацию.\nДоступно: Атаковать, Навыки, Инвентарь, Убежать.",
+            keyboard=create_combat_keyboard().get_keyboard(),
+            random_id=0
+        )
         return True
-    
+
     # Неизвестная команда в бою
     vk.messages.send(
         user_id=user_id,
-        message="⚔️ Ты в бою! Атакуй или убеги!",
+        message="⚔️ Ты в бою.\nДоступно: Атаковать, Навыки, Инвентарь, Убежать.",
+        keyboard=create_combat_keyboard().get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def _show_combat_inventory(player, vk, user_id: int):
+    """Показать расходники, которые можно использовать прямо в бою."""
+    player.inventory.reload()
+    items = player.inventory.other
+
+    if not items:
+        vk.messages.send(
+            user_id=user_id,
+            message="🎒 В боевом кармане пусто.\nНет расходников для использования.",
+            keyboard=create_combat_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    msg = "🎒 БОЕВОЙ ИНВЕНТАРЬ\n\n"
+    for idx, item in enumerate(items, 1):
+        msg += f"{idx}. {item['name']} x{item.get('quantity', 1)}\n"
+    msg += "\nИспользуй: 'использовать <номер>' или 'использовать <название>'\nНазад — вернуться в бой."
+
+    vk.messages.send(
+        user_id=user_id,
+        message=msg,
+        keyboard=create_combat_keyboard().get_keyboard(),
+        random_id=0
+    )
+
+
+def _use_combat_item_by_index(player, vk, user_id: int, idx: int) -> bool:
+    """Использовать расходник по номеру во время боя."""
+    if idx <= 0:
+        return False
+    player.inventory.reload()
+    items = player.inventory.other
+    if idx > len(items):
+        vk.messages.send(
+            user_id=user_id,
+            message="Нет предмета с таким номером в боевом инвентаре.",
+            keyboard=create_combat_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return True
+    return _use_combat_item(player, vk, user_id, items[idx - 1]["name"])
+
+
+def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
+    """Использовать предмет в бою только из секции other."""
+    if not target:
+        return False
+
+    player.inventory.reload()
+    item = None
+
+    if target.isdigit():
+        idx = int(target)
+        if idx <= 0 or idx > len(player.inventory.other):
+            vk.messages.send(
+                user_id=user_id,
+                message="Нет предмета с таким номером в боевом инвентаре.",
+                keyboard=create_combat_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return True
+        item = player.inventory.other[idx - 1]
+    else:
+        item = next((it for it in player.inventory.other if it["name"].lower() == target.lower()), None)
+
+    if not item:
+        vk.messages.send(
+            user_id=user_id,
+            message="В бою можно использовать только расходники из раздела 'Другое'.",
+            keyboard=create_combat_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    success, msg = player.use_item(item["name"])
+    vk.messages.send(
+        user_id=user_id,
+        message=msg,
         keyboard=create_combat_keyboard().get_keyboard(),
         random_id=0
     )

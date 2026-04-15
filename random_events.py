@@ -5,6 +5,7 @@
 События случаются при перемещении между локациями.
 """
 from __future__ import annotations
+import copy
 import random
 
 
@@ -1745,7 +1746,7 @@ def _get_next_quest_event(user_id: int) -> dict | None:
             # Найти событие в RANDOM_EVENTS
             for event in RANDOM_EVENTS:
                 if event["id"] in stage_event_ids:
-                    return event
+                    return copy.deepcopy(event)
 
     return None
 
@@ -1793,13 +1794,13 @@ def get_random_event(user_id: int = None) -> dict | None:
     if user_id is not None:
         quest_event = _get_next_quest_event(user_id)
         if quest_event:
-            return quest_event
+            return copy.deepcopy(quest_event)
 
     # Редкий «вау» — отдельный ролл 5%
     if random.randint(1, 100) <= 5:
         wow_events = [e for e in RANDOM_EVENTS if _is_rare_wow_event(e["id"])]
         if wow_events:
-            return random.choice(wow_events)
+            return copy.deepcopy(random.choice(wow_events))
 
     # Обычные события — 18% шанс
     if random.randint(1, 100) > 18:
@@ -1814,7 +1815,7 @@ def get_random_event(user_id: int = None) -> dict | None:
     if not non_quest_events:
         return None
 
-    return random.choices(non_quest_events, weights=weights, k=1)[0]
+    return copy.deepcopy(random.choices(non_quest_events, weights=weights, k=1)[0])
 
 
 # Фразы-вступления для контекста ивента
@@ -1873,7 +1874,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     Если передан user_id — продвигает квестовые цепочки.
     """
     if choice_index < 0:
-        return {"message": "Неверный выбор.", "next_stage": None}
+        return {"message": "Неверный выбор.", "next_stage": None, "invalid": True}
 
     # Многоэтапное событие
     if event.get("type") == "multi_stage":
@@ -1885,7 +1886,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         choices = stage.get("choices", [])
 
         if choice_index >= len(choices):
-            return {"message": "Неверный выбор.", "next_stage": None}
+            return {"message": "Неверный выбор.", "next_stage": None, "invalid": True}
 
         choice = choices[choice_index]
 
@@ -1934,7 +1935,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
     # Обычное событие
     if choice_index >= len(event.get("choices", [])):
-        return {"message": "Неверный выбор.", "next_stage": None}
+        return {"message": "Неверный выбор.", "next_stage": None, "invalid": True}
 
     choice = event["choices"][choice_index]
     effect = choice.get("effect", {})
@@ -1960,27 +1961,26 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
     # Риск - получение урона
     if effect.get("risk_damage"):
-        if random.randint(1, 100) <= 40:
-            player.health = max(1, player.health - 20)
-            player.energy = max(0, player.energy - 15)
-            return {"message": effect.get("message_fail", "Тебе не повезло!"), "next_stage": None, "is_final": True}
-        else:
-            return {"message": effect.get("message_ok", "Тебе повезло!"), "next_stage": None, "is_final": True}
+        msg = _apply_risk_damage(player, effect)
+        return {"message": msg, "next_stage": None, "is_final": True}
 
     # Риск - бой
     if effect.get("risk_combat"):
-        if random.randint(1, 100) <= 60:
-            if "money" in effect:
-                player.money += effect.get("money", 0)
-            return {"message": effect.get("message_ok", "Всё прошло успешно!"), "next_stage": None, "is_final": True}
-        else:
-            player.health = max(1, player.health - 30)
-            return {"message": effect.get("message_fail", "Что-то пошло не так!"), "next_stage": None, "is_final": True}
+        msg = _apply_risk_combat(player, effect)
+        return {"message": msg, "next_stage": None, "is_final": True}
 
     # Случайный лут
     if effect.get("random_loot"):
-        _apply_random_loot(player)
-        return {"message": effect.get("message", "Ты нашёл припасы."), "next_stage": None, "is_final": True}
+        loot_data = _apply_random_loot(player)
+        if "money" in effect:
+            player.money += effect["money"]
+            loot_data["money_reward"] += effect["money"]
+        msg_tpl = effect.get("message", "Ты нашёл припасы.")
+        return {
+            "message": _render_event_message(msg_tpl, loot_data),
+            "next_stage": None,
+            "is_final": True,
+        }
 
     # Шанс артефакта
     if effect.get("artifact_chance"):
@@ -1991,6 +1991,17 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     if effect.get("random_artifact"):
         msg = _apply_random_artifact(player)
         return {"message": msg or effect.get("message", "Ты нашёл артефакт."), "next_stage": None, "is_final": True}
+
+    # Случайный диалог
+    if effect.get("random_dialog"):
+        dialog_xp = int(effect.get("xp", 30))
+        player.experience += dialog_xp
+        msg_tpl = effect.get("message", "Разговор в Зоне не прошёл зря.")
+        return {
+            "message": _render_event_message(msg_tpl, {"xp": dialog_xp}),
+            "next_stage": None,
+            "is_final": True,
+        }
 
     # Нужен предмет
     if effect.get("need_item"):
@@ -2025,10 +2036,18 @@ def _apply_random_loot(player):
     import database
     money_reward = random.randint(50, 300)
     player.money += money_reward
+    item_text = "ничего"
     if random.randint(1, 100) <= 40:
         common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
         item_name, qty = random.choice(common_items)
         database.add_item_to_inventory(player.vk_id, item_name, qty)
+        item_text = f"{item_name} x{qty}"
+    return {
+        "money_reward": money_reward,
+        "item_text": item_text,
+        "money": money_reward,
+        "item": item_text,
+    }
 
 
 def _apply_random_artifact(player):
@@ -2056,29 +2075,52 @@ def _apply_artifact_chance(player, effect=None):
             database.add_item_to_inventory(player.vk_id, artifact, 1)
             from handlers.quests import track_quest_artifact
             track_quest_artifact(player.vk_id)
-        return effect.get("message_ok", f"Ты нашёл {artifact or 'артефакт'}!") if effect else f"Ты нашёл {artifact or 'артефакт'}!"
+        msg_tpl = effect.get("message_ok", f"Ты нашёл {artifact or 'артефакт'}!") if effect else f"Ты нашёл {artifact or 'артефакт'}!"
+        return _render_event_message(msg_tpl, {"artifact": artifact or "артефакт"})
     else:
         player.health = max(1, player.health - 25)
-        return effect.get("message_fail", "Буря слишком сильна!") if effect else "Не повезло!"
+        msg_tpl = effect.get("message_fail", "Буря слишком сильна!") if effect else "Не повезло!"
+        return _render_event_message(msg_tpl, {"artifact": artifact or "артефакт"})
 
 
 def _apply_risk_combat(player, effect=None):
     if random.randint(1, 100) <= 60:
+        money_gain = 0
         if effect and "money" in effect:
-            player.money += effect.get("money", 0)
-        return effect.get("message_ok", "Всё прошло успешно!") if effect else "Всё прошло успешно!"
+            money_gain = int(effect.get("money", 0))
+            player.money += money_gain
+        msg_tpl = effect.get("message_ok", "Всё прошло успешно!") if effect else "Всё прошло успешно!"
+        return _render_event_message(msg_tpl, {"money": money_gain})
     else:
         player.health = max(1, player.health - 30)
-        return effect.get("message_fail", "Что-то пошло не так!") if effect else "Что-то пошло не так!"
+        msg_tpl = effect.get("message_fail", "Что-то пошло не так!") if effect else "Что-то пошло не так!"
+        return _render_event_message(msg_tpl, {})
 
 
 def _apply_risk_damage(player, effect=None):
     if random.randint(1, 100) <= 40:
         player.health = max(1, player.health - 20)
         player.energy = max(0, player.energy - 15)
-        return effect.get("message_fail", "Тебе не повезло!") if effect else "Тебе не повезло!"
+        msg_tpl = effect.get("message_fail", "Тебе не повезло!") if effect else "Тебе не повезло!"
+        return _render_event_message(msg_tpl, {})
     else:
-        return effect.get("message_ok", "Тебе повезло!") if effect else "Тебе повезло!"
+        msg_tpl = effect.get("message_ok", "Тебе повезло!") if effect else "Тебе повезло!"
+        return _render_event_message(msg_tpl, {})
+
+
+def _render_event_message(template: str, ctx: dict) -> str:
+    """Безопасно подставить плейсхолдеры в тексте ивента."""
+    if not template:
+        return ""
+    try:
+        return template.format(
+            money=ctx.get("money", ctx.get("money_reward", 0)),
+            item=ctx.get("item", ctx.get("item_text", "ничего")),
+            artifact=ctx.get("artifact", "артефакт"),
+            xp=ctx.get("xp", 0),
+        )
+    except Exception:
+        return template
 
 
 def _apply_need_item(player, effect):

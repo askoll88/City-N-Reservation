@@ -1674,9 +1674,10 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
 
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
 
     vk.messages.send(user_id=user_id, message=message, keyboard=keyboard.get_keyboard(), random_id=0)
 
@@ -1767,12 +1768,15 @@ def create_combat_keyboard(player=None, user_id=None):
     from classes import get_class_by_weapon
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     # Кнопка навыков - показываем только если есть класс
     class_from_weapon = get_class_by_weapon(player.equipped_weapon) if player and player.equipped_weapon else None
     if player and (player.player_class or class_from_weapon):
         keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
+    else:
+        keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -1834,6 +1838,8 @@ def create_skills_keyboard(player, user_id: int = None):
         keyboard.add_button(btn_text, color=color)
         keyboard.add_line()
 
+    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 

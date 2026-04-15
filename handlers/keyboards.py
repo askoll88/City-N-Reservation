@@ -184,9 +184,10 @@ def create_combat_keyboard():
     """Клавиатура боя — минимализм в стрессе"""
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 

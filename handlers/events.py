@@ -59,7 +59,32 @@ def handle_event_response(player, vk, user_id: int, text: str) -> bool:
                 break
 
     if choice_idx is None:
-        return False
+        stage_index = event.get("_stage_index", 0)
+        if event.get("type") == "multi_stage":
+            stages = event.get("stages", [])
+            if 0 <= stage_index < len(stages):
+                choices = stages[stage_index].get("choices", [])
+            else:
+                choices = []
+        else:
+            choices = event.get("choices", [])
+        max_choice = len(choices)
+        if max_choice <= 0:
+            clear_pending_event(user_id)
+            vk.messages.send(
+                user_id=user_id,
+                message="Событие повреждено и было сброшено. Продолжай путь.",
+                keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+                random_id=0,
+            )
+            return True
+        vk.messages.send(
+            user_id=user_id,
+            message=f"Выбери вариант числом от 1 до {max_choice} или нажми 'Пропустить'.",
+            keyboard=create_random_event_keyboard(event, stage_index=stage_index).get_keyboard(),
+            random_id=0,
+        )
+        return True
 
     return _process_event_choice(player, vk, user_id, event, choice_idx)
 
@@ -69,6 +94,15 @@ def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: i
     stage_index = event.get("_stage_index", 0)
 
     result = apply_event_choice(event, choice_index, player, user_id=user_id, stage_index=stage_index)
+
+    if result.get("invalid"):
+        vk.messages.send(
+            user_id=user_id,
+            message=result.get("message", "Неверный выбор."),
+            keyboard=create_random_event_keyboard(event, stage_index=stage_index).get_keyboard(),
+            random_id=0,
+        )
+        return True
 
     # Сохраняем изменения игрока
     database.update_user_stats(
