@@ -4,6 +4,7 @@
 Предупреждение за 15 минут → урон игрокам в Зоне → бонусы после.
 """
 import logging
+import math
 import random
 import time
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 _EMISSION_RISK_LOCK_FLAG = "emission_risk_lock"
 _EMISSION_RISK_EID_FLAG = "emission_risk_emission_id"
+_EMISSION_IMPACT_RAD_SLOT_FLAG = "emission_impact_rad_slot"
+_EMISSION_IMPACT_RAD_EID_FLAG = "emission_impact_rad_emission_id"
 
 # Летальность выброса для неподготовленных вне укрытия.
 EMISSION_FATAL_UNPREPARED_CHANCE = float(getattr(config, "EMISSION_FATAL_UNPREPARED_CHANCE", 0.07) or 0.07)
@@ -31,6 +34,7 @@ EMISSION_FATAL_RISK_MULT = float(getattr(config, "EMISSION_FATAL_RISK_MULT", 1.5
 EMISSION_PREPARED_HP_MIN = int(getattr(config, "EMISSION_PREPARED_HP_MIN", 65) or 65)
 EMISSION_PREPARED_ENERGY_MIN = int(getattr(config, "EMISSION_PREPARED_ENERGY_MIN", 35) or 35)
 EMISSION_PREPARED_MAX_RADIATION = int(getattr(config, "EMISSION_PREPARED_MAX_RADIATION", 90) or 90)
+EMISSION_IMPACT_HALF_DEATH_RAD = int(getattr(config, "EMISSION_IMPACT_HALF_DEATH_RAD", 250) or 250)
 
 
 # =========================================================================
@@ -272,6 +276,13 @@ def emission_tick(vk):
                 logger.info("Выброс #%d: успешно перешёл в IMPACT", emission_id)
         except Exception as e:
             logger.error("Выброс #%d: ОШИБКА при переходе в IMPACT: %s", emission_id, e, exc_info=True)
+
+    # Фаза impact: продолжаем накапливать радиацию вне укрытий.
+    elif status == EMISSION_PHASE_IMPACT and impact_time <= now < end_time:
+        try:
+            _apply_impact_radiation_accumulation(vk, emission)
+        except Exception as e:
+            logger.error("Выброс #%d: ошибка накопления радиации в impact: %s", emission_id, e, exc_info=True)
 
     # Переход: impact → finished (aftermath начинается автоматически)
     elif status == EMISSION_PHASE_IMPACT and now >= end_time:
@@ -527,6 +538,8 @@ def _flee_to_safe_location(player, vk, user_id: int) -> bool:
     player.energy = max(0, player.energy - 10)  # Затраты энергии на бегство
     database.set_user_flag(user_id, _EMISSION_RISK_LOCK_FLAG, 0)
     database.set_user_flag(user_id, _EMISSION_RISK_EID_FLAG, 0)
+    database.set_user_flag(user_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1)
+    database.set_user_flag(user_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0)
 
     database.update_user_stats(
         user_id,
@@ -724,6 +737,78 @@ def _apply_emission_impact(vk, emission_id: int):
     )
 
 
+def _impact_radiation_gain_per_minute(impact_time: datetime, end_time: datetime) -> int:
+    """Прирост рад/мин: к половине окна impact набегает ~уровень почти-верной смерти."""
+    duration_sec = max(60, int((end_time - impact_time).total_seconds()))
+    half_minutes = max(1, (duration_sec // 2) // 60)
+    return max(8, int(math.ceil(EMISSION_IMPACT_HALF_DEATH_RAD / half_minutes)))
+
+
+def _apply_impact_radiation_accumulation(vk, emission: dict):
+    """
+    Во время impact радиация продолжает расти каждую минуту у игроков вне safe.
+    Без антирада игрок быстро выходит в критическую зону.
+    """
+    emission_id = int(emission.get("id") or 0)
+    impact_time = emission.get("impact_time")
+    end_time = emission.get("end_time")
+    if not impact_time or not end_time:
+        return
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if now < impact_time or now >= end_time:
+        return
+
+    minute_slot = int((now - impact_time).total_seconds() // 60)
+    per_min_gain = _impact_radiation_gain_per_minute(impact_time, end_time)
+    players = database.get_all_active_players()
+    from player import calculate_radiation_hp_loss
+
+    for player_data in players:
+        vk_id = int(player_data["vk_id"])
+        location = player_data.get("location", "город")
+        if location in SAFE_LOCATIONS:
+            continue
+
+        last_eid = int(database.get_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0) or 0)
+        last_slot = int(database.get_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1) or -1)
+        if last_eid == emission_id and last_slot == minute_slot:
+            continue
+
+        database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, emission_id)
+        database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, minute_slot)
+
+        user = database.get_user_by_vk(vk_id) or {}
+        hp = int(user.get("health") or 1)
+        rad = int(user.get("radiation") or 0)
+
+        risk_locked = bool(int(database.get_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0) or 0))
+        risk_mult = 1.2 if risk_locked else 1.0
+        rad_gain = max(1, int((per_min_gain + random.randint(-2, 3)) * risk_mult))
+        new_radiation = rad + rad_gain
+        overload = calculate_radiation_hp_loss(new_radiation, hp)
+        new_health = max(1, hp - overload)
+
+        database.update_user_stats(vk_id, health=new_health, radiation=new_radiation)
+
+        # Сообщения редко: каждые 5 минут и при критических порогах.
+        if (minute_slot % 5 == 0) or new_radiation >= 220 or new_health <= 15:
+            try:
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=(
+                        "☣️ **Выброс усиливается**\n\n"
+                        f"☢️ Радиация: +{rad_gain} (итого {new_radiation})\n"
+                        f"💔 Урон от токсичности: -{overload} HP (осталось {new_health})\n\n"
+                        "Спастись поможет только антирад и укрытие."
+                    ),
+                    keyboard=create_emission_impact_keyboard(location).get_keyboard(),
+                    random_id=0,
+                )
+            except Exception:
+                pass
+
+
 def _is_player_prepared_for_emission(vk_id: int, user_row: dict) -> tuple[bool, dict]:
     """Определить, подготовлен ли игрок к выбросу."""
     hp = int(user_row.get("health") or 0)
@@ -811,6 +896,8 @@ def _apply_emission_death_penalty(vk_id: int, user_row: dict) -> dict:
     )
     database.set_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0)
     database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
+    database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1)
+    database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0)
 
     return {
         "money_lost": money_lost,
@@ -882,6 +969,8 @@ def _announce_emission_cancelled(vk, emission_id: int):
         clear_emission_pending(vk_id)
         database.set_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0)
         database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
+        database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1)
+        database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0)
 
         try:
             vk.messages.send(
@@ -903,6 +992,8 @@ def _announce_aftermath(vk, emission_id: int):
         vk_id = player_data["vk_id"]
         database.set_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0)
         database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
+        database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1)
+        database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0)
         try:
             vk.messages.send(
                 user_id=vk_id,
@@ -982,6 +1073,33 @@ def is_emission_safe_entry_blocked_for_user(user_id: int) -> tuple[bool, int]:
         return True, seconds_to_impact
 
     return False, seconds_to_impact
+
+
+def mark_emission_safe_exit_during_impact(user_id: int, from_location: str, to_location: str) -> bool:
+    """
+    Если игрок вышел из safe-локации в impact, блокируем возврат в safe до конца impact.
+    """
+    if from_location not in SAFE_LOCATIONS or to_location in SAFE_LOCATIONS:
+        return False
+
+    emission = database.get_active_emission()
+    if not emission:
+        return False
+    if emission.get("status") != EMISSION_PHASE_IMPACT:
+        return False
+
+    impact_time = emission.get("impact_time")
+    end_time = emission.get("end_time")
+    if not impact_time or not end_time:
+        return False
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if not (impact_time <= now <= end_time):
+        return False
+
+    database.set_user_flag(user_id, _EMISSION_RISK_LOCK_FLAG, 1)
+    database.set_user_flag(user_id, _EMISSION_RISK_EID_FLAG, int(emission.get("id") or 0))
+    return True
 
 
 # =========================================================================

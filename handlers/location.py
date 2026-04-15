@@ -553,6 +553,13 @@ def go_to_location(player, location_id: str, vk, user_id: int):
     if from_location == "инвентарь" and player.previous_location:
         from_location = player.previous_location
 
+    # Если игрок вышел из укрытия во время impact — возврат в safe закрыт до конца impact.
+    try:
+        from emission import mark_emission_safe_exit_during_impact
+        mark_emission_safe_exit_during_impact(user_id, from_location, location_id)
+    except Exception:
+        logger.exception("Не удалось отметить выход из safe в impact: user_id=%s", user_id)
+
     if location_id == from_location:
         set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
         vk.messages.send(
