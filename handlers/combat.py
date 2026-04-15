@@ -1230,6 +1230,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 def _handle_radiation(player, vk, user_id: int):
     """Обработка радиоактивного заражения (с модификатором локации)"""
     from location_mechanics import get_radiation_mult
+    from player import calculate_radiation_hp_loss
     _, create_location_keyboard, _, _ = _get_main_imports()
 
     # Получаем реальные данные игрока
@@ -1240,8 +1241,10 @@ def _handle_radiation(player, vk, user_id: int):
     rad_mult = get_radiation_mult(player.current_location_id)
     rad_damage = int(random.randint(15, 35) * rad_mult)
     rad_gain = int(random.randint(10, 25) * rad_mult)
-    new_health = max(0, user['health'] - rad_damage)
     new_radiation = user['radiation'] + rad_gain
+    rad_overload = calculate_radiation_hp_loss(new_radiation, user['health'])
+    total_rad_damage = rad_damage + rad_overload
+    new_health = max(0, user['health'] - total_rad_damage)
 
     database.update_user_stats(user_id, health=new_health, radiation=new_radiation)
 
@@ -1253,8 +1256,11 @@ def _handle_radiation(player, vk, user_id: int):
         message=(
             f"РАДИАЦИЯ!\n\n"
             f"Ты вошёл в зону повышенной радиации!{rad_mult_text}\n\n"
-            f"Получен урон: {rad_damage}\n"
+            f"Базовый урон: {rad_damage}\n"
+            f"Токсичность накопления: {rad_overload}\n"
+            f"Итоговый урон: {total_rad_damage}\n"
             f"Радиация: +{rad_gain}\n"
+            f"☢️ Текущая радиация: {new_radiation}\n"
             f"HP: {new_health}/{max_hp}"
         ),
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),

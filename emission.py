@@ -586,6 +586,12 @@ def _apply_emission_impact(vk, emission_id: int):
 
             # Радиация
             radiation = config.EMISSION_RADIATION + random.randint(-5, 10)
+            new_radiation = int(player_data.get("radiation") or 0) + radiation
+
+            # Урон от накопленной радиации: чем выше накопление, тем быстрее тает HP.
+            from player import calculate_radiation_hp_loss
+            rad_overload_damage = calculate_radiation_hp_loss(new_radiation, new_health)
+            new_health = max(1, new_health - rad_overload_damage)
 
             # Потеря предметов
             items_lost = 0
@@ -599,7 +605,7 @@ def _apply_emission_impact(vk, emission_id: int):
             database.update_user_stats(
                 vk_id,
                 health=new_health,
-                radiation=min(100, int(player_data.get("radiation") or 0) + radiation),
+                radiation=new_radiation,
             )
 
             # Логируем
@@ -635,6 +641,7 @@ def _apply_emission_impact(vk, emission_id: int):
                     f"Ты был в: {location}\n"
                     f"💔 Получено урона: -{damage} HP ({current_health} → {new_health})\n"
                     f"☢️ Радиация: +{radiation}\n"
+                    f"☣️ Токсичность: -{rad_overload_damage} HP (накопление)\n"
                     f"{items_line}"
                     f"{death_line}"
                     "Что делать?"
@@ -871,7 +878,11 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
     )
     damage = int(player.health * damage_pct)
     player.health = max(1, player.health - damage)
-    player.radiation = min(100, player.radiation + config.EMISSION_RADIATION)
+    player.radiation = player.radiation + config.EMISSION_RADIATION
+
+    from player import calculate_radiation_hp_loss
+    rad_overload_damage = calculate_radiation_hp_loss(player.radiation, player.health)
+    player.health = max(1, player.health - rad_overload_damage)
 
     database.update_user_stats(
         user_id,
@@ -886,6 +897,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
                 f"☢️ **ВЫБРОС БУШУЕТ!**\n\n"
                 f"Ты в Зоне ({location}) и получаешь урон!\n"
                 f"💔 Урон: -{damage} HP\n"
+                f"☣️ Токсичность: -{rad_overload_damage} HP\n"
                 f"❤️ HP: {player.health}\n"
                 f"☢️ Радиация: +{config.EMISSION_RADIATION}\n\n"
                 "Беги в укрытие!"

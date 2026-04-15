@@ -8,6 +8,32 @@ import ui
 
 logger = logging.getLogger(__name__)
 
+
+def calculate_radiation_hp_loss(radiation: int, current_hp: int) -> int:
+    """
+    Тик-урон от накопленной радиации.
+    До ~100 растёт плавно, после 150 ускоряется, а на 250+ почти смертелен.
+    """
+    rad = max(0, int(radiation or 0))
+    hp = max(1, int(current_hp or 1))
+
+    if rad < 30:
+        return 0
+    if rad < 80:
+        return 1 + (rad - 30) // 25          # 1..2
+    if rad < 120:
+        return 3 + (rad - 80) // 15          # 3..5
+    if rad < 170:
+        return 6 + (rad - 120) // 10         # 6..10
+    if rad < 220:
+        return 11 + (rad - 170) // 6         # 11..19
+    if rad < 250:
+        return 20 + (rad - 220) // 2         # 20..34
+
+    # 250+ — почти мгновенная смерть, но не всегда 100%.
+    return max(35, int(hp * 0.85))
+
+
 class Inventory:
     """Класс инвентаря игрока"""
 
@@ -574,9 +600,6 @@ class Player:
             self.energy = max(0, min(100, energy))
         if radiation is not None:
             self.radiation = max(0, radiation)
-            if self.radiation >= 100:
-                self._handle_radiation_death()
-                return
         if money is not None:
             self.money = max(0, money)
         if level is not None:
