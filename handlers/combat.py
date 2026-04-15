@@ -837,6 +837,8 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 
             # Добавляем артефакт в инвентарь
             database.add_item_to_inventory(user_id, artifact_name, 1)
+            from handlers.quests import track_quest_artifact
+            track_quest_artifact(user_id)
 
             # Формируем сообщение об успехе
             rarity_emoji = {
@@ -1019,6 +1021,8 @@ def _spawn_artifact(player, vk, user_id: int):
 
     artifact = random.choice(artifacts)
     database.add_item_to_inventory(user_id, artifact['name'], 1)
+    from handlers.quests import track_quest_artifact
+    track_quest_artifact(user_id)
 
     vk.messages.send(
         user_id=user_id,
@@ -1930,6 +1934,7 @@ def handle_combat_flee(player, vk, user_id: int):
 def _handle_victory(player, combat, user_id: int) -> str:
     """Обработка победы над врагом"""
     _combat_state, _, _, _ = _get_main_imports()
+    from handlers.quests import track_quest_kill, track_quest_shells
 
     del _combat_state[user_id]
     
@@ -1942,9 +1947,16 @@ def _handle_victory(player, combat, user_id: int) -> str:
     
     # Добавляем гильзы с учетом вместимости мешочка
     shells_info = database.get_shells_info(user_id)
+    shells_before = database.get_user_shells(user_id)
     success, msg = database.add_shells(user_id, shells_drop)
     current_shells = database.get_user_shells(user_id)
     capacity = shells_info['capacity']
+
+    # Автопрогресс daily-заданий: убийства и собранные гильзы.
+    track_quest_kill(user_id, combat.get("location_id"))
+    added_shells = max(0, int(current_shells or 0) - int(shells_before or 0))
+    if added_shells > 0:
+        track_quest_shells(user_id, count=added_shells)
 
     database.update_user_stats(user_id, experience=player.experience, money=player.money)
     

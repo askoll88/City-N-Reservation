@@ -672,7 +672,10 @@ def main():
         import time
         # Планируем первый выброс
         if config.EMISSION_ENABLED:
-            schedule_next_emission()
+            try:
+                schedule_next_emission()
+            except Exception as e:
+                logger.error("Ошибка начального планирования выброса: %s", e, exc_info=True)
 
         last_tick = time.time()
         while True:

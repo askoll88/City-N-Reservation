@@ -55,6 +55,15 @@ def schedule_next_emission():
     if not config.EMISSION_ENABLED:
         return None
 
+    existing = database.get_active_emission()
+    if existing:
+        logger.info(
+            "schedule_next_emission: активный выброс уже есть (id=%s, status=%s), новый не создаю",
+            existing.get("id"),
+            existing.get("status"),
+        )
+        return existing.get("id")
+
     now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC
 
     # Случайный интервал
@@ -198,7 +207,12 @@ def emission_tick(vk):
 
     emission = database.get_active_emission()
     if not emission:
-        logger.debug("emission_tick: нет активных выбросов")
+        logger.warning("emission_tick: нет активных выбросов, планирую новый")
+        try:
+            next_id = schedule_next_emission()
+            logger.info("emission_tick: автопланирование выполнено, id=%s", next_id)
+        except Exception as e:
+            logger.error("emission_tick: ошибка автопланирования: %s", e, exc_info=True)
         return
 
     # БД хранит TIMESTAMP (без tz) — делаем now тоже наивным для сравнения

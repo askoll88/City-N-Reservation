@@ -96,7 +96,6 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
 def track_quest_kill(user_id: int, location: str = None):
     """Отслеживать убийства для заданий"""
     database.track_quest_progress(user_id, "kill", location)
-    database.track_quest_progress(user_id, "kill_any", location)
 
 
 def track_quest_explore(user_id: int, location: str = None):

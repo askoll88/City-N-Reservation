@@ -2412,12 +2412,21 @@ def init_daily_quests_table():
                 streak        INTEGER NOT NULL DEFAULT 0,
                 last_complete DATE,
                 claimed       BOOLEAN NOT NULL DEFAULT FALSE,
+                updated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (vk_id, quest_date)
             )
         """)
         cursor.execute("""
+            ALTER TABLE daily_quests
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_daily_quests_date
             ON daily_quests(quest_date)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_daily_quests_vk_date
+            ON daily_quests(vk_id, quest_date DESC)
         """)
 
 
@@ -2425,9 +2434,9 @@ def get_daily_quests_for_user(vk_id: int) -> dict | None:
     """Получить ежедневные задания игрока на сегодня"""
     with db_cursor() as (cursor, _):
         cursor.execute("""
-            SELECT quest_json, progress_json, streak, last_complete, claimed
+            SELECT quest_json, progress_json, streak, last_complete, claimed, quest_date, updated_at
             FROM daily_quests
-            WHERE vk_id = %s AND quest_date = CURRENT_DATE
+            WHERE vk_id = %s AND quest_date = (NOW() AT TIME ZONE 'UTC')::date
         """, (vk_id,))
         row = cursor.fetchone()
         if not row:
@@ -2438,6 +2447,8 @@ def get_daily_quests_for_user(vk_id: int) -> dict | None:
             "streak": row["streak"],
             "last_complete": row["last_complete"],
             "claimed": row["claimed"],
+            "quest_date": row["quest_date"],
+            "updated_at": row["updated_at"],
         }
 
 
@@ -2446,12 +2457,15 @@ def save_daily_quests(vk_id: int, quests: list, progress: dict = None, streak: i
     import json
     with db_cursor() as (cursor, conn):
         cursor.execute("""
-            INSERT INTO daily_quests (vk_id, quest_json, progress_json, streak)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO daily_quests (vk_id, quest_date, quest_json, progress_json, streak, claimed, updated_at)
+            VALUES (%s, (NOW() AT TIME ZONE 'UTC')::date, %s, %s, %s, FALSE, NOW())
             ON CONFLICT (vk_id, quest_date)
             DO UPDATE SET
                 quest_json = EXCLUDED.quest_json,
-                streak = EXCLUDED.streak
+                progress_json = EXCLUDED.progress_json,
+                streak = EXCLUDED.streak,
+                claimed = FALSE,
+                updated_at = NOW()
         """, (vk_id, json.dumps(quests, ensure_ascii=False), json.dumps(progress or {}, ensure_ascii=False), streak))
 
 
@@ -2460,20 +2474,30 @@ def update_quest_progress(vk_id: int, quest_id: str, increment: int = 1):
     import json
     with db_cursor() as (cursor, conn):
         cursor.execute("""
-            SELECT progress_json FROM daily_quests
-            WHERE vk_id = %s AND quest_date = CURRENT_DATE
+            SELECT progress_json, quest_json FROM daily_quests
+            WHERE vk_id = %s AND quest_date = (NOW() AT TIME ZONE 'UTC')::date
         """, (vk_id,))
         row = cursor.fetchone()
         if not row:
             return
 
-        progress = row["progress_json"]
-        progress[quest_id] = progress.get(quest_id, 0) + increment
+        progress = row["progress_json"] or {}
+        quests = row["quest_json"] or []
+        quest_target = None
+        for q in quests:
+            if q.get("id") == quest_id:
+                quest_target = int(q.get("target", 1))
+                break
+        new_value = int(progress.get(quest_id, 0)) + int(increment)
+        if quest_target is not None:
+            new_value = min(new_value, quest_target)
+        progress[quest_id] = max(0, new_value)
 
         cursor.execute("""
             UPDATE daily_quests
-            SET progress_json = %s
-            WHERE vk_id = %s AND quest_date = CURRENT_DATE
+            SET progress_json = %s,
+                updated_at = NOW()
+            WHERE vk_id = %s AND quest_date = (NOW() AT TIME ZONE 'UTC')::date
         """, (json.dumps(progress, ensure_ascii=False), vk_id))
 
 
@@ -2487,7 +2511,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             cursor.execute("""
                 SELECT quest_json, progress_json, streak, claimed
                 FROM daily_quests
-                WHERE vk_id = %s AND quest_date = CURRENT_DATE
+                WHERE vk_id = %s AND quest_date = (NOW() AT TIME ZONE 'UTC')::date
                 FOR UPDATE
             """, (vk_id,))
             row = cursor.fetchone()
@@ -2545,8 +2569,9 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 UPDATE daily_quests
                 SET claimed = TRUE,
                     streak = %s,
-                    last_complete = CURRENT_DATE
-                WHERE vk_id = %s AND quest_date = CURRENT_DATE
+                    last_complete = (NOW() AT TIME ZONE 'UTC')::date,
+                    updated_at = NOW()
+                WHERE vk_id = %s AND quest_date = (NOW() AT TIME ZONE 'UTC')::date
             """, (new_streak, vk_id))
 
             # Обновляем деньги и XP игрока
@@ -2578,27 +2603,32 @@ def reset_daily_quests_if_needed(vk_id: int):
     Проверить, сменился ли день. Если да - сгенерировать новые задания.
     Возвращает (quests, progress, streak) или генерирует новые.
     """
-    from datetime import timezone, datetime
+    from datetime import timezone, datetime, timedelta
     from daily_quests import generate_daily_quests
 
     existing = get_daily_quests_for_user(vk_id)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if existing is not None:
+        return existing["quests"], existing["progress"], existing["streak"]
 
-    if existing is None:
-        # Новые задания
-        quests = generate_daily_quests(today)
-        save_daily_quests(vk_id, quests, streak=0)
-        return quests, {}, 0
+    today = datetime.now(timezone.utc).date()
+    yesterday = today - timedelta(days=1)
 
-    # Проверяем, выполнен ли claim вчера
-    if existing["claimed"]:
-        # Новый день, сбрасываем прогресс
-        quests = generate_daily_quests(today)
-        save_daily_quests(vk_id, quests, streak=existing["streak"])
-        return quests, {}, existing["streak"]
+    streak_seed = 0
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT quest_date, streak, claimed
+            FROM daily_quests
+            WHERE vk_id = %s
+            ORDER BY quest_date DESC
+            LIMIT 1
+        """, (vk_id,))
+        prev = cursor.fetchone()
+        if prev and prev["claimed"] and prev["quest_date"] == yesterday:
+            streak_seed = int(prev["streak"] or 0)
 
-    # Ещё не забрал награду - оставляем те же задания
-    return existing["quests"], existing["progress"], existing["streak"]
+    quests = generate_daily_quests(today.strftime("%Y-%m-%d"))
+    save_daily_quests(vk_id, quests, progress={}, streak=streak_seed)
+    return quests, {}, streak_seed
 
 
 def track_quest_progress(vk_id: int, quest_type: str, location: str = None, increment: int = 1):
@@ -2608,7 +2638,8 @@ def track_quest_progress(vk_id: int, quest_type: str, location: str = None, incr
     """
     existing = get_daily_quests_for_user(vk_id)
     if not existing:
-        return
+        quests, progress, streak = reset_daily_quests_if_needed(vk_id)
+        existing = {"quests": quests, "progress": progress, "streak": streak}
 
     quests = existing["quests"]
     for q in quests:

@@ -1,15 +1,90 @@
 """
 Обработчики локаций и навигации
 """
+import logging
 import time
+from typing import Optional
 import database
 from constants import RESEARCH_LOCATIONS, NPC_LOCATIONS
 
+logger = logging.getLogger(__name__)
+
 # Кулдаун рандомных событий
-EVENT_COOLDOWN_SECONDS = 15 * 60        # 15 минут — базовый кулдаун
+EVENT_COOLDOWN_SECONDS = 30 * 60        # 30 минут — базовый кулдаун
 EVENT_CHANCE_RAMP_UP = 10 * 60          # каждые 10 минут после кулдауна
 EVENT_CHANCE_INCREMENT = 1.5            # +1.5% шанс за каждый интервал
 EVENT_MAX_CHANCE = 100                  # макс шанс
+
+
+def _normalize_last_event_time(raw_value, now: int) -> int:
+    """Нормализовать last_random_event_time к unix timestamp в секундах."""
+    try:
+        ts = int(raw_value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+    if ts <= 0:
+        return 0
+
+    # Иногда значение может быть в миллисекундах.
+    if ts > 10_000_000_000:
+        ts = ts // 1000
+
+    # Защита от "времени из будущего" (сдвиг часов/битые данные).
+    if ts > now:
+        return 0
+
+    return ts
+
+
+def get_event_spawn_state(last_event_time_raw, now: Optional[int] = None) -> dict:
+    """
+    Рассчитать текущее состояние выдачи рандом-события.
+
+    Возвращает словарь:
+    {
+        "last_event_time": int,
+        "elapsed": int,
+        "cooldown_remaining": int,
+        "chance": float,
+        "ready": bool,
+    }
+    """
+    if now is None:
+        now = int(time.time())
+
+    last_event_time = _normalize_last_event_time(last_event_time_raw, now)
+
+    if last_event_time == 0:
+        return {
+            "last_event_time": 0,
+            "elapsed": 0,
+            "cooldown_remaining": 0,
+            "chance": 100.0,
+            "ready": True,
+        }
+
+    elapsed = max(0, now - last_event_time)
+    if elapsed < EVENT_COOLDOWN_SECONDS:
+        return {
+            "last_event_time": last_event_time,
+            "elapsed": elapsed,
+            "cooldown_remaining": EVENT_COOLDOWN_SECONDS - elapsed,
+            "chance": 0.0,
+            "ready": False,
+        }
+
+    time_after_cooldown = elapsed - EVENT_COOLDOWN_SECONDS
+    intervals_passed = int(time_after_cooldown / EVENT_CHANCE_RAMP_UP)
+    chance = min(EVENT_MAX_CHANCE, intervals_passed * EVENT_CHANCE_INCREMENT)
+
+    return {
+        "last_event_time": last_event_time,
+        "elapsed": elapsed,
+        "cooldown_remaining": 0,
+        "chance": float(chance),
+        "ready": True,
+    }
 
 
 def _check_event_cooldown(user_id: int) -> bool:
@@ -18,30 +93,26 @@ def _check_event_cooldown(user_id: int) -> bool:
     Возвращает True если можно выдавать событие, False если на кулдауне.
 
     Механика:
-    - После получения события — кулдаун 15 минут
+    - После получения события — кулдаун 30 минут
     - После кулдауна — шанс растёт на 1.5% каждые 10 минут
     - Максимум 100%
     """
-    last_event_time = database.get_user_flag(user_id, "last_random_event_time", 0)
-    now = int(time.time())
-
-    if last_event_time == 0:
-        # Первый раз — всегда можно
-        return True
-
-    elapsed = now - last_event_time
-
-    # Базовый кулдаун
-    if elapsed < EVENT_COOLDOWN_SECONDS:
+    state = get_event_spawn_state(database.get_user_flag(user_id, "last_random_event_time", 0))
+    if not state["ready"]:
+        logger.debug(
+            "random_event cooldown: user=%s elapsed=%ss remaining=%ss",
+            user_id, state["elapsed"], state["cooldown_remaining"],
+        )
         return False
 
-    # После кулдауна — нарастающий шанс
-    time_after_cooldown = elapsed - EVENT_COOLDOWN_SECONDS
-    intervals_passed = int(time_after_cooldown / EVENT_CHANCE_RAMP_UP)
-    chance = min(EVENT_MAX_CHANCE, intervals_passed * EVENT_CHANCE_INCREMENT)
-
     import random
-    return random.randint(1, 100) <= chance
+    roll = random.random() * 100
+    hit = roll <= state["chance"]
+    logger.debug(
+        "random_event chance: user=%s elapsed=%ss chance=%.2f roll=%.2f hit=%s",
+        user_id, state["elapsed"], state["chance"], roll, hit,
+    )
+    return hit
 
 
 def go_to_location(player, location_id: str, vk, user_id: int):

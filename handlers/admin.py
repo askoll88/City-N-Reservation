@@ -2,6 +2,7 @@
 Админские команды для управления игрой — с подменю и кнопками
 """
 import re
+import time
 
 import database
 from handlers.keyboards import (
@@ -329,6 +330,10 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         if not quests_info:
             _send(vk, user_id, f"📋 Квесты {user['name']}:\n\nЕжедневных квестов нет."); return True
         lines = [f"📋 КВЕСТЫ: {user['name']} (vk:{target})\n"]
+        if quests_info.get("quest_date"):
+            lines.append(f"Дата: {quests_info['quest_date']}")
+        if quests_info.get("updated_at"):
+            lines.append(f"Обновлено: {quests_info['updated_at']}")
         lines.append(f"Стрик: {quests_info['streak']} дней")
         lines.append(f"Claimed: {'да' if quests_info['claimed'] else 'нет'}\n")
         for i, q in enumerate(quests_info.get("quests", []), 1):
@@ -365,21 +370,33 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         user = database.get_admin_user(target)
         if not user:
             _send(vk, user_id, "Пользователь не найден."); return True
-        import time
+        from handlers.location import get_event_spawn_state
+        now_ts = int(time.time())
         last_time = database.get_user_flag(target, "last_random_event_time", 0)
         if action == "инфо":
             if last_time == 0:
                 _send(vk, user_id, f"⏰ Кулдаун {user['name']}:\n\nСобытий ещё не было.")
             else:
-                elapsed = int(time.time()) - last_time
+                state = get_event_spawn_state(last_time, now=now_ts)
+                elapsed = state["elapsed"]
                 mins = elapsed // 60
-                if elapsed < 15 * 60:
-                    _send(vk, user_id, f"⏰ Кулдаун {user['name']}:\n\nПоследнее событие: {mins} мин назад\n⏳ Осталось: {(15 * 60 - elapsed) // 60} мин")
+                if not state["ready"]:
+                    _send(
+                        vk,
+                        user_id,
+                        f"⏰ Кулдаун {user['name']}:\n\n"
+                        f"Последнее событие: {mins} мин назад\n"
+                        f"⏳ Осталось: {state['cooldown_remaining'] // 60} мин",
+                    )
                 else:
-                    after = elapsed - 15 * 60
-                    intervals = after // (10 * 60)
-                    chance = min(100, intervals * 1.5)
-                    _send(vk, user_id, f"⏰ Кулдаун {user['name']}:\n\nПоследнее событие: {mins} мин назад\n✅ Кулдаун прошёл\n🎲 Шанс: {chance:.1f}%")
+                    _send(
+                        vk,
+                        user_id,
+                        f"⏰ Кулдаун {user['name']}:\n\n"
+                        f"Последнее событие: {mins} мин назад\n"
+                        f"✅ Кулдаун прошёл\n"
+                        f"🎲 Шанс: {state['chance']:.1f}%",
+                    )
             return True
         if action == "снять":
             database.set_user_flag(target, "last_random_event_time", 0)

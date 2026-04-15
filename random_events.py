@@ -1951,7 +1951,11 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         if "energy" in effect:
             player.energy = max(0, player.energy + effect["energy"])
         if "shells" in effect:
-            player.shells = getattr(player, 'shells', 0) + effect["shells"]
+            shell_gain = int(effect["shells"])
+            player.shells = getattr(player, 'shells', 0) + shell_gain
+            if shell_gain > 0:
+                from handlers.quests import track_quest_shells
+                track_quest_shells(player.vk_id, count=shell_gain)
         return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # Риск - получение урона
@@ -2034,15 +2038,22 @@ def _apply_random_artifact(player):
     artifact = get_artifact_from_anomaly(anomaly_type)
     if artifact:
         database.add_item_to_inventory(player.vk_id, artifact, 1)
+        from handlers.quests import track_quest_artifact
+        track_quest_artifact(player.vk_id)
         return f"Ты нашёл {artifact}!"
     return "Артефакт рассыпался в руках..."
 
 
 def _apply_artifact_chance(player, effect=None):
     from anomalies import get_random_anomaly, get_artifact_from_anomaly
+    import database
     anomaly = get_random_anomaly()
     artifact = get_artifact_from_anomaly(anomaly["type"])
     if random.randint(1, 100) <= 30:
+        if artifact:
+            database.add_item_to_inventory(player.vk_id, artifact, 1)
+            from handlers.quests import track_quest_artifact
+            track_quest_artifact(player.vk_id)
         return effect.get("message_ok", f"Ты нашёл {artifact or 'артефакт'}!") if effect else f"Ты нашёл {artifact or 'артефакт'}!"
     else:
         player.health = max(1, player.health - 25)
