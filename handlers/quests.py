@@ -136,3 +136,13 @@ def track_quest_talk_npc(user_id: int):
 def track_quest_change_class(user_id: int):
     """Отслеживать смену класса для заданий"""
     database.track_quest_progress(user_id, "change_class")
+
+
+def track_quest_shop_buy(user_id: int):
+    """Отслеживать покупку у NPC-магазинов для заданий"""
+    database.track_quest_progress(user_id, "shop_buy")
+
+
+def track_quest_shop_sell(user_id: int):
+    """Отслеживать продажу NPC-магазинам для заданий"""
+    database.track_quest_progress(user_id, "shop_sell")

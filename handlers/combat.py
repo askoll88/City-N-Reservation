@@ -18,92 +18,128 @@ _active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
 RESEARCH_EVENTS = {
     # Ничего не найдено (уменьшили шанс)
     "nothing": {
-        "chance": 10,
+        "chance": 14,
         "message": "Ты обыскал территорию...\n\nНичего не найдено.",
         "danger": 0
     },
     # Предметы (увеличили шансы)
     "common_item": {
-        "chance": 25,
+        "chance": 22,
         "message": "Что-то найдено!",
         "danger": 0,
         "type": "item",
         "rarity": "common"
     },
     "rare_item": {
-        "chance": 15,
+        "chance": 12,
         "message": "Ценная находка!",
         "danger": 0,
         "type": "item",
         "rarity": "rare"
     },
     "artifact": {
-        "chance": 12,
+        "chance": 10,
         "message": "Найден артефакт!",
         "danger": 0,
         "type": "artifact"
     },
     # Враги (максимальные шансы)
     "mutant": {
-        "chance": 60,
+        "chance": 38,
         "message": "АТАКА МУТАНТА!",
-        "danger": 30,
+        "danger": 22,
         "type": "enemy",
         "enemy_type": "mutant"
     },
     "bandit": {
-        "chance": 50,
+        "chance": 30,
         "message": "Обнаружен бандит!",
-        "danger": 25,
+        "danger": 18,
         "type": "enemy",
         "enemy_type": "bandit"
     },
     "military": {
-        "chance": 35,
+        "chance": 20,
         "message": "Военный патруль!",
-        "danger": 40,
+        "danger": 26,
         "type": "enemy",
         "enemy_type": "military"
     },
     # Опасность (максимальные шансы)
     "anomaly": {
-        "chance": 30,
+        "chance": 16,
         "message": "Попадание в аномалию!",
-        "danger": 35,
+        "danger": 24,
         "type": "anomaly"
     },
     "radiation": {
-        "chance": 25,
+        "chance": 14,
         "message": "Радиоактивная зона!",
-        "danger": 20,
+        "danger": 16,
         "type": "radiation"
     },
     "trap": {
-        "chance": 22,
+        "chance": 14,
         "message": "Попадание в ловушку!",
-        "danger": 25,
+        "danger": 18,
         "type": "trap"
     },
     # Бонусы (увеличили)
     "stash": {
-        "chance": 8,
+        "chance": 9,
         "message": "Найден тайник сталкера!",
         "danger": 0,
         "type": "stash"
     },
     "survivor": {
-        "chance": 6,
+        "chance": 8,
         "message": "Встречен выживший сталкер",
         "danger": 0,
         "type": "survivor"
+    },
+    "military_cache": {
+        "chance": 8,
+        "message": "Найден военный ящик с гильзами!",
+        "danger": 0,
+        "type": "shell_cache"
+    },
+    "field_lab_data": {
+        "chance": 7,
+        "message": "Найдены ценные лабораторные данные!",
+        "danger": 0,
+        "type": "intel"
+    },
+    "abandoned_camp": {
+        "chance": 9,
+        "message": "Обнаружен брошенный лагерь сталкеров.",
+        "danger": 0,
+        "type": "camp"
+    },
+    "artifact_cluster": {
+        "chance": 6,
+        "message": "Ты наткнулся на скопление артефактов!",
+        "danger": 0,
+        "type": "artifact_cluster"
+    },
+    "psi_echo": {
+        "chance": 10,
+        "message": "Пси-эхо накрывает сознание!",
+        "danger": 16,
+        "type": "psi"
+    },
+    "blood_trail": {
+        "chance": 11,
+        "message": "Свежий кровавый след уходит в чащу...",
+        "danger": 20,
+        "type": "trail"
     }
 }
 
 # Время исследования (сек) -> множитель шансов
 RESEARCH_TIME_MULTIPLIERS = {
-    5: {"chance": 1.0, "danger": 0.5, "name": "Быстрый поиск"},
-    10: {"chance": 1.5, "danger": 1.0, "name": "Обычный поиск"},
-    15: {"chance": 2.0, "danger": 1.5, "name": "Тщательный поиск"}
+    5: {"chance": 0.9, "danger": 0.75, "name": "Быстрый поиск"},
+    10: {"chance": 1.2, "danger": 1.0, "name": "Обычный поиск"},
+    15: {"chance": 1.45, "danger": 1.2, "name": "Тщательный поиск"}
 }
 
 # Энергия затрачиваемая на исследование
@@ -808,6 +844,30 @@ def _handle_research_event(player, vk, user_id: int, event_id: str, time_sec: in
         _handle_survivor(player, vk, user_id)
         return
 
+    if event_type == "shell_cache":
+        _handle_shell_cache(player, vk, user_id)
+        return
+
+    if event_type == "intel":
+        _handle_intel_find(player, vk, user_id)
+        return
+
+    if event_type == "camp":
+        _handle_abandoned_camp(player, vk, user_id)
+        return
+
+    if event_type == "artifact_cluster":
+        _handle_artifact_cluster(player, vk, user_id)
+        return
+
+    if event_type == "psi":
+        _handle_psi_echo(player, vk, user_id)
+        return
+
+    if event_type == "trail":
+        _handle_blood_trail(player, vk, user_id)
+        return
+
 
 def _handle_anomaly(player, vk, user_id: int):
     """Обработка попадания в аномалию"""
@@ -1172,6 +1232,199 @@ def _handle_survivor(player, vk, user_id: int):
             f"Ты встретил другого сталкера. Он обрадовался живому лицу.\n\n"
             f"Он поделился с тобой: {item}\n\n"
             f"'Удачи, братан. В Зоне каждый сам за себя.'"
+        ),
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
+
+
+def _handle_shell_cache(player, vk, user_id: int):
+    """Военный ящик с гильзами."""
+    _, create_location_keyboard, _, _ = _get_main_imports()
+
+    shells_found = random.randint(2, 9)
+    success, msg = database.add_shells(user_id, shells_found)
+    shells_info = database.get_shells_info(user_id)
+
+    if success:
+        text = (
+            "📦 ВОЕННЫЙ ЯЩИК\n\n"
+            "Под брезентом ты нашёл вскрытый армейский контейнер.\n\n"
+            f"Получено гильз: +{shells_found}\n"
+            f"Текущий запас: {shells_info['current']}/{shells_info['capacity']}"
+        )
+    else:
+        text = (
+            "📦 ВОЕННЫЙ ЯЩИК\n\n"
+            "Контейнер оказался полон гильз, но места в мешке не хватило.\n\n"
+            f"{msg}\n"
+            f"Текущий запас: {shells_info['current']}/{shells_info['capacity']}"
+        )
+
+    vk.messages.send(
+        user_id=user_id,
+        message=text,
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
+
+
+def _handle_intel_find(player, vk, user_id: int):
+    """Находка данных/документов: деньги + опыт."""
+    _, create_location_keyboard, _, _ = _get_main_imports()
+    user = database.get_user_by_vk(user_id)
+    if not user:
+        return
+
+    money_gain = random.randint(90, 240)
+    exp_gain = random.randint(8, 20)
+    new_money = int(user.get("money", 0)) + money_gain
+    new_exp = int(user.get("experience", 0)) + exp_gain
+    database.update_user_stats(user_id, money=new_money, experience=new_exp)
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🧾 РАЗВЕДДАННЫЕ\n\n"
+            "Ты нашёл планшет с маршрутами патрулей и координатами схронов.\n"
+            "Информация ушла перекупщику по защищённому каналу.\n\n"
+            f"💰 Деньги: +{money_gain}\n"
+            f"📘 Опыт: +{exp_gain}"
+        ),
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
+
+
+def _handle_abandoned_camp(player, vk, user_id: int):
+    """Заброшенный лагерь: мелкий лут и восстановление энергии."""
+    _, create_location_keyboard, _, _ = _get_main_imports()
+    user = database.get_user_by_vk(user_id)
+    if not user:
+        return
+
+    reward_pool = ["Бинт", "Аптечка", "Вода", "Энергетик", "Хлеб", "Антирад"]
+    item = random.choice(reward_pool)
+    database.add_item_to_inventory(user_id, item, 1)
+
+    old_energy = int(user.get("energy", 0))
+    energy_gain = random.randint(6, 14)
+    new_energy = min(100, old_energy + energy_gain)
+    database.update_user_stats(user_id, energy=new_energy)
+    player.energy = new_energy
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "⛺ БРОШЕННЫЙ ЛАГЕРЬ\n\n"
+            "В лагере тихо, но запасы ещё остались.\n\n"
+            f"📦 Найдено: {item} x1\n"
+            f"⚡ Энергия: {old_energy} → {new_energy} (+{new_energy - old_energy})"
+        ),
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
+
+
+def _handle_artifact_cluster(player, vk, user_id: int):
+    """Скопление артефактов: 1-2 артефакта за событие."""
+    _, create_location_keyboard, _, _ = _get_main_imports()
+    artifacts = database.get_items_by_category('artifacts')
+    if not artifacts:
+        _spawn_artifact(player, vk, user_id)
+        return
+
+    from handlers.quests import track_quest_artifact
+
+    count = 2 if random.random() < 0.35 else 1
+    found = []
+    for _ in range(count):
+        artifact = random.choice(artifacts)
+        found.append(artifact["name"])
+        database.add_item_to_inventory(user_id, artifact["name"], 1)
+        track_quest_artifact(user_id)
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "💎 СКОПЛЕНИЕ АРТЕФАКТОВ\n\n"
+            "Ты зашёл в нестабильную зону и быстро собрал трофеи.\n\n"
+            f"Получено: {', '.join(found)}"
+        ),
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
+
+
+def _handle_psi_echo(player, vk, user_id: int):
+    """Пси-эхо: контрольный негативный ивент без боя."""
+    _, create_location_keyboard, _, _ = _get_main_imports()
+    user = database.get_user_by_vk(user_id)
+    if not user:
+        return
+
+    hp_loss = random.randint(6, 14)
+    energy_loss = random.randint(8, 16)
+    rad_gain = random.randint(3, 9)
+
+    old_hp = int(user.get("health", 100))
+    old_energy = int(user.get("energy", 0))
+    old_rad = int(user.get("radiation", 0))
+
+    new_hp = max(1, old_hp - hp_loss)
+    new_energy = max(0, old_energy - energy_loss)
+    new_rad = min(100, old_rad + rad_gain)
+    database.update_user_stats(user_id, health=new_hp, energy=new_energy, radiation=new_rad)
+
+    player.health = new_hp
+    player.energy = new_energy
+    player.radiation = new_rad
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🧠 ПСИ-ЭХО\n\n"
+            "В голове зазвенело, как будто кто-то чужой шепчет рядом.\n\n"
+            f"❤️ HP: {old_hp} → {new_hp} (-{old_hp - new_hp})\n"
+            f"⚡ Энергия: {old_energy} → {new_energy} (-{old_energy - new_energy})\n"
+            f"☢️ Радиация: {old_rad} → {new_rad} (+{new_rad - old_rad})"
+        ),
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
+
+
+def _handle_blood_trail(player, vk, user_id: int):
+    """Кровавый след: иногда бой, иногда награда."""
+    _, create_location_keyboard, _, _ = _get_main_imports()
+    if random.random() < 0.58:
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🩸 КРОВАВЫЙ СЛЕД\n\n"
+                "След оказался свежим. Хищник рядом.\n"
+                "Ты едва успел снять оружие с предохранителя..."
+            ),
+            random_id=0
+        )
+        _spawn_enemy(player, vk, user_id, enemy_type="mutant", allow_elite=False)
+        return
+
+    user = database.get_user_by_vk(user_id)
+    if not user:
+        return
+    money = random.randint(70, 180)
+    new_money = int(user.get("money", 0)) + money
+    database.update_user_stats(user_id, money=new_money)
+    database.add_item_to_inventory(user_id, "Бинт", 1)
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🩸 КРОВАВЫЙ СЛЕД\n\n"
+            "Хищник уже ушёл. В кустах ты нашёл рюкзак прошлого сталкера.\n\n"
+            f"💰 Найдено: {money} руб.\n"
+            "📦 Дополнительно: Бинт x1"
         ),
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
         random_id=0

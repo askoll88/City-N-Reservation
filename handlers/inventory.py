@@ -629,13 +629,49 @@ def handle_show_use_items(player, vk, user_id: int):
 
 def handle_buy_item(player, item_name: str, vk, user_id: int):
     """Купить предмет"""
-    success, msg = player.buy_item(item_name)
+    from handlers.quests import track_quest_shop_buy
+    shop_data = get_shop_cache_data(user_id)
+    merchant_id = shop_data.get("merchant")
+    if not merchant_id:
+        vk.messages.send(
+            user_id=user_id,
+            message="❌ Сначала открой витрину магазина (раздел с товарами), затем покупай.",
+            random_id=0
+        )
+        return
+
+    offered_items = []
+    for key in ("weapons", "armor", "scientist", "artifacts"):
+        offered_items.extend(shop_data.get(key, []))
+
+    if merchant_id and offered_items:
+        if not any(str(i.get("name", "")).lower() == item_name.lower() for i in offered_items):
+            vk.messages.send(
+                user_id=user_id,
+                message="❌ Этого товара нет в текущей витрине. Открой раздел магазина заново.",
+                random_id=0
+            )
+            return
+
+    success, msg = player.buy_item(item_name, merchant_id=merchant_id)
+    if success:
+        track_quest_shop_buy(user_id)
     vk.messages.send(user_id=user_id, message=msg, random_id=0)
 
 
 def handle_sell_item(player, item_name: str, vk, user_id: int):
     """Продать предмет"""
-    success, msg = player.sell_item(item_name)
+    from handlers.quests import track_quest_shop_sell
+    shop_data = get_shop_cache_data(user_id)
+    merchant_id = shop_data.get("merchant")
+    if not merchant_id:
+        if player.current_location_id == 'кпп':
+            merchant_id = database.NPC_MERCHANT_SOLDIER
+        elif player.current_location_id == 'черный рынок':
+            merchant_id = database.NPC_MERCHANT_TRADER
+    success, msg = player.sell_item(item_name, merchant_id=merchant_id)
+    if success:
+        track_quest_shop_sell(user_id)
     vk.messages.send(user_id=user_id, message=msg, random_id=0)
 
 
@@ -967,12 +1003,7 @@ def _get_shop_items_by_number(user_id: int, category: str, number: int) -> str |
     """Получить название предмета по номеру в магазине"""
     with _shop_cache_lock:
         if user_id not in _shop_cache:
-            _shop_cache[user_id] = {}
-
-        if category not in _shop_cache[user_id]:
-            items = database.get_items_by_category(category)
-            _shop_cache[user_id][category] = items
-
+            return None
         items = _shop_cache[user_id].get(category, [])
 
     if 1 <= number <= len(items):
@@ -1020,12 +1051,18 @@ def show_soldier_weapons(player, vk, user_id: int):
             except:
                 pass
 
-        # Используем кэш предметов из database
-        all_weapons = database.get_items_by_category('weapons')
-        # Ограничиваем до 10 предметов (VK лимит)
-        weapons = all_weapons[:10]
-        logger.info(f"[SOLDIER_SHOP] Загружено оружия: {len(weapons)} из {len(all_weapons)}")
-        set_shop_cache_data(user_id, {'weapons': weapons})
+        shop = database.get_npc_shop_assortment(
+            database.NPC_MERCHANT_SOLDIER,
+            category='weapons',
+            limit=10,
+        )
+        weapons = shop.get("items", [])
+        logger.info(f"[SOLDIER_SHOP] Загружено оружия в витрине: {len(weapons)}")
+        set_shop_cache_data(user_id, {
+            'merchant': database.NPC_MERCHANT_SOLDIER,
+            'weapons': weapons,
+            'period_key': shop.get("period_key"),
+        })
 
         if not weapons:
             vk.messages.send(
@@ -1038,18 +1075,29 @@ def show_soldier_weapons(player, vk, user_id: int):
 
         msg = "🎖️ВОЕННЫЙ СКЛАД — ОРУЖИЕ\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        event_text = shop.get("event_text")
+        if event_text:
+            msg += f"📣 {event_text}\n\n"
 
         for idx, weapon in enumerate(weapons, 1):
             name = weapon['name']
             price = weapon.get('price', 0)
+            base_price = weapon.get('base_price', price)
             attack = weapon.get('attack', 0)
             weight = weapon.get('weight', 1.0)
             desc = weapon.get('description', '')[:40]
+            stock_left = weapon.get('stock_left', 0)
+            is_featured = weapon.get('is_featured', False)
+            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
 
-            msg += f"{idx}. {name}\n"
+            msg += f"{idx}. {name}{featured}\n"
             msg += f"   🔫 Урон: {attack} | Вес: {weight}кг\n"
             msg += f"   📝 {desc}\n"
-            msg += f"   💵 Цена: {price} руб.\n\n"
+            if is_featured and base_price != price:
+                msg += f"   💵 Цена: {price} руб. (было {base_price})\n"
+            else:
+                msg += f"   💵 Цена: {price} руб.\n"
+            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'"
 
@@ -1099,12 +1147,18 @@ def show_soldier_armor(player, vk, user_id: int):
             except:
                 pass
 
-        # Используем кэш предметов из database
-        all_armor = database.get_items_by_category('armor')
-        # Ограничиваем до 10 предметов (VK лимит)
-        armor_list = all_armor[:10]
-        logger.info(f"[SOLDIER_SHOP] Загружено брони: {len(armor_list)} из {len(all_armor)}")
-        set_shop_cache_data(user_id, {'armor': armor_list})
+        shop = database.get_npc_shop_assortment(
+            database.NPC_MERCHANT_SOLDIER,
+            category='armor',
+            limit=10,
+        )
+        armor_list = shop.get("items", [])
+        logger.info(f"[SOLDIER_SHOP] Загружено брони в витрине: {len(armor_list)}")
+        set_shop_cache_data(user_id, {
+            'merchant': database.NPC_MERCHANT_SOLDIER,
+            'armor': armor_list,
+            'period_key': shop.get("period_key"),
+        })
 
         if not armor_list:
             vk.messages.send(
@@ -1117,18 +1171,29 @@ def show_soldier_armor(player, vk, user_id: int):
 
         msg = "🎖️ВОЕННЫЙ СКЛАД — БРОНЯ\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        event_text = shop.get("event_text")
+        if event_text:
+            msg += f"📣 {event_text}\n\n"
 
         for idx, armor in enumerate(armor_list, 1):
             name = armor['name']
             price = armor.get('price', 0)
+            base_price = armor.get('base_price', price)
             defense = armor.get('defense', 0)
             weight = armor.get('weight', 1.0)
             desc = armor.get('description', '')[:40]
+            stock_left = armor.get('stock_left', 0)
+            is_featured = armor.get('is_featured', False)
+            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
 
-            msg += f"{idx}. {name}\n"
+            msg += f"{idx}. {name}{featured}\n"
             msg += f"   🛡️ Защита: {defense} | Вес: {weight}кг\n"
             msg += f"   📝 {desc}\n"
-            msg += f"   💵 Цена: {price} руб.\n\n"
+            if is_featured and base_price != price:
+                msg += f"   💵 Цена: {price} руб. (было {base_price})\n"
+            else:
+                msg += f"   💵 Цена: {price} руб.\n"
+            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'"
 
@@ -1190,14 +1255,29 @@ def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
 
         # Получаем категорию meds или food
         if category == 'meds':
-            items = database.get_items_by_category('meds')[:10]
+            shop = database.get_npc_shop_assortment(
+                database.NPC_MERCHANT_SCIENTIST,
+                category='meds',
+                limit=10,
+            )
+            items = shop.get("items", [])
             title = "ЛЕКАРСТВА"
         else:
-            items = database.get_items_by_category('food')[:10]
+            shop = database.get_npc_shop_assortment(
+                database.NPC_MERCHANT_SCIENTIST,
+                category='food',
+                limit=10,
+            )
+            items = shop.get("items", [])
             title = "ЭНЕРГЕТИКИ"
 
         logger.info(f"[SCIENTIST_SHOP] Категория consumables: {len(items)} предметов")
-        set_shop_cache_data(user_id, {'scientist': items, 'category': category})
+        set_shop_cache_data(user_id, {
+            'merchant': database.NPC_MERCHANT_SCIENTIST,
+            'scientist': items,
+            'category': category,
+            'period_key': shop.get("period_key"),
+        })
 
         if not items:
             vk.messages.send(
@@ -1210,15 +1290,26 @@ def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
 
         msg = f"🔬ЛАБОРАТОРИЯ — {title}\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        event_text = shop.get("event_text")
+        if event_text:
+            msg += f"📣 {event_text}\n\n"
 
         for idx, item in enumerate(items, 1):
             name = item['name']
             price = item.get('price', 0)
+            base_price = item.get('base_price', price)
             weight = item.get('weight', 0.1)
             desc = item.get('description', '')[:35]
-            msg += f"{idx}. {name}\n"
+            stock_left = item.get('stock_left', 0)
+            is_featured = item.get('is_featured', False)
+            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
+            msg += f"{idx}. {name}{featured}\n"
             msg += f"   📝 {desc}\n"
-            msg += f"   💵 Цена: {price} руб. | Вес: {weight}кг\n\n"
+            if is_featured and base_price != price:
+                msg += f"   💵 Цена: {price} руб. (было {base_price}) | Вес: {weight}кг\n"
+            else:
+                msg += f"   💵 Цена: {price} руб. | Вес: {weight}кг\n"
+            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'\n"
         msg += "\nНажми 'Назад' для выбора категории"
@@ -1275,7 +1366,13 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
 
         # Получаем категорию и название
         rarity_key, title = rarity_map.get(rarity, ('common', 'ОБЫЧНЫЕ'))
-        items = database.get_artifacts_by_rarity(rarity_key)[:10]
+        shop = database.get_npc_shop_assortment(
+            database.NPC_MERCHANT_TRADER,
+            category='artifacts',
+            limit=10,
+            rarity=rarity_key,
+        )
+        items = shop.get("items", [])
 
         if not items:
             vk.messages.send(
@@ -1286,16 +1383,28 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
             )
             return
 
-        set_shop_cache_data(user_id, {'artifacts': items, 'rarity': rarity})
+        set_shop_cache_data(user_id, {
+            'merchant': database.NPC_MERCHANT_TRADER,
+            'artifacts': items,
+            'rarity': rarity,
+            'period_key': shop.get("period_key"),
+        })
 
         msg = f"🔮АРТЕФАКТЫ — {title}\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        event_text = shop.get("event_text")
+        if event_text:
+            msg += f"📣 {event_text}\n\n"
 
         for idx, item in enumerate(items, 1):
             name = item['name']
             price = item.get('price', 0)
+            base_price = item.get('base_price', price)
             weight = item.get('weight', 0.1)
             desc = item.get('description', '')[:35]
+            stock_left = item.get('stock_left', 0)
+            is_featured = item.get('is_featured', False)
+            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
 
             # Показываем бонусы
             bonuses = []
@@ -1314,9 +1423,13 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
 
             bonus_str = f" ({', '.join(bonuses)})" if bonuses else ""
 
-            msg += f"{idx}. {name}{bonus_str}\n"
+            msg += f"{idx}. {name}{bonus_str}{featured}\n"
             msg += f"   📝 {desc}\n"
-            msg += f"   💵 Цена: {price} руб. | Вес: {weight}кг\n\n"
+            if is_featured and base_price != price:
+                msg += f"   💵 Цена: {price} руб. (было {base_price}) | Вес: {weight}кг\n"
+            else:
+                msg += f"   💵 Цена: {price} руб. | Вес: {weight}кг\n"
+            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'\n"
         msg += "\nНажми 'Назад' для выбора редкости"
@@ -1355,25 +1468,35 @@ def show_sell_artifacts(player, vk, user_id: int):
             return
 
         # Сохраняем в кэш для продажи по номеру
-        set_shop_cache_data(user_id, {'sell_artifacts': artifacts})
+        set_shop_cache_data(user_id, {
+            'merchant': database.NPC_MERCHANT_TRADER,
+            'sell_artifacts': artifacts,
+        })
 
         msg = "💰ПРОДАЖА АРТЕФАКТОВ\n\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        event_text = database.get_shop_event_text(database.NPC_MERCHANT_TRADER)
+        if event_text:
+            msg += f"📣 {event_text}\n\n"
 
         for idx, art in enumerate(artifacts, 1):
             name = art['name']
-            item_info = database.get_item_by_name(name)
-            base_price = item_info.get('price', 100) // 2 if item_info else 50
+            price_preview = database.get_npc_sell_price_preview(
+                name,
+                merchant_id=database.NPC_MERCHANT_TRADER,
+                sell_bonus_pct=player.sell_bonus,
+            )
+            base_price = price_preview["sell_price"] if price_preview else 50
             weight = art.get('weight', 0.1)
 
             bonuses = []
-            if item_info:
-                if item_info.get('crit_bonus'):
-                    bonuses.append(f"крит:+{item_info['crit_bonus']}%")
-                if item_info.get('find_bonus'):
-                    bonuses.append(f"находка:+{item_info['find_bonus']}%")
-                if item_info.get('radiation'):
-                    bonuses.append(f"рад:{item_info['radiation']}")
+            item_info = database.get_item_by_name(name)
+            if item_info and item_info.get('crit_bonus'):
+                bonuses.append(f"крит:+{item_info['crit_bonus']}%")
+            if item_info and item_info.get('find_bonus'):
+                bonuses.append(f"находка:+{item_info['find_bonus']}%")
+            if item_info and item_info.get('radiation'):
+                bonuses.append(f"рад:{item_info['radiation']}")
 
             bonus_str = f" ({', '.join(bonuses)})" if bonuses else ""
             msg += f"{idx}. {name}{bonus_str}\n"
@@ -1464,20 +1587,15 @@ def handle_sell_artifact(player, artifact_name: str, vk, user_id: int) -> bool:
             )
             return True
 
-        base_price = item_info.get('price', 100) // 2
-        # sell_bonus — это процент бонуса (напр. 15 = +15%), формула: base * (1 + bonus/100)
-        sell_price = int(base_price * (1 + player.sell_bonus / 100))
-
         # Продаем
-        success, msg = player.sell_item(artifact_name)
+        success, msg = player.sell_item(artifact_name, merchant_id=database.NPC_MERCHANT_TRADER)
 
         if success:
+            from handlers.quests import track_quest_shop_sell
+            track_quest_shop_sell(user_id)
             vk.messages.send(
                 user_id=user_id,
-                message=f"💰Артефакт продан!\n\n"
-                        f"🔮 {artifact_name}\n"
-                        f"💵 Получено: {sell_price} руб.\n\n"
-                        f"💰 Баланс: {player.money} руб.",
+                message=f"💰Артефакт продан!\n\n🔮 {artifact_name}\n{msg}",
                 random_id=0
             )
 
@@ -1579,9 +1697,11 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
             return True
 
         # Покупаем
-        success, msg = player.buy_item(artifact_name)
+        success, msg = player.buy_item(artifact_name, merchant_id=database.NPC_MERCHANT_TRADER)
 
         if success:
+            from handlers.quests import track_quest_shop_buy
+            track_quest_shop_buy(user_id)
             player.inventory.reload()
 
             vk.messages.send(

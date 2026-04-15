@@ -1028,7 +1028,7 @@ class Player:
 
         return True, msg
 
-    def buy_item(self, item_name: str) -> tuple[bool, str]:
+    def buy_item(self, item_name: str, merchant_id: str | None = None) -> tuple[bool, str]:
         """Купить предмет у торговца"""
         import database as db
 
@@ -1047,7 +1047,7 @@ class Player:
         if current_weight + weight > self.max_weight:
             return False, f"Не хватает места в рюкзаке. Вес: {current_weight}/{self.max_weight}кг"
 
-        result = db.buy_item_transaction(self.user_id, item_name)
+        result = db.buy_item_transaction(self.user_id, item_name, merchant_id=merchant_id)
         if not result.get('success'):
             return False, result.get('message', 'Ошибка покупки.')
 
@@ -1055,9 +1055,10 @@ class Player:
 
         self.inventory.reload()
 
-        return True, f"Ты купил {item_name} за {price} руб.\nОсталось денег: {self.money} руб."
+        paid_price = result.get('price', price)
+        return True, f"Ты купил {item_name} за {paid_price} руб.\nОсталось денег: {self.money} руб."
 
-    def sell_item(self, item_name: str) -> tuple[bool, str]:
+    def sell_item(self, item_name: str, merchant_id: str | None = None) -> tuple[bool, str]:
         """Продать предмет торговцу"""
         import database as db
 
@@ -1080,7 +1081,8 @@ class Player:
         result = db.sell_item_transaction(
             self.user_id,
             item['name'],
-            sell_bonus_pct=sell_bonus
+            sell_bonus_pct=sell_bonus,
+            merchant_id=merchant_id,
         )
         if not result.get('success'):
             return False, result.get('message', 'Ошибка продажи.')
@@ -1090,8 +1092,7 @@ class Player:
 
         self.inventory.reload()
 
-        bonus_msg = f" (+{sell_bonus}% бонус)" if sell_bonus > 0 else ""
-        return True, f"Ты продал {item_name} за {sell_price} руб.{bonus_msg}\nДенег: {self.money} руб."
+        return True, f"Ты продал {item_name} за {sell_price} руб.\nДенег: {self.money} руб."
 
     def get_shop_items(self, category: str = None) -> list[dict]:
         """Получить список предметов в магазине"""

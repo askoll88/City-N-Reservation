@@ -488,8 +488,13 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
 
     stage = dialog_info.get("stage", "")
 
+    try:
+        num = int(item_num)
+    except ValueError:
+        return False
+
     if stage == "shop_weapons":
-        item_name = _get_shop_items_by_number(user_id, 'weapons', item_num)
+        item_name = _get_shop_items_by_number(user_id, 'weapons', num)
         if item_name:
             handle_buy_item(player, item_name, vk, user_id)
             return True
@@ -497,7 +502,7 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
             vk.messages.send(user_id=user_id, message="Нет предмета с таким номером.", random_id=0)
             return True
     elif stage == "shop_armor":
-        item_name = _get_shop_items_by_number(user_id, 'armor', item_num)
+        item_name = _get_shop_items_by_number(user_id, 'armor', num)
         if item_name:
             handle_buy_item(player, item_name, vk, user_id)
             return True

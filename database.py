@@ -6,8 +6,10 @@ from __future__ import annotations
 import logging
 import math
 import os
+import random
 import threading
 import time
+import hashlib
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -259,6 +261,21 @@ def init_db():
             )
         """)
 
+        # -- npc_shop_stock -----------------------------------------------
+        # Сток витрин NPC по периодам ротации.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS npc_shop_stock (
+                period_key    VARCHAR(32)  NOT NULL,
+                merchant_id   VARCHAR(30)  NOT NULL,
+                item_id       INTEGER      NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                stock_total   INTEGER      NOT NULL DEFAULT 0,
+                stock_left    INTEGER      NOT NULL DEFAULT 0,
+                is_featured   BOOLEAN      NOT NULL DEFAULT FALSE,
+                updated_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (period_key, merchant_id, item_id)
+            )
+        """)
+
         # -- Индексы --------------------------------------------------------
         for ddl in [
             "CREATE INDEX IF NOT EXISTS idx_users_vk_id          ON users(vk_id)",
@@ -271,6 +288,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_market_listings_seller ON market_listings(seller_vk_id)",
             "CREATE INDEX IF NOT EXISTS idx_market_trx_buyer       ON market_transactions(buyer_vk_id)",
             "CREATE INDEX IF NOT EXISTS idx_market_trx_seller      ON market_transactions(seller_vk_id)",
+            "CREATE INDEX IF NOT EXISTS idx_npc_shop_stock_merchant_period ON npc_shop_stock(merchant_id, period_key)",
         ]:
             cursor.execute(ddl)
 
@@ -1028,107 +1046,442 @@ def drop_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> d
 
 
 # ---------------------------------------------------------------------------
+# NPC магазины (не P2P): ротация, редкий товар, сток, ивенты скупки
+# ---------------------------------------------------------------------------
+
+NPC_MERCHANT_SOLDIER = "soldier"
+NPC_MERCHANT_SCIENTIST = "scientist"
+NPC_MERCHANT_TRADER = "trader"
+
+_NPC_SHOPS = {
+    NPC_MERCHANT_SOLDIER: {"categories": ("weapons", "armor")},
+    NPC_MERCHANT_SCIENTIST: {"categories": ("meds", "food")},
+    NPC_MERCHANT_TRADER: {"categories": ("artifacts",)},
+}
+
+_SHOP_EVENT_POOL = [
+    {
+        "id": "soldier_artifacts",
+        "merchant_id": NPC_MERCHANT_SOLDIER,
+        "categories": ("artifacts",),
+        "sell_bonus_pct": 20,
+        "title": "Сегодня военный принимает артефакты дороже (+20%).",
+    },
+    {
+        "id": "scientist_meds",
+        "merchant_id": NPC_MERCHANT_SCIENTIST,
+        "categories": ("meds",),
+        "sell_bonus_pct": 20,
+        "title": "Сегодня учёный скупает медикаменты по повышенной цене (+20%).",
+    },
+    {
+        "id": "trader_artifacts",
+        "merchant_id": NPC_MERCHANT_TRADER,
+        "categories": ("artifacts",),
+        "sell_bonus_pct": 20,
+        "title": "Сегодня барыга берёт артефакты по повышенной цене (+20%).",
+    },
+]
+
+
+def _clamp(value: float, floor_value: float, ceil_value: float) -> float:
+    return max(floor_value, min(ceil_value, value))
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _get_shop_period_start(now_utc: datetime | None = None) -> datetime:
+    now_utc = now_utc or _utc_now()
+    rotation = max(1, int(config.SHOP_ROTATION_HOURS))
+    slot_hour = (now_utc.hour // rotation) * rotation
+    return now_utc.replace(hour=slot_hour, minute=0, second=0, microsecond=0)
+
+
+def _get_shop_period_key(now_utc: datetime | None = None) -> str:
+    return _get_shop_period_start(now_utc).strftime("%Y%m%d%H")
+
+
+def _seed_int(seed: str) -> int:
+    return int(hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16], 16)
+
+
+def _get_active_shop_event(now_utc: datetime | None = None) -> dict:
+    now_utc = now_utc or _utc_now()
+    day_key = now_utc.strftime("%Y-%m-%d")
+    idx = _seed_int(f"shop_event:{day_key}") % len(_SHOP_EVENT_POOL)
+    return _SHOP_EVENT_POOL[idx]
+
+
+def get_shop_event_text(merchant_id: str | None = None) -> str:
+    event = _get_active_shop_event()
+    if merchant_id and event["merchant_id"] != merchant_id:
+        return ""
+    return event["title"]
+
+
+def _get_sell_event_bonus_pct(merchant_id: str | None, item_category: str | None) -> int:
+    if not merchant_id or not item_category:
+        return 0
+    event = _get_active_shop_event()
+    if event["merchant_id"] != merchant_id:
+        return 0
+    if item_category not in event["categories"]:
+        return 0
+    return int(event["sell_bonus_pct"])
+
+
+def _get_shop_candidates(merchant_id: str, category: str | None = None, rarity: str | None = None) -> list[dict]:
+    shop_info = _NPC_SHOPS.get(merchant_id, {})
+    allowed_categories = set(shop_info.get("categories", ()))
+    if category and category not in allowed_categories:
+        return []
+
+    _, by_cat, _ = _get_cached_items()
+
+    categories = [category] if category else list(allowed_categories)
+    result: list[dict] = []
+    seen_names: set[str] = set()
+
+    for cat in categories:
+        for row in by_cat.get(cat, []):
+            name = row.get("name")
+            if not name or name in seen_names:
+                continue
+            if rarity and (row.get("rarity") or "common").lower() != rarity.lower():
+                continue
+            result.append(dict(row))
+            seen_names.add(name)
+    return result
+
+
+def _pick_featured_item(merchant_id: str, candidates: list[dict], now_utc: datetime | None = None) -> dict | None:
+    if not candidates:
+        return None
+    now_utc = now_utc or _utc_now()
+    day_key = now_utc.strftime("%Y-%m-%d")
+    eligible = [c for c in candidates if (c.get("rarity") or "common").lower() in {"rare", "unique", "legendary"}]
+    if not eligible:
+        eligible = sorted(candidates, key=lambda x: int(x.get("price") or 0), reverse=True)[:max(1, len(candidates) // 3)]
+    eligible = sorted(eligible, key=lambda x: (x.get("name") or ""))
+    idx = _seed_int(f"shop_featured:{merchant_id}:{day_key}") % len(eligible)
+    return eligible[idx]
+
+
+def _initial_shop_stock(item: dict, is_featured: bool = False) -> int:
+    rarity = (item.get("rarity") or "common").lower()
+    if rarity == "legendary":
+        stock = config.SHOP_STOCK_LEGENDARY
+    elif rarity == "unique":
+        stock = config.SHOP_STOCK_UNIQUE
+    elif rarity == "rare":
+        stock = config.SHOP_STOCK_RARE
+    else:
+        stock = config.SHOP_STOCK_DEFAULT
+    if is_featured:
+        stock += 1
+    return max(1, int(stock))
+
+
+def _ensure_shop_stock_rows_tx(cursor, period_key: str, merchant_id: str, items: list[dict], featured_item_id: int | None):
+    for item in items:
+        item_id = int(item["id"])
+        is_featured = (featured_item_id is not None and item_id == featured_item_id)
+        stock_total = _initial_shop_stock(item, is_featured=is_featured)
+        cursor.execute(
+            """
+            INSERT INTO npc_shop_stock (period_key, merchant_id, item_id, stock_total, stock_left, is_featured, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (period_key, merchant_id, item_id) DO NOTHING
+            """,
+            (period_key, merchant_id, item_id, stock_total, stock_total, is_featured),
+        )
+
+
+def _calc_shop_buy_price(base_price: int, is_featured: bool = False) -> tuple[int, int]:
+    mult = 1.0
+    if is_featured:
+        mult -= max(0, int(config.SHOP_FEATURED_DISCOUNT_PCT)) / 100.0
+    mult = _clamp(mult, config.SHOP_BUY_MULT_FLOOR, config.SHOP_BUY_MULT_CEIL)
+    return max(1, int(base_price * mult)), int(round((1.0 - mult) * 100))
+
+
+def get_npc_shop_assortment(
+    merchant_id: str,
+    category: str | None = None,
+    limit: int = 10,
+    rarity: str | None = None,
+) -> dict:
+    """
+    Получить текущую витрину NPC магазина:
+    ротация по часу, редкий товар дня и ограниченный сток.
+    """
+    candidates = _get_shop_candidates(merchant_id, category=category, rarity=rarity)
+    if not candidates:
+        return {"items": [], "period_key": _get_shop_period_key(), "event_text": get_shop_event_text(merchant_id)}
+
+    now_utc = _utc_now()
+    period_key = _get_shop_period_key(now_utc)
+    featured_item = _pick_featured_item(merchant_id, _get_shop_candidates(merchant_id), now_utc=now_utc)
+    featured_item_id = int(featured_item["id"]) if featured_item else None
+
+    rng = random.Random(_seed_int(f"shop_rotate:{merchant_id}:{category or 'all'}:{rarity or 'all'}:{period_key}"))
+    ordered = list(candidates)
+    rng.shuffle(ordered)
+
+    picked = ordered[: max(1, int(limit))]
+    if featured_item_id is not None and all(int(i["id"]) != featured_item_id for i in picked):
+        featured_in_scope = next((i for i in candidates if int(i["id"]) == featured_item_id), None)
+        if featured_in_scope:
+            if len(picked) >= limit:
+                picked[-1] = featured_in_scope
+            else:
+                picked.append(featured_in_scope)
+
+    with db_cursor() as (cursor, _):
+        _ensure_shop_stock_rows_tx(cursor, period_key, merchant_id, picked, featured_item_id)
+        item_ids = [int(i["id"]) for i in picked]
+        cursor.execute(
+            """
+            SELECT item_id, stock_left, is_featured
+            FROM npc_shop_stock
+            WHERE period_key = %s AND merchant_id = %s AND item_id = ANY(%s)
+            """,
+            (period_key, merchant_id, item_ids),
+        )
+        stock_rows = {int(r["item_id"]): dict(r) for r in cursor.fetchall()}
+
+    result_items = []
+    for item in picked:
+        item_id = int(item["id"])
+        stock = stock_rows.get(item_id, {})
+        stock_left = int(stock.get("stock_left", 0))
+        is_featured = bool(stock.get("is_featured", False))
+        dynamic_price, discount_pct = _calc_shop_buy_price(int(item.get("price") or 0), is_featured=is_featured)
+        row = dict(item)
+        row["base_price"] = int(item.get("price") or 0)
+        row["price"] = dynamic_price
+        row["stock_left"] = stock_left
+        row["is_featured"] = is_featured
+        row["discount_pct"] = max(0, discount_pct)
+        result_items.append(row)
+
+    return {
+        "items": result_items,
+        "period_key": period_key,
+        "event_text": get_shop_event_text(merchant_id),
+    }
+
+
+def get_npc_sell_price_preview(item_name: str, merchant_id: str | None, sell_bonus_pct: int = 0) -> dict | None:
+    item = get_item_by_name(item_name)
+    if not item:
+        return None
+    base_price = int(item.get("price") or 0) // 2
+    event_bonus = _get_sell_event_bonus_pct(merchant_id, (item.get("category") or "").lower())
+    total_mult = 1.0 + (sell_bonus_pct + event_bonus) / 100.0
+    total_mult = _clamp(total_mult, config.SHOP_SELL_MULT_FLOOR, config.SHOP_SELL_MULT_CEIL)
+    return {
+        "base_price": base_price,
+        "sell_price": max(1, int(base_price * total_mult)),
+        "event_bonus_pct": event_bonus,
+        "total_mult": total_mult,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Атомарные операции покупки / продажи
 # ---------------------------------------------------------------------------
 
-def buy_item_transaction(vk_id: int, item_name: str) -> dict:
+def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = None) -> dict:
     """
     Купить предмет. Атомарно: деньги списываются и предмет добавляется
     в одной транзакции — нельзя потерять деньги без предмета.
     Возвращает {"success": bool, "message": str, "price": int}
     """
     with db_cursor() as (cursor, _):
-        cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
-        item = cursor.fetchone()
-        if not item:
+        cursor.execute("SELECT * FROM items WHERE name = %s", (item_name,))
+        item_row = cursor.fetchone()
+        if not item_row:
             return {"success": False, "message": f"Предмет '{item_name}' не найден"}
+        item_data = dict(item_row)
 
-        cursor.execute("SELECT * FROM items WHERE id = %s", (item["id"],))
-        item_data = dict(cursor.fetchone())
-        price = item_data["price"]
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден"}
 
-        # Списываем деньги с проверкой баланса в одном запросе
-        cursor.execute("""
-            UPDATE users SET money = money - %s
-            WHERE vk_id = %s AND money >= %s
-            RETURNING id, money
-        """, (price, vk_id, price))
-        result = cursor.fetchone()
-        if not result:
-            cursor.execute("SELECT money FROM users WHERE vk_id = %s", (vk_id,))
-            balance = cursor.fetchone()
-            have = balance["money"] if balance else 0
+        is_featured = False
+        stock_left_after = None
+        period_key = None
+
+        if merchant_id:
+            period_key = _get_shop_period_key()
+            cursor.execute(
+                """
+                SELECT stock_left, is_featured
+                FROM npc_shop_stock
+                WHERE period_key = %s AND merchant_id = %s AND item_id = %s
+                FOR UPDATE
+                """,
+                (period_key, merchant_id, item_data["id"]),
+            )
+            stock_row = cursor.fetchone()
+            if not stock_row:
+                return {
+                    "success": False,
+                    "message": "Ассортимент обновился. Сначала открой витрину магазина заново.",
+                }
+            if int(stock_row["stock_left"]) <= 0:
+                return {"success": False, "message": "Товар закончился. Жди следующую ротацию витрины."}
+            is_featured = bool(stock_row["is_featured"])
+
+        price, _ = _calc_shop_buy_price(int(item_data.get("price") or 0), is_featured=is_featured)
+        have = int(user.get("money") or 0)
+        if have < price:
             return {
                 "success": False,
                 "message": f"Не хватает денег. Нужно {price} руб., у тебя {have} руб.",
             }
 
-        user_id = result["id"]
+        cursor.execute(
+            """
+            UPDATE users
+            SET money = money - %s
+            WHERE id = %s
+            RETURNING money
+            """,
+            (price, user["id"]),
+        )
+        new_balance = int(cursor.fetchone()["money"])
 
-        # Добавляем предмет
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO user_inventory (user_id, item_id, quantity)
             VALUES (%s, %s, 1)
             ON CONFLICT (user_id, item_id)
             DO UPDATE SET quantity = user_inventory.quantity + 1
-        """, (user_id, item_data["id"]))
+            """,
+            (user["id"], item_data["id"]),
+        )
 
-    return {
-        "success": True,
-        "message": f"Ты купил {item_name} за {price} руб.",
-        "price": price,
-        "remaining_money": result["money"],
-    }
+        if merchant_id:
+            cursor.execute(
+                """
+                UPDATE npc_shop_stock
+                SET stock_left = stock_left - 1, updated_at = NOW()
+                WHERE period_key = %s AND merchant_id = %s AND item_id = %s AND stock_left > 0
+                RETURNING stock_left
+                """,
+                (period_key, merchant_id, item_data["id"]),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {"success": False, "message": "Товар только что закончился. Попробуй другой предмет."}
+            stock_left_after = int(row["stock_left"])
+
+    msg = f"Ты купил {item_name} за {price} руб."
+    if stock_left_after is not None:
+        msg += f"\nОстаток на витрине: {stock_left_after} шт."
+    return {"success": True, "message": msg, "price": price, "remaining_money": new_balance}
 
 
-def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0) -> dict:
+def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, merchant_id: str | None = None) -> dict:
     """
     Продать предмет. Атомарно: предмет убирается и деньги зачисляются
     в одной транзакции.
     sell_bonus_pct — бонус к цене от пассивных навыков класса (в процентах).
     """
     with db_cursor() as (cursor, _):
-        cursor.execute("""
-            SELECT i.id, i.price
+        cursor.execute(
+            """
+            SELECT i.id, i.price, i.category
             FROM items i
             WHERE i.name = %s
-        """, (item_name,))
+            """,
+            (item_name,),
+        )
         item = cursor.fetchone()
         if not item:
             return {"success": False, "message": f"Предмет '{item_name}' не найден"}
 
-        base_price = item["price"] // 2
-        sell_price = int(base_price * (1 + sell_bonus_pct / 100))
-
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден"}
 
-        # Убираем предмет (проверяем что он есть)
-        cursor.execute("""
+        cursor.execute(
+            """
+            SELECT quantity
+            FROM user_inventory
+            WHERE user_id = %s AND item_id = %s
+            FOR UPDATE
+            """,
+            (user["id"], item["id"]),
+        )
+        inv_row = cursor.fetchone()
+        if not inv_row or int(inv_row["quantity"]) < 1:
+            return {"success": False, "message": f"У тебя нет '{item_name}'"}
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM user_equipment
+            WHERE user_id = %s AND item_name = %s
+            """,
+            (user["id"], item_name),
+        )
+        equipped_cnt = int((cursor.fetchone() or {}).get("cnt", 0))
+        if equipped_cnt > 0 and int(inv_row["quantity"]) <= equipped_cnt:
+            return {
+                "success": False,
+                "message": f"Нельзя продать надетый предмет '{item_name}'. Сначала сними его.",
+            }
+
+        base_price = int(item["price"]) // 2
+        event_bonus_pct = _get_sell_event_bonus_pct(merchant_id, (item.get("category") or "").lower())
+        total_mult = 1.0 + (sell_bonus_pct + event_bonus_pct) / 100.0
+        total_mult = _clamp(total_mult, config.SHOP_SELL_MULT_FLOOR, config.SHOP_SELL_MULT_CEIL)
+        sell_price = max(1, int(base_price * total_mult))
+
+        cursor.execute(
+            """
             UPDATE user_inventory
             SET quantity = quantity - 1
             WHERE user_id = %s AND item_id = %s AND quantity >= 1
             RETURNING quantity
-        """, (user["id"], item["id"]))
+            """,
+            (user["id"], item["id"]),
+        )
         if not cursor.fetchone():
             return {"success": False, "message": f"У тебя нет '{item_name}'"}
 
-        cursor.execute("""
+        cursor.execute(
+            """
             DELETE FROM user_inventory
             WHERE user_id = %s AND item_id = %s AND quantity <= 0
-        """, (user["id"], item["id"]))
+            """,
+            (user["id"], item["id"]),
+        )
 
-        # Зачисляем деньги
-        cursor.execute("""
-            UPDATE users SET money = money + %s
+        cursor.execute(
+            """
+            UPDATE users
+            SET money = money + %s
             WHERE vk_id = %s
             RETURNING money
-        """, (sell_price, vk_id))
-        new_balance = cursor.fetchone()["money"]
+            """,
+            (sell_price, vk_id),
+        )
+        new_balance = int(cursor.fetchone()["money"])
 
-    bonus_msg = f" (+{sell_bonus_pct}% бонус)" if sell_bonus_pct else ""
+    bonuses = []
+    if sell_bonus_pct:
+        bonuses.append(f"+{sell_bonus_pct}% класс")
+    if event_bonus_pct:
+        bonuses.append(f"+{event_bonus_pct}% ивент")
+    bonus_msg = f" ({', '.join(bonuses)})" if bonuses else ""
     return {
         "success": True,
         "message": f"Ты продал {item_name} за {sell_price} руб.{bonus_msg}",

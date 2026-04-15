@@ -72,6 +72,7 @@ _research_state = LockedDict()  # {user_id: research_data}
 _anomaly_state = LockedDict()  # {user_id: anomaly_data}
 _pending_purchase_state = LockedDict()  # {user_id: purchase_data}
 _travel_state = LockedDict()  # {user_id: travel_data}
+_ui_state = LockedDict()  # {user_id: {"current": dict, "stack": [dict, ...]}}
 
 # Кэш игроков
 _players_cache = {}
@@ -362,6 +363,55 @@ def clear_travel_state(user_id: int):
 def get_all_travel_states() -> list[tuple[int, dict]]:
     """Снимок всех активных перемещений."""
     return _travel_state.items()
+
+
+# === UI Навигация (стек экранов) ===
+
+def get_ui_state(user_id: int) -> dict:
+    """Получить UI-состояние пользователя."""
+    state = _ui_state.get(user_id)
+    if not state:
+        return {"current": {"name": "location"}, "stack": []}
+    return state
+
+
+def get_ui_current_screen(user_id: int) -> dict:
+    """Текущий экран интерфейса."""
+    state = get_ui_state(user_id)
+    return state.get("current", {"name": "location"})
+
+
+def set_ui_screen(user_id: int, screen: dict, push_current: bool = False, clear_stack: bool = False):
+    """Установить экран интерфейса."""
+    def updater(current):
+        current = current or {"current": {"name": "location"}, "stack": []}
+        stack = list(current.get("stack", []))
+        if clear_stack:
+            stack = []
+        if push_current:
+            prev = current.get("current")
+            if prev:
+                stack.append(prev)
+        return {"current": dict(screen or {"name": "location"}), "stack": stack}
+    _ui_state.update(user_id, updater)
+
+
+def pop_ui_screen(user_id: int) -> dict | None:
+    """Вернуться к предыдущему экрану из стека."""
+    popped = {"value": None}
+
+    def updater(current):
+        current = current or {"current": {"name": "location"}, "stack": []}
+        stack = list(current.get("stack", []))
+        if not stack:
+            popped["value"] = None
+            return current
+        prev = stack.pop()
+        popped["value"] = prev
+        return {"current": prev, "stack": stack}
+
+    _ui_state.update(user_id, updater)
+    return popped["value"]
 
 
 # === Состояние просмотра рынка (пагинация, фильтры, сортировка) ===

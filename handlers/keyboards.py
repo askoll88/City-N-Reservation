@@ -23,13 +23,21 @@ from npcs import get_npc_by_location, get_npc
 # Helper — стандартный нижний ряд (всегда одинаковый)
 # ============================================================
 
-def _add_meta_row(keyboard, show_quests=True):
-    """Добавить нижний ряд: Инвентарь | Статус | Задания"""
-    keyboard.add_button("Инвентарь", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("Статус", color=VkKeyboardColor.SECONDARY)
-    if show_quests:
-        keyboard.add_line()
-        keyboard.add_button("Задания", color=VkKeyboardColor.SECONDARY)
+def _add_meta_row(keyboard):
+    """Добавить нижний ряд: Персонаж."""
+    keyboard.add_button("Персонаж", color=VkKeyboardColor.SECONDARY)
+
+
+def create_character_keyboard():
+    """Экран персонажа: статус, инвентарь, задания."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Статус", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("Задания", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
 
 
 # ============================================================
@@ -68,12 +76,12 @@ def create_location_keyboard(location_id: str, player_level: int = None):
 
     # --- Город ---
     if location_id == "город":
-        keyboard.add_button("Больница", color=VkKeyboardColor.PRIMARY)
         keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Больница", color=VkKeyboardColor.PRIMARY)
         keyboard.add_line()
-        keyboard.add_button("Убежище", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Убежище", color=VkKeyboardColor.PRIMARY)
         if player_level is not None and player_level >= 25:
-            keyboard.add_button("Черный рынок", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_button("Черный рынок", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
         _add_meta_row(keyboard)
 

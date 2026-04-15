@@ -153,6 +153,24 @@ QUEST_POOL = [
         "flavor": "Поддержи сталкерскую экономику."
     },
     {
+        "id": "shop_buy_3",
+        "text": "Купи 3 предмета у NPC-торговцев",
+        "type": "shop_buy",
+        "target": 3,
+        "reward_xp": 140,
+        "reward_money": 180,
+        "flavor": "Запасись снаряжением перед вылазкой."
+    },
+    {
+        "id": "shop_sell_5",
+        "text": "Продай 5 предметов NPC-торговцам",
+        "type": "shop_sell",
+        "target": 5,
+        "reward_xp": 170,
+        "reward_money": 220,
+        "flavor": "Разгрузи рюкзак и подзаработай."
+    },
+    {
         "id": "talk_npc",
         "text": "Поговори с любым NPC",
         "type": "talk_npc",
