@@ -18,7 +18,7 @@ _DEFAULT_CLASSES = {
         "name": "🔫 Пистолетчик",
         "description": "Быстрый и точный боец на коротких дистанциях.",
         "weapon_type": "pistol",
-        "weapon_keywords": ["пм", "глок", "гш", "пистолет", "glock", "beretta", "pistol"],
+        "weapon_keywords": ["пм", "глок", "гш", "пистолет", "glock", "beretta", "pistol", "тт", "удав", "п-99", "п-96", "с-40п", "гроз-35"],
         "required_weapons": [],
         "active_skills": [
             {
@@ -39,7 +39,7 @@ _DEFAULT_CLASSES = {
         "name": "⚔️ Автоматчик",
         "description": "Универсальный штурмовик с упором в стабильный урон.",
         "weapon_type": "assault_rifle",
-        "weapon_keywords": ["ак", "м4", "м16", "автомат", "scar", "ar-", "rifle"],
+        "weapon_keywords": ["ак", "м4", "м16", "автомат", "scar", "ar-", "rifle", "акс", "акс-74у", "ак-101", "ак-105", "ак-12", "м4а1", "кастом"],
         "required_weapons": [],
         "active_skills": [
             {
@@ -60,7 +60,7 @@ _DEFAULT_CLASSES = {
         "name": "🎯 Снайпер",
         "description": "Максимум урона за выстрел и повышенный крит.",
         "weapon_type": "sniper",
-        "weapon_keywords": ["свд", "винтовк", "снайпер", "barrett", "awp", "sniper"],
+        "weapon_keywords": ["свд", "винтовк", "снайпер", "barrett", "awp", "sniper", "винторез", "св-98", "т-5000", "осв-96", "мосина", "вск-100", "лось-7"],
         "required_weapons": [],
         "active_skills": [
             {
@@ -81,7 +81,7 @@ _DEFAULT_CLASSES = {
         "name": "💥 Пулемётчик",
         "description": "Тяжелый боец с высоким давлением огнем.",
         "weapon_type": "machine_gun",
-        "weapon_keywords": ["пулем", "рпк", "м249", "pkm", "minigun"],
+        "weapon_keywords": ["пулем", "рпк", "м249", "pkm", "minigun", "пкм", "печенег", "м240", "корд", "рпк-16", "рпк-74"],
         "required_weapons": [],
         "active_skills": [
             {
@@ -102,7 +102,7 @@ _DEFAULT_CLASSES = {
         "name": "🏹 Дробовик",
         "description": "Крайне опасен на ближней дистанции.",
         "weapon_type": "shotgun",
-        "weapon_keywords": ["дробов", "shotgun", "remington", "saiga", "тоз", "toz"],
+        "weapon_keywords": ["дробов", "shotgun", "remington", "saiga", "тоз", "toz", "вепрь", "бекас", "иж-27", "мр-153", "сайга-12", "сайга-410", "кострома"],
         "required_weapons": [],
         "active_skills": [
             {
@@ -123,7 +123,7 @@ _DEFAULT_CLASSES = {
         "name": "🔪 Боец",
         "description": "Мастер ближнего боя и выживаемости.",
         "weapon_type": "melee",
-        "weapon_keywords": ["нож", "мачете", "топор", "финка", "knife", "machete", "dagger", "bayonet"],
+        "weapon_keywords": ["нож", "мачете", "топор", "финка", "knife", "machete", "dagger", "bayonet", "кинжал", "ятаган", "штык"],
         "required_weapons": [],
         "active_skills": [
             {
@@ -293,17 +293,17 @@ def get_class_by_weapon(weapon_name: str) -> Optional[str]:
             return class_id
 
     # 3) эвристика по типу класса (если keywords не заданы)
-    if any(k in weapon_lower for k in ("нож", "мачете", "knife", "machete", "dagger", "bayonet")):
+    if any(k in weapon_lower for k in ("нож", "мачете", "knife", "machete", "dagger", "bayonet", "кинжал", "ятаган", "штык")):
         return "боец"
-    if any(k in weapon_lower for k in ("дробов", "shotgun", "saiga", "toz")):
+    if any(k in weapon_lower for k in ("дробов", "shotgun", "saiga", "toz", "вепрь", "бекас", "иж-27", "мр-153", "сайга")):
         return "дробовик"
-    if any(k in weapon_lower for k in ("снайпер", "свд", "sniper", "awp", "винтовк")):
+    if any(k in weapon_lower for k in ("снайпер", "свд", "sniper", "awp", "винтовк", "винторез", "св-98", "т-5000", "осв-96", "мосина", "вск-100", "лось-7")):
         return "снайпер"
-    if any(k in weapon_lower for k in ("пулем", "pkm", "m249", "minigun", "рпк")):
+    if any(k in weapon_lower for k in ("пулем", "pkm", "m249", "minigun", "рпк", "пкм", "печенег", "м240", "корд")):
         return "пулемётчик"
-    if any(k in weapon_lower for k in ("пистолет", "пм", "глок", "pistol", "glock", "beretta")):
+    if any(k in weapon_lower for k in ("пистолет", "пм", "глок", "pistol", "glock", "beretta", "тт", "удав", "п-99", "п-96", "с-40п", "гроз-35")):
         return "пистолетчик"
-    if any(k in weapon_lower for k in ("автомат", "ак", "м4", "m4", "ar-", "scar", "rifle")):
+    if any(k in weapon_lower for k in ("автомат", "ак", "м4", "m4", "ar-", "scar", "rifle", "акс", "ак-101", "ак-105", "ак-12", "м4а1")):
         return "автоматчик"
 
     return None

@@ -433,12 +433,18 @@ class Player:
 
     def _get_passive_bonuses(self) -> dict:
         """Получить бонусы от пассивных навыков класса"""
-        if not self.player_class:
-            return {}
-
         try:
-            from classes import get_passive_bonuses
-            return get_passive_bonuses(self.player_class, self.level)
+            from classes import get_passive_bonuses, get_class_by_weapon
+            # Приоритет: класс по текущему оружию (фактическая роль в бою),
+            # fallback: сохранённый класс персонажа.
+            class_id = None
+            if self.equipped_weapon:
+                class_id = get_class_by_weapon(self.equipped_weapon)
+            if not class_id:
+                class_id = self.player_class
+            if not class_id:
+                return {}
+            return get_passive_bonuses(class_id, self.level)
         except Exception:
             return {}
 

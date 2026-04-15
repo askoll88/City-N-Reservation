@@ -14,6 +14,14 @@ _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "p
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
 _active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
 
+# Гарантированная аномалия: не реже 1 раза в N исследований.
+ANOMALY_GUARANTEE_RESEARCHES = 150
+ANOMALY_GUARANTEE_FLAG = "research_no_anomaly_streak"
+
+# Без детектора можно "влететь" в аномалию и потерять ресурсы.
+ANOMALY_BLIND_MISSTEP_CHANCE = 10
+ANOMALY_BLIND_ITEM_LOSS_CHANCE = 45
+
 
 # === События исследования ===
 RESEARCH_EVENTS = {
@@ -691,7 +699,13 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
     danger_mult = multiplier['danger']
 
     # Выбираем событие (с модификаторами локации)
-    event = _select_research_event_by_chance(find_chance, chance_mult, danger_mult, location_id)
+    event = _select_research_event_by_chance(
+        find_chance,
+        chance_mult,
+        danger_mult,
+        location_id,
+        user_id=user_id,
+    )
 
     # Используем полноценного Player, чтобы боевая система получала все атрибуты
     # (total_defense, dodge_chance, max_health, инициатива и т.д.).
@@ -768,9 +782,22 @@ def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk
             _combat_state_ref[user_id]["mutant_hunt"] = hunt_count
 
 
-def _select_research_event_by_chance(find_chance: float, chance_mult: float, danger_mult: float, location_id: str = None):
+def _select_research_event_by_chance(
+    find_chance: float,
+    chance_mult: float,
+    danger_mult: float,
+    location_id: str = None,
+    user_id: int | None = None,
+):
     """Выбрать событие исследования на основе шансов и модификаторов локации"""
     from location_mechanics import get_event_weights, get_find_chance_mult, get_danger_mult
+
+    no_anomaly_streak = 0
+    if user_id is not None:
+        no_anomaly_streak = int(database.get_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, 0) or 0)
+        if no_anomaly_streak >= ANOMALY_GUARANTEE_RESEARCHES - 1:
+            database.set_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, 0)
+            return "anomaly"
 
     # Применяем модификаторы локации
     loc_find_mult = get_find_chance_mult(location_id) if location_id else 1.0
@@ -782,6 +809,8 @@ def _select_research_event_by_chance(find_chance: float, chance_mult: float, dan
 
     # Проверяем, нашли ли что-то
     if random.randint(1, 100) > base_find_chance:
+        if user_id is not None:
+            database.set_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, no_anomaly_streak + 1)
         return "nothing"
 
     # Выбираем событие
@@ -820,12 +849,20 @@ def _select_research_event_by_chance(find_chance: float, chance_mult: float, dan
     rand = random.uniform(0, total_weight)
     cumulative = 0
 
+    selected = "nothing"
     for i, weight in enumerate(weights):
         cumulative += weight
         if rand <= cumulative:
-            return event_ids[i]
+            selected = event_ids[i]
+            break
 
-    return "nothing"
+    if user_id is not None:
+        if selected == "anomaly":
+            database.set_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, 0)
+        else:
+            database.set_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, no_anomaly_streak + 1)
+
+    return selected
 
 
 def _select_research_event(player, chance_mult: float, danger_mult: float):
@@ -947,6 +984,59 @@ def _handle_research_event(player, vk, user_id: int, event_id: str, time_sec: in
         return
 
 
+def _apply_blind_anomaly_loss(user_id: int, player) -> str:
+    """
+    Потери при попадании в аномалию без детектора.
+    Пытаемся списать гильзы/предмет/деньги.
+    """
+    # 1) Гильзы
+    shells = int(database.get_user_shells(user_id) or 0)
+    if shells > 0:
+        loss = min(shells, random.randint(1, 3))
+        if database.remove_shells(user_id, loss):
+            return f"🎯 Потеряно гильз: {loss}"
+
+    # 2) Случайный НЕэкипированный предмет
+    try:
+        equipped_names = {
+            getattr(player, "equipped_weapon", None),
+            getattr(player, "equipped_backpack", None),
+            getattr(player, "equipped_device", None),
+            getattr(player, "equipped_armor", None),
+            getattr(player, "equipped_armor_head", None),
+            getattr(player, "equipped_armor_body", None),
+            getattr(player, "equipped_armor_legs", None),
+            getattr(player, "equipped_armor_hands", None),
+            getattr(player, "equipped_armor_feet", None),
+        }
+        equipped_names.update(set(getattr(player, "equipped_artifacts", []) or []))
+        inv = database.get_user_inventory(user_id) or []
+        candidates = [it for it in inv if int(it.get("quantity", 0) or 0) > 0 and it.get("name") not in equipped_names]
+        if candidates and random.randint(1, 100) <= ANOMALY_BLIND_ITEM_LOSS_CHANCE:
+            lost = random.choice(candidates)
+            lost_name = str(lost.get("name") or "предмет")
+            if database.remove_item_from_inventory(user_id, lost_name, 1):
+                try:
+                    player.inventory.reload()
+                except Exception:
+                    pass
+                return f"📦 Потерян предмет: {lost_name}"
+    except Exception:
+        pass
+
+    # 3) Деньги (fallback)
+    lose_money = random.randint(50, 180)
+    current_money = int(getattr(player, "money", 0) or 0)
+    actual = min(current_money, lose_money)
+    if actual > 0:
+        new_money = current_money - actual
+        database.update_user_stats(user_id, money=new_money)
+        player.money = new_money
+        return f"💰 Потеряно денег: {actual} руб."
+
+    return "⚠️ Потерь по ресурсам нет, повезло."
+
+
 def _handle_anomaly(player, vk, user_id: int):
     """Обработка попадания в аномалию"""
     import anomalies as anomalies_module
@@ -958,21 +1048,9 @@ def _handle_anomaly(player, vk, user_id: int):
     if not user:
         return
 
-    # Проверяем детектор - БЕЗ ДЕТЕКТОРА АНОМАЛИЮ НЕ ВИДНО!
+    # Проверяем детектор: без него аномалия всё равно встречается,
+    # но информация хуже и риски выше.
     detector = anomalies_module.get_equipped_detector(player)
-    if not detector:
-        # Без детектора аномалия не обнаружена - игрок просто исследует дальше
-        vk.messages.send(
-            user_id=user_id,
-            message=(
-                "Ты исследуешь территорию...\n\n"
-                "Аномалий не обнаружено (нужен детектор).\n\n"
-                "Энергия потрачена."
-            ),
-            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
-            random_id=0
-        )
-        return
 
     # Получаем случайную аномалию (с учётом локации)
     from location_mechanics import get_random_anomaly_for_location
@@ -983,18 +1061,36 @@ def _handle_anomaly(player, vk, user_id: int):
     anomaly_desc = anomaly["description"]
     anomaly_danger = anomaly["danger_level"]
 
-    # Получаем бонус детектора
-    detector_bonus = anomalies_module.get_detector_bonus(player)
-    detector_name = detector["name"]
-
-    # Урон с детектором (меньше)
-    damage_min, damage_max = anomaly.get("damage_with_detector", [5, 15])
+    # Данные детектора / урон
+    has_detector = bool(detector)
+    detector_bonus = anomalies_module.get_detector_bonus(player) if has_detector else 0
+    detector_name = detector["name"] if has_detector else "нет"
+    if has_detector:
+        damage_min, damage_max = anomaly.get("damage_with_detector", [5, 15])
+    else:
+        damage_min, damage_max = anomaly.get("damage_without_detector", [20, 45])
 
     # Возможные артефакты в этой аномалии
     possible_artifacts = anomaly.get("artifacts", [])
 
     # Получаем количество гильз
     shells = database.get_user_shells(user_id)
+
+    # Без детектора можно "влететь" в аномалию: мгновенный урон и потери.
+    blind_intro = ""
+    if not has_detector and random.randint(1, 100) <= ANOMALY_BLIND_MISSTEP_CHANCE:
+        blind_damage = random.randint(damage_min, damage_max)
+        new_health = max(0, int(user.get("health", 0)) - blind_damage)
+        database.update_user_stats(user_id, health=new_health)
+        player.health = new_health
+        lost_text = _apply_blind_anomaly_loss(user_id, player)
+        blind_intro = (
+            "☠️ ВСЛЕПУЮ В АНОМАЛИЮ\n\n"
+            "Ты поздно заметил аномальный контур и угодил прямо в активную зону.\n"
+            f"Получен урон: {blind_damage}\n"
+            f"❤️ HP: {new_health}/{int(getattr(player, 'max_health', 100) or 100)}\n"
+            f"{lost_text}\n\n"
+        )
 
     # Сохраняем состояние аномалии в централизованный state_manager
     set_anomaly_state(user_id, {
@@ -1012,15 +1108,20 @@ def _handle_anomaly(player, vk, user_id: int):
     # Формируем сообщение
     message = (
         f"⚠️ АНОМАЛИЯ ОБНАРУЖЕНА! ⚠️\n\n"
-        f"{anomaly_icon} {anomaly_name}\n"
-        f"{anomaly_desc}\n\n"
-        f"Опасность: {anomaly_danger}\n"
-        f"Детектор: {detector_name} (+{detector_bonus}% к шансу)\n"
+        f"{anomaly_icon} {anomaly_name if has_detector else 'Неопознанная аномалия'}\n"
+        f"{anomaly_desc if has_detector else 'Без детектора контур нестабилен, тип трудно определить.'}\n\n"
+        f"Опасность: {anomaly_danger}{' (повышенная без детектора)' if not has_detector else ''}\n"
+        f"Детектор: {detector_name}"
+        f"{f' (+{detector_bonus}% к шансу)' if has_detector else ' (бонус 0%)'}\n"
         f"Гильзы: {shells} шт.\n"
     )
+    if blind_intro:
+        message = blind_intro + message
 
-    if possible_artifacts:
+    if possible_artifacts and has_detector:
         message += f"Возможные артефакты: {', '.join(possible_artifacts)}\n"
+    elif not has_detector:
+        message += "Возможные артефакты: неизвестно (нужен детектор).\n"
 
     message += "\nВыбери действие:"
 
@@ -1034,6 +1135,8 @@ def _handle_anomaly(player, vk, user_id: int):
 
     if shells == 0:
         message += "\n\n⚠️ У тебя нет гильз! Сначала найди гильзы."
+    if not has_detector:
+        message += "\n⚠️ Без детектора шанс добычи ниже, а урон при ошибке выше."
 
     vk.messages.send(
         user_id=user_id,
@@ -1791,7 +1894,9 @@ def create_skills_keyboard(player, user_id: int = None):
 
     # Определяем текущий класс по оружию
     current_weapon = player.equipped_weapon
-    class_id = get_class_by_weapon(current_weapon) if current_weapon else player.player_class
+    class_id = get_class_by_weapon(current_weapon) if current_weapon else None
+    if not class_id:
+        class_id = player.player_class
 
     if not class_id:
         return None
@@ -1851,7 +1956,9 @@ def show_skills_in_combat(player, vk, user_id):
     from classes import get_class, get_class_by_weapon
 
     current_weapon = player.equipped_weapon
-    class_id = get_class_by_weapon(current_weapon) if current_weapon else player.player_class
+    class_id = get_class_by_weapon(current_weapon) if current_weapon else None
+    if not class_id:
+        class_id = player.player_class
 
     if not class_id:
         vk.messages.send(
@@ -1930,7 +2037,9 @@ def use_skill(player, vk, user_id: int, skill_name: str):
         return
 
     current_weapon = player.equipped_weapon
-    class_id = get_class_by_weapon(current_weapon) if current_weapon else player.player_class
+    class_id = get_class_by_weapon(current_weapon) if current_weapon else None
+    if not class_id:
+        class_id = player.player_class
 
     if not class_id:
         vk.messages.send(
