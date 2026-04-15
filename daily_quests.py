@@ -126,7 +126,7 @@ QUEST_POOL = [
     },
     {
         "id": "visit_shelter",
-        "text": "Отдохни в убежище (поспи)",
+        "text": "Посети убежище",
         "type": "visit_location",
         "location": "убежище",
         "target": 1,

@@ -2941,15 +2941,17 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             if row["claimed"]:
                 return {"error": "already_claimed"}
 
-            quests = row["quest_json"]
+            quests = row["quest_json"] or []
             progress = row["progress_json"] or {}
             streak = row["streak"] or 0
+            if not quests:
+                return {"error": "not_found"}
 
             # Проверяем, все ли задания выполнены
             all_done = True
             for q in quests:
                 qid = q["id"]
-                target = q.get("target", 1)
+                target = max(1, int(q.get("target", 1) or 1))
                 if progress.get(qid, 0) < target:
                     all_done = False
                     break
@@ -2965,7 +2967,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             for q in quests:
                 qid = q["id"]
                 prog = progress.get(qid, 0)
-                target = q.get("target", 1)
+                target = max(1, int(q.get("target", 1) or 1))
                 xp = q.get("reward_xp", 0)
                 money = q.get("reward_money", 0)
 
@@ -2975,17 +2977,28 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 total_money += int(money * ratio)
 
             # Бонус за streak
+            # Награда должна считаться по "новому" стрику (включая текущий день),
+            # а не по вчерашнему значению.
+            new_streak = int(streak) + 1
+
             from daily_quests import STREAK_BONUSES
-            if streak in STREAK_BONUSES:
-                bonus = STREAK_BONUSES[streak]
-                mult = bonus["multiplier"]
-                total_xp = int(total_xp * mult)
-                total_money = int(total_money * mult)
-                if bonus.get("bonus_item"):
-                    bonus_items.append(bonus["bonus_item"])
+            best_bonus = STREAK_BONUSES.get(1, {"multiplier": 1.0})
+            for threshold, bonus in sorted(STREAK_BONUSES.items()):
+                if new_streak >= int(threshold):
+                    best_bonus = bonus
+                else:
+                    break
+
+            mult = float(best_bonus.get("multiplier", 1.0) or 1.0)
+            total_xp = int(total_xp * mult)
+            total_money = int(total_money * mult)
+
+            # Бонусный предмет выдаём только на пороговых значениях.
+            threshold_bonus = STREAK_BONUSES.get(new_streak)
+            if threshold_bonus and threshold_bonus.get("bonus_item"):
+                bonus_items.append(threshold_bonus["bonus_item"])
 
             # Обновляем streak и claimed
-            new_streak = streak + 1
             cursor.execute("""
                 UPDATE daily_quests
                 SET claimed = TRUE,
@@ -3001,9 +3014,30 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 SET money = money + %s,
                     experience = experience + %s
                 WHERE vk_id = %s
-                RETURNING money, experience
+                RETURNING id, money, experience
             """, (total_money, total_xp, vk_id))
             user_row = cursor.fetchone()
+            user_internal_id = int(user_row["id"]) if user_row and user_row.get("id") is not None else None
+
+            # Бонусные предметы выдаём здесь же, в той же транзакции.
+            if user_internal_id is not None:
+                for item_name, qty in bonus_items:
+                    if int(qty or 0) <= 0:
+                        continue
+                    cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+                    item_row = cursor.fetchone()
+                    if not item_row:
+                        logger.warning("claim_daily_rewards: бонусный предмет не найден: %s", item_name)
+                        continue
+                    cursor.execute(
+                        """
+                        INSERT INTO user_inventory (user_id, item_id, quantity)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (user_id, item_id)
+                        DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+                        """,
+                        (user_internal_id, item_row["id"], int(qty)),
+                    )
 
             return {
                 "success": True,

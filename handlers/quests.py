@@ -11,7 +11,10 @@ def handle_daily_quests_command(player, vk, user_id: int, text: str) -> bool:
     from state_manager import try_edit_or_send
     text_lower = text.strip().lower()
 
-    if text_lower not in ("задания", "ежедневные задания", "квесты", "daily", "/daily", "задания показать", "квесты показать"):
+    if text_lower not in (
+        "задания", "ежедневные задания", "квесты", "daily", "/daily",
+        "задания показать", "квесты показать", "мои задания",
+    ):
         return False
 
     # Получаем или генерируем задания
@@ -30,7 +33,10 @@ def handle_daily_quests_command(player, vk, user_id: int, text: str) -> bool:
 def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
     """Забрать награду за ежедневные задания"""
     text_lower = text.strip().lower()
-    if text_lower not in ("задания забрать", "забрать награду", "забрать", "claim"):
+    if text_lower not in (
+        "задания забрать", "забрать награду", "забрать", "claim",
+        "получить награду", "забрать квест",
+    ):
         return False
 
     result = database.claim_daily_rewards(user_id)
@@ -47,6 +53,15 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
         vk.messages.send(
             user_id=user_id,
             message="🎁 Ты уже забрал награду сегодня. Приходи завтра!",
+            keyboard=create_daily_quests_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    if result.get("error") == "not_found":
+        vk.messages.send(
+            user_id=user_id,
+            message="⚠️ Сегодняшние задания не найдены. Напиши 'мои задания' для генерации.",
             keyboard=create_daily_quests_keyboard().get_keyboard(),
             random_id=0,
         )
@@ -79,7 +94,6 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
         msg += "\n🎁 Бонусные предметы:\n"
         for item_name, qty in result["bonus_items"]:
             msg += f"   • {item_name} x{qty}\n"
-            database.add_item_to_inventory(user_id, item_name, qty)
 
     msg += f"\n📊 Всего: {result['new_money']:,} руб., {result['new_xp']:,} XP\n"
     msg += f"🔥 Серия: {result['new_streak']} дн."
