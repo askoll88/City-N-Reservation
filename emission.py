@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 _EMISSION_RISK_LOCK_FLAG = "emission_risk_lock"
 _EMISSION_RISK_EID_FLAG = "emission_risk_emission_id"
 
+# Летальность выброса для неподготовленных вне укрытия.
+EMISSION_FATAL_UNPREPARED_CHANCE = float(getattr(config, "EMISSION_FATAL_UNPREPARED_CHANCE", 0.07) or 0.07)
+EMISSION_FATAL_RISK_MULT = float(getattr(config, "EMISSION_FATAL_RISK_MULT", 1.5) or 1.5)
+EMISSION_PREPARED_HP_MIN = int(getattr(config, "EMISSION_PREPARED_HP_MIN", 65) or 65)
+EMISSION_PREPARED_ENERGY_MIN = int(getattr(config, "EMISSION_PREPARED_ENERGY_MIN", 35) or 35)
+EMISSION_PREPARED_MAX_RADIATION = int(getattr(config, "EMISSION_PREPARED_MAX_RADIATION", 90) or 90)
+
 
 # =========================================================================
 # Фаза выброса
@@ -558,7 +565,8 @@ def _apply_emission_impact(vk, emission_id: int):
         try:
             vk_id = player_data["vk_id"]
             location = player_data.get("location", "город")
-            current_health = int(player_data.get("health") or 100)
+            user_row = database.get_user_by_vk(vk_id) or {}
+            current_health = int(user_row.get("health") or player_data.get("health") or 100)
 
             if location in SAFE_LOCATIONS:
                 safe += 1
@@ -586,12 +594,53 @@ def _apply_emission_impact(vk, emission_id: int):
 
             # Радиация
             radiation = config.EMISSION_RADIATION + random.randint(-5, 10)
-            new_radiation = int(player_data.get("radiation") or 0) + radiation
+            new_radiation = int(user_row.get("radiation") or 0) + radiation
 
             # Урон от накопленной радиации: чем выше накопление, тем быстрее тает HP.
             from player import calculate_radiation_hp_loss
             rad_overload_damage = calculate_radiation_hp_loss(new_radiation, new_health)
             new_health = max(1, new_health - rad_overload_damage)
+
+            # Небольшой шанс погибнуть от выброса, если игрок в зоне и не готов.
+            prepared, prep_state = _is_player_prepared_for_emission(vk_id, user_row)
+            risk_locked = bool(int(database.get_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0) or 0))
+            fatal_hit, fatal_roll, fatal_chance = _roll_unprepared_fatality(prepared, risk_locked)
+            if fatal_hit:
+                death_result = _apply_emission_death_penalty(vk_id, user_row)
+
+                database.record_emission_damage(
+                    vk_id=vk_id,
+                    emission_id=emission_id,
+                    damage=max(1, current_health),
+                    radiation=radiation,
+                    items_lost=0,
+                    was_safe=False,
+                )
+                clear_emission_pending(vk_id)
+                damaged += 1
+                died += 1
+
+                prep_line = "Неподготовлен: " + ", ".join(prep_state.get("missing", []))
+                risk_line = "Да" if risk_locked else "Нет"
+                try:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=(
+                            "☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
+                            "Ты не успел укрыться, а Зона не прощает ошибок.\n"
+                            "💀 Смертельная волна выброса накрыла тебя.\n\n"
+                            f"🎲 Шанс фатального исхода: {fatal_chance * 100:.1f}% (бросок {fatal_roll * 100:.1f}%)\n"
+                            f"⚠️ Риск-режим: {risk_line}\n"
+                            f"📉 {prep_line}\n\n"
+                            f"Штраф: -{death_result['money_lost']} руб, -{death_result['experience_lost']} XP.\n"
+                            "Ты очнулся в больнице."
+                        ),
+                        keyboard=create_location_keyboard("больница", user_row.get("level")).get_keyboard(),
+                        random_id=0,
+                    )
+                except Exception as e:
+                    logger.error("Выброс #%d: не удалось отправить fatal-impact игроку %s: %s", emission_id, vk_id, e)
+                continue
 
             # Потеря предметов
             items_lost = 0
@@ -673,6 +722,102 @@ def _apply_emission_impact(vk, emission_id: int):
         "Выброс #%d: удар применён. Повреждено: %d, погибло: %d, в безопасности: %d, ошибок: %d",
         emission_id, damaged, died, safe, failed,
     )
+
+
+def _is_player_prepared_for_emission(vk_id: int, user_row: dict) -> tuple[bool, dict]:
+    """Определить, подготовлен ли игрок к выбросу."""
+    hp = int(user_row.get("health") or 0)
+    energy = int(user_row.get("energy") or 0)
+    radiation = int(user_row.get("radiation") or 0)
+
+    inv = database.get_user_inventory(vk_id)
+    supply_tokens = (
+        "аптечк", "бинт", "антирад", "анти-рад", "анти рад",
+        "водк", "энергетик", "стим",
+    )
+    has_supplies = any(
+        int(item.get("quantity") or 0) > 0 and any(tok in str(item.get("name", "")).lower() for tok in supply_tokens)
+        for item in inv
+    )
+
+    checks = {
+        "hp": hp >= EMISSION_PREPARED_HP_MIN,
+        "energy": energy >= EMISSION_PREPARED_ENERGY_MIN,
+        "radiation": radiation <= EMISSION_PREPARED_MAX_RADIATION,
+        "supplies": has_supplies,
+    }
+    score = sum(1 for ok in checks.values() if ok)
+
+    missing = []
+    if not checks["hp"]:
+        missing.append(f"HP<{EMISSION_PREPARED_HP_MIN}")
+    if not checks["energy"]:
+        missing.append(f"Энергия<{EMISSION_PREPARED_ENERGY_MIN}")
+    if not checks["radiation"]:
+        missing.append(f"Радиация>{EMISSION_PREPARED_MAX_RADIATION}")
+    if not checks["supplies"]:
+        missing.append("нет расходников")
+
+    # Считаем игрока готовым, если выполняются хотя бы 3 условия из 4.
+    return score >= 3, {"score": score, "checks": checks, "missing": missing}
+
+
+def _roll_unprepared_fatality(prepared: bool, risk_locked: bool) -> tuple[bool, float, float]:
+    """Ролл мгновенной смерти для неподготовленных игроков вне укрытия."""
+    if prepared:
+        return False, 1.0, 0.0
+    chance = EMISSION_FATAL_UNPREPARED_CHANCE
+    if risk_locked:
+        chance *= EMISSION_FATAL_RISK_MULT
+    chance = max(0.0, min(0.35, float(chance)))
+    roll = random.random()
+    return roll < chance, roll, chance
+
+
+def _apply_emission_death_penalty(vk_id: int, user_row: dict) -> dict:
+    """Применить штрафы смерти от выброса и вернуть игрока в больницу."""
+    from state_manager import (
+        clear_travel_state, clear_combat_state, clear_dialog_state,
+        clear_research_state, clear_anomaly_state,
+    )
+    from player import Player
+
+    level = int(user_row.get("level") or 1)
+    old_money = int(user_row.get("money") or 0)
+    old_experience = int(user_row.get("experience") or 0)
+
+    money_lost = int(old_money * 0.1)
+    new_money = max(0, old_money - money_lost)
+
+    exp_loss = int(old_experience * 0.25)
+    min_exp = int(Player.LEVELS.get(level, 0))
+    new_experience = max(min_exp, old_experience - exp_loss)
+    experience_lost = old_experience - new_experience
+
+    clear_travel_state(vk_id)
+    clear_combat_state(vk_id)
+    clear_dialog_state(vk_id)
+    clear_research_state(vk_id)
+    clear_anomaly_state(vk_id)
+
+    database.update_user_stats(
+        vk_id,
+        health=50,
+        energy=50,
+        radiation=0,
+        money=new_money,
+        experience=new_experience,
+        location="больница",
+    )
+    database.set_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0)
+    database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
+
+    return {
+        "money_lost": money_lost,
+        "experience_lost": experience_lost,
+        "new_money": new_money,
+        "new_experience": new_experience,
+    }
 
 
 def _remove_random_items(vk_id: int, count: int) -> str:
