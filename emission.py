@@ -497,7 +497,7 @@ def _apply_emission_impact(vk, emission_id: int):
 
         # Сохраняем
         database.update_user_stats(
-            user_id=vk_id,
+            vk_id,
             health=new_health,
             radiation=min(100, player_data.get("radiation", 0) + radiation),
         )
@@ -731,7 +731,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
     player.radiation = min(100, player.radiation + config.EMISSION_RADIATION)
 
     database.update_user_stats(
-        user_id=user_id,
+        user_id,
         health=player.health,
         radiation=player.radiation,
     )
