@@ -50,6 +50,65 @@ SORT_MAP = {
 PER_PAGE = 8  # Лотов на страницу
 
 
+def _resolve_player_item_name(player, item_input: str) -> tuple[str, dict | None]:
+    """Найти каноничное имя предмета из инвентаря игрока."""
+    name_raw = (item_input or "").strip()
+    if not name_raw:
+        return "", None
+
+    try:
+        player.inventory.reload()
+        all_items = (
+            player.inventory.weapons +
+            player.inventory.armor +
+            player.inventory.artifacts +
+            player.inventory.backpacks +
+            player.inventory.other
+        )
+        inv_match = next((i for i in all_items if (i.get("name", "").lower() == name_raw.lower())), None)
+        if inv_match:
+            canon = inv_match.get("name", name_raw)
+            return canon, (database.get_item_by_name(canon) or inv_match)
+    except Exception:
+        pass
+
+    item_info = database.get_item_by_name(name_raw)
+    if item_info:
+        return item_info.get("name", name_raw), item_info
+    return name_raw, None
+
+
+def _get_price_bounds_for_item(item_info: dict | None) -> tuple[int, int] | None:
+    """Получить допустимый диапазон цены для лота."""
+    if not item_info:
+        return None
+
+    # Предпочитаем общую бизнес-логику из database.py
+    calc_fn = getattr(database, "_get_market_price_bounds", None)
+    if callable(calc_fn):
+        try:
+            min_p, max_p = calc_fn(item_info)
+            return int(min_p), int(max_p)
+        except Exception:
+            pass
+
+    base_price = int(item_info.get("price") or 0)
+    if base_price <= 0:
+        return None
+    rarity = str(item_info.get("rarity") or "common").lower()
+    if rarity == "rare":
+        mn, mx = config.MARKET_PRICE_MIN_MULT_RARE, config.MARKET_PRICE_MAX_MULT_RARE
+    elif rarity == "unique":
+        mn, mx = config.MARKET_PRICE_MIN_MULT_UNIQUE, config.MARKET_PRICE_MAX_MULT_UNIQUE
+    elif rarity == "legendary":
+        mn, mx = config.MARKET_PRICE_MIN_MULT_LEGENDARY, config.MARKET_PRICE_MAX_MULT_LEGENDARY
+    else:
+        mn, mx = config.MARKET_PRICE_MIN_MULT_COMMON, config.MARKET_PRICE_MAX_MULT_COMMON
+    min_price = max(1, int(base_price * mn))
+    max_price = max(min_price, int(base_price * mx))
+    return min_price, max_price
+
+
 def _sanitize_keyboard_payload(keyboard_payload: str, max_cols: int = 2) -> str:
     """
     Принудительно ограничить количество кнопок в строке.
@@ -125,15 +184,27 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
             )
             return True
 
-        flow["item_name"] = text_raw
+        item_name, item_info = _resolve_player_item_name(player, text_raw)
+        flow["item_name"] = item_name
+        flow["item_info"] = item_info or {}
+        bounds = _get_price_bounds_for_item(item_info)
+        if bounds:
+            flow["min_price"], flow["max_price"] = bounds
         flow["step"] = "price"
         _market_browse_state.update(user_id, lambda s: {**(s or {}), "listing_flow": flow})
+
+        price_hint = ""
+        if flow.get("min_price") and flow.get("max_price"):
+            price_hint = (
+                f"\nДопустимый диапазон: "
+                f"{int(flow['min_price']):,}..{int(flow['max_price']):,} руб/шт"
+            )
         vk.messages.send(
             user_id=user_id,
             message=(
                 f"📦 Предмет: {flow['item_name']}\n\n"
                 "Шаг 2/3: укажи цену за 1 шт. (целое число)\n"
-                "Пример: 1500"
+                f"Пример: 1500{price_hint}"
             ),
             keyboard=create_market_search_keyboard().get_keyboard(),
             random_id=0,
@@ -150,7 +221,22 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
             )
             return True
 
-        flow["price"] = int(text_raw)
+        input_price = int(text_raw)
+        min_p = flow.get("min_price")
+        max_p = flow.get("max_price")
+        if min_p is not None and max_p is not None and not (int(min_p) <= input_price <= int(max_p)):
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    f"Цена вне диапазона: {int(min_p):,}..{int(max_p):,} руб/шт.\n"
+                    "Введи корректную цену."
+                ),
+                keyboard=create_market_search_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
+
+        flow["price"] = input_price
         flow["step"] = "qty"
         _market_browse_state.update(user_id, lambda s: {**(s or {}), "listing_flow": flow})
         vk.messages.send(
