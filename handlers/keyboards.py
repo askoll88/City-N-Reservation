@@ -166,14 +166,14 @@ def create_location_keyboard(location_id: str, player_level: int = None):
 def create_inventory_keyboard():
     """Клавиатура инвентаря (дублирующая)"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Все", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("Оружие", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_line()
     keyboard.add_button("Броня", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Рюкзаки", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("Артефакты", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("Другое", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Рюкзаки", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Все", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard

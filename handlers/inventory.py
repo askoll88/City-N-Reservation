@@ -9,6 +9,27 @@ import ui
 from constants import InventorySection
 
 
+def _fmt_weight(item: dict, default: float = 1.0) -> str:
+    return f"{float(item.get('weight', default)):.1f}кг"
+
+
+def _screen_header(title: str, player) -> str:
+    return (
+        f"{ui.title(title)}\n"
+        f"⚖️ Вес: {player.inventory.total_weight:.1f}/{player.max_weight:.1f}кг\n"
+        f"💰 Деньги: {player.money} руб.\n"
+    )
+
+
+def _screen_footer(action_hint: str) -> str:
+    return (
+        f"\n{ui.section('Действия')}\n"
+        f"• Цифра: {action_hint}\n"
+        "• выбросить <номер|название>\n"
+        "• Назад"
+    )
+
+
 def handle_inventory_digit(player, text: str, vk, user_id: int) -> bool:
     """Обработка цифр 1-99 в инвентаре. Возвращает True если обработано."""
     from main import create_inventory_keyboard
@@ -218,14 +239,16 @@ def show_weapons(player, vk, user_id: int):
 
     items = player.inventory.weapons
     if items:
-        msg = "Оружие:\n"
+        msg = _screen_header("Инвентарь: оружие", player) + "\n"
         for idx, item in enumerate(items, 1):
-            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_weapon else ""
-            msg += f"{idx}. {item['name']} x{item['quantity']} УРН:{item.get('attack', 0)} ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
-        msg += "\nНажми цифру чтобы надеть"
-        msg += "\nНапиши 'выбросить <название>' чтобы выкинуть"
+            equipped_mark = " [ЭКИП]" if item['name'] == player.equipped_weapon else ""
+            msg += (
+                f"{idx}. 🔫 {item['name']}{equipped_mark}\n"
+                f"   Урон {item.get('attack', 0)} | Вес {_fmt_weight(item)} | x{item.get('quantity', 1)}\n"
+            )
+        msg += _screen_footer("надеть/снять")
     else:
-        msg = "Оружие: Пусто"
+        msg = _screen_header("Инвентарь: оружие", player) + "\nПусто."
 
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
@@ -240,7 +263,7 @@ def show_armor(player, vk, user_id: int):
 
     items = player.inventory.armor
     if items:
-        msg = "Броня:\n"
+        msg = _screen_header("Инвентарь: броня", player) + "\n"
         for idx, item in enumerate(items, 1):
             equipped_mark = ""
             item_name = item['name']
@@ -252,12 +275,14 @@ def show_armor(player, vk, user_id: int):
                 player.equipped_armor_hands,
                 player.equipped_armor_feet
             ]:
-                equipped_mark = "⚡ [ЭКИП]"
-            msg += f"{idx}. {item_name} x{item['quantity']} ЗАЩ:{item.get('defense', 0)} ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
-        msg += "\nНажми цифру чтобы надеть"
-        msg += "\nНапиши 'выбросить <название>' чтобы выкинуть"
+                equipped_mark = " [ЭКИП]"
+            msg += (
+                f"{idx}. 🛡️ {item_name}{equipped_mark}\n"
+                f"   Защита {item.get('defense', 0)} | Вес {_fmt_weight(item)} | x{item.get('quantity', 1)}\n"
+            )
+        msg += _screen_footer("надеть/снять")
     else:
-        msg = "Броня: Пусто"
+        msg = _screen_header("Инвентарь: броня", player) + "\nПусто."
 
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
@@ -271,15 +296,17 @@ def show_backpacks(player, vk, user_id: int):
     database.update_user_stats(user_id, inventory_section='backpacks')
 
     if player.inventory.backpacks:
-        backpack_list = ""
+        msg = _screen_header("Инвентарь: рюкзаки", player) + "\n"
         for idx, b in enumerate(player.inventory.backpacks, 1):
-            equipped_mark = "⚡ [ЭКИП]" if b['name'] == player.equipped_backpack else ""
-            backpack_list += f"{idx}. {b['name']} +{b.get('backpack_bonus', 0)}кг ВЕС:{b.get('weight', 1.0)}кг {equipped_mark}\n"
-        current = f"\n\nНадето: {player.equipped_backpack or 'нет'}\nНажми цифру чтобы надеть"
-        current += "\nНапиши 'выбросить <название>' чтобы выкинуть"
-        msg = f"Рюкзаки:\n\n{backpack_list}{current}"
+            equipped_mark = " [ЭКИП]" if b['name'] == player.equipped_backpack else ""
+            msg += (
+                f"{idx}. 🎒 {b['name']}{equipped_mark}\n"
+                f"   Бонус веса +{b.get('backpack_bonus', 0)}кг | Вес {_fmt_weight(b)} | x{b.get('quantity', 1)}\n"
+            )
+        msg += f"\nНадето: {player.equipped_backpack or 'нет'}"
+        msg += _screen_footer("надеть/снять")
     else:
-        msg = "Рюкзаки: Пусто"
+        msg = _screen_header("Инвентарь: рюкзаки", player) + "\nПусто."
 
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
@@ -295,10 +322,10 @@ def show_artifacts(player, vk, user_id: int):
     equipped = player.equipped_artifacts
     artifacts = player.inventory.artifacts
 
-    msg = "Артефакты:\n\n"
+    msg = _screen_header("Инвентарь: артефакты", player) + "\n"
 
     if equipped:
-        msg += "Надето:\n"
+        msg += f"{ui.section('Надето')}\n"
         for idx, art_name in enumerate(equipped, 1):
             art_info = database.get_item_by_name(art_name)
             if art_info:
@@ -316,11 +343,11 @@ def show_artifacts(player, vk, user_id: int):
                 if art_info.get('dodge_bonus'):
                     bonuses.append(f"уклон:+{art_info['dodge_bonus']}%")
 
-                bonus_str = " ".join(bonuses) if bonuses else ""
-                msg += f"{idx}. [Н] {art_name} {bonus_str}\n"
+                bonus_str = ", ".join(bonuses) if bonuses else "без бонусов"
+                msg += f"{idx}. 🔮 {art_name} [ЭКИП]\n   {bonus_str}\n"
 
     if artifacts:
-        msg += "\nВ инвентаре:\n"
+        msg += f"\n{ui.section('В рюкзаке')}\n"
         for idx, art in enumerate(artifacts, len(equipped) + 1):
             bonuses = []
             if art.get('crit_bonus'):
@@ -336,13 +363,14 @@ def show_artifacts(player, vk, user_id: int):
             if art.get('dodge_bonus'):
                 bonuses.append(f"уклон:+{art['dodge_bonus']}%")
 
-            bonus_str = " ".join(bonuses) if bonuses else ""
-            weight = art.get('weight', 0.5)
-            msg += f"{idx}. {art['name']} {bonus_str} ВЕС:{weight}кг\n"
-        msg += "\nНажми цифру чтобы надеть/снять"
-        msg += "\nНапиши 'выбросить <название>' чтобы выкинуть"
+            bonus_str = ", ".join(bonuses) if bonuses else "без бонусов"
+            msg += (
+                f"{idx}. 🔸 {art['name']}\n"
+                f"   {bonus_str} | Вес {_fmt_weight(art, default=0.5)} | x{art.get('quantity', 1)}\n"
+            )
+        msg += _screen_footer("надеть/снять")
     elif not equipped:
-        msg = "Артефакты: Пусто"
+        msg = _screen_header("Инвентарь: артефакты", player) + "\nПусто."
 
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
@@ -357,14 +385,16 @@ def show_other(player, vk, user_id: int):
 
     items = player.inventory.other
     if items:
-        msg = "Другое:\n"
+        msg = _screen_header("Инвентарь: другое", player) + "\n"
         for idx, item in enumerate(items, 1):
-            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_device else ""
-            msg += f"{idx}. {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг {equipped_mark}\n"
-        msg += "\nНажми цифру чтобы использовать"
-        msg += "\nНапиши 'выбросить <название>' чтобы выкинуть"
+            equipped_mark = " [ЭКИП]" if item['name'] == player.equipped_device else ""
+            msg += (
+                f"{idx}. 📦 {item['name']}{equipped_mark}\n"
+                f"   Вес {_fmt_weight(item, default=0.5)} | x{item.get('quantity', 1)}\n"
+            )
+        msg += _screen_footer("использовать/экипировать")
     else:
-        msg = "Другое: Пусто"
+        msg = _screen_header("Инвентарь: другое", player) + "\nПусто."
 
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
@@ -418,66 +448,22 @@ def show_resources_shop(player, vk, user_id: int):
 def show_all(player, vk, user_id: int):
     """Показать весь инвентарь"""
     from main import create_inventory_keyboard
-    import database as db
 
     player.inventory.reload()
 
-    msg = "Весь инвентарь:\n\n"
-
-    if player.inventory.weapons:
-        msg += "Оружие:\n"
-        for item in player.inventory.weapons:
-            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_weapon else ""
-            msg += f"- {item['name']} x{item['quantity']} УРН:{item.get('attack', 0)} ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
-        msg += "\n"
-    else:
-        msg += "Оружие: пусто\n\n"
-
-    if player.inventory.armor:
-        msg += "Броня:\n"
-        for item in player.inventory.armor:
-            equipped_mark = ""
-            item_name = item['name']
-            if item_name in [
-                player.equipped_armor_head,
-                player.equipped_armor_body,
-                player.equipped_armor_legs,
-                player.equipped_armor_hands,
-                player.equipped_armor_feet
-            ]:
-                equipped_mark = "⚡ [ЭКИП]"
-            msg += f"- {item_name} x{item['quantity']} ЗАЩ:{item.get('defense', 0)} ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
-        msg += "\n"
-    else:
-        msg += "Броня: пусто\n\n"
-
-    if player.inventory.backpacks:
-        msg += "Рюкзаки:\n"
-        for item in player.inventory.backpacks:
-            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_backpack else ""
-            msg += f"- {item['name']} +{item.get('backpack_bonus', 0)}кг ВЕС:{item.get('weight', 1.0)}кг {equipped_mark}\n"
-        msg += "\n"
-    else:
-        msg += "Рюкзаки: пусто\n\n"
-
-    if player.inventory.artifacts:
-        msg += "Артефакты:\n"
-        for item in player.inventory.artifacts:
-            equipped_mark = "⚡ [ЭКИП]" if item['name'] in player.equipped_artifacts else ""
-            msg += f"- {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг {equipped_mark}\n"
-        msg += "\n"
-    else:
-        msg += "Артефакты: пусто\n\n"
-
-    if player.inventory.other:
-        msg += "Другое:\n"
-        for item in player.inventory.other:
-            equipped_mark = "⚡ [ЭКИП]" if item['name'] == player.equipped_device else ""
-            msg += f"- {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 0.5)}кг {equipped_mark}\n"
-    else:
-        msg += "Другое: пусто"
-
-    msg += f"\n\nОбщий вес: {player.inventory.total_weight}/{player.max_weight}кг"
+    msg = (
+        _screen_header("Инвентарь: сводка", player)
+        + "\n"
+        + f"{ui.section('Категории')}\n"
+        + f"🔫 Оружие: {len(player.inventory.weapons)}\n"
+        + f"🛡️ Броня: {len(player.inventory.armor)}\n"
+        + f"🎒 Рюкзаки: {len(player.inventory.backpacks)}\n"
+        + f"🔮 Артефакты: {len(player.inventory.artifacts)} (экип: {len(player.equipped_artifacts)}/{player.artifact_slots})\n"
+        + f"📦 Другое: {len(player.inventory.other)}\n"
+        + "\n"
+        + ui.section("Подсказка")
+        + "\nОткрой нужную категорию кнопками ниже — так читать проще."
+    )
 
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
