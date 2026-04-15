@@ -2559,6 +2559,14 @@ def get_artifact_bonuses(vk_id: int) -> dict:
         "max_health_bonus": 0,
         "fire_immune": False,
         "rare_find_chance": 0,
+        "damage_boost": 0,
+        "max_weight": 0,
+        "max_energy": 0,
+        "strength": 0,
+        "stamina": 0,
+        "perception": 0,
+        "luck": 0,
+        "all_stats": 0,
     }
 
     for artifact_name in equipped:
@@ -2567,6 +2575,14 @@ def get_artifact_bonuses(vk_id: int) -> dict:
             # Исторически часть артефактов использовала ключ "health" для бонуса к макс. HP.
             # Сводим его к единому полю max_health_bonus.
             normalized_key = "max_health_bonus" if key == "health" else key
+            if normalized_key == "all_stats":
+                stat_delta = int(value or 0)
+                bonuses["all_stats"] += stat_delta
+                bonuses["strength"] += stat_delta
+                bonuses["stamina"] += stat_delta
+                bonuses["perception"] += stat_delta
+                bonuses["luck"] += stat_delta
+                continue
             if normalized_key in bonuses:
                 if isinstance(value, bool):
                     bonuses[normalized_key] = bonuses[normalized_key] or value

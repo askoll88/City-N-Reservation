@@ -379,8 +379,8 @@ def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_el
 
 def _roll_initiative(player, enemy_speed: int) -> dict:
     """Бросок инициативы d20 + модификаторы."""
-    player_perception = int(getattr(player, "perception", 0) or 0)
-    player_luck = int(getattr(player, "luck", 0) or 0)
+    player_perception = int(getattr(player, "effective_perception", getattr(player, "perception", 0)) or 0)
+    player_luck = int(getattr(player, "effective_luck", getattr(player, "luck", 0)) or 0)
 
     player_roll = random.randint(1, 20)
     enemy_roll = random.randint(1, 20)
@@ -1072,8 +1072,8 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 
     if action == "обойти":
         # Попытка обойти - зависит от восприятия
-        perception = user.get('perception', 1)
-        dodge_chance = 30 + perception * 5  # 30-80%
+        perception = int(getattr(player, "effective_perception", user.get('perception', 1)) or 1)
+        dodge_chance = min(95, 30 + perception * 5)
 
         if random.randint(1, 100) <= dodge_chance:
             vk.messages.send(
@@ -1133,7 +1133,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
         detector_bonus = anomalies_module.get_detector_bonus(player) if detector else 0
 
         # Бросок гильзы - пытаемся получить артефакт
-        luck = user.get('luck', 5)
+        luck = int(getattr(player, "effective_luck", user.get('luck', 5)) or 5)
         from emission import get_emission_artifact_bonus
         artifact_bonus_mult = get_emission_artifact_bonus()
         result = database.roll_artifact_from_anomaly(
@@ -2043,8 +2043,13 @@ def use_skill(player, vk, user_id: int, skill_name: str):
                     )
                     return
 
+        stamina_regen = _restore_energy_from_stamina(player)
+        if stamina_regen > 0:
+            result_msg += f"\n🔋 Выносливость восстанавливает энергию: +{stamina_regen}⚡"
+
         # Проверяем победу
         if combat['enemy_hp'] <= 0:
+            database.update_user_stats(user_id, energy=player.energy)
             result_msg += _handle_victory(player, combat, user_id)
             vk.messages.send(
                 user_id=user_id,
@@ -2069,7 +2074,10 @@ def use_skill(player, vk, user_id: int, skill_name: str):
         )
     else:
         # Не мгновенный эффект - показываем сообщение и возвращаем в бой
-        pass
+        stamina_regen = _restore_energy_from_stamina(player)
+        if stamina_regen > 0:
+            result_msg += f"\n🔋 Выносливость восстанавливает энергию: +{stamina_regen}⚡"
+        database.update_user_stats(user_id, energy=player.energy)
 
     # Уменьшаем кулдауны
     _decrease_cooldowns(user_id)
@@ -2331,6 +2339,20 @@ def _apply_crit_damage_bonus(player, damage: int) -> tuple[int, int]:
     return int(damage * crit_mult), crit_bonus_pct
 
 
+def _restore_energy_from_stamina(player) -> int:
+    """
+    Восстановление энергии от выносливости за боевой ход.
+    Формула мягкая: без заметного бафа на низких уровнях, но полезна в мид/лейт-гейме.
+    """
+    effective_stamina = int(getattr(player, "effective_stamina", getattr(player, "stamina", 1)) or 1)
+    regen = max(0, (effective_stamina - 4) // 4)  # 4->0, 8->1, 12->2, 16->3, 20->4
+    if regen <= 0:
+        return 0
+    old_energy = int(getattr(player, "energy", 0) or 0)
+    player.energy = min(100, old_energy + regen)
+    return max(0, player.energy - old_energy)
+
+
 def handle_combat_attack(player, vk, user_id: int):
     """Атаковать врага"""
     _combat_state, create_location_keyboard, _, _ = _get_main_imports()
@@ -2375,7 +2397,8 @@ def handle_combat_attack(player, vk, user_id: int):
     # Проверка кровотечения при атаке ножом
     bleed_applied = False
     if weapon_is_knife:
-        bleed_chance = 30 + player.luck * 2  # 30-50% + удача
+        effective_luck = int(getattr(player, "effective_luck", player.luck) or player.luck)
+        bleed_chance = 30 + effective_luck * 2  # 30-50% + удача
         if random.randint(1, 100) <= bleed_chance:
             combat['bleed_turns'] = combat.get('bleed_turns', 0) + 3  # 3 хода кровотечения
             bleed_applied = True
@@ -2383,7 +2406,8 @@ def handle_combat_attack(player, vk, user_id: int):
     # Урон от кровотечения (если есть)
     bleed_damage = 0
     if combat.get('bleed_turns', 0) > 0:
-        bleed_damage = 5 + player.luck  # 5-10 урона от кровотечения
+        effective_luck = int(getattr(player, "effective_luck", player.luck) or player.luck)
+        bleed_damage = 5 + effective_luck  # 5-10 урона от кровотечения
         combat['enemy_hp'] -= bleed_damage
         combat['bleed_turns'] -= 1
 
@@ -2422,10 +2446,16 @@ def handle_combat_attack(player, vk, user_id: int):
     if bleed_damage > 0:
         message += f"🩸 Кровотечение наносит {bleed_damage} урона!\n"
 
+    # Восстановление энергии от выносливости в конце своего действия.
+    stamina_regen = _restore_energy_from_stamina(player)
+    if stamina_regen > 0:
+        message += f"\n🔋 Выносливость восстанавливает энергию: +{stamina_regen}⚡\n"
+
     # Определяем какую клавиатуру показывать
     keyboard = None
 
     if combat['enemy_hp'] <= 0:
+        database.update_user_stats(user_id, energy=player.energy)
         message += _handle_victory(player, combat, user_id)
         keyboard = create_location_keyboard(player.current_location_id)
     else:

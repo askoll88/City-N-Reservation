@@ -195,20 +195,33 @@ class Player:
 
         # Загружаем бонусы от артефактов
         self._artifact_bonuses = self._get_artifact_bonuses()
+        self.max_health_bonus = self._artifact_bonuses.get('max_health_bonus', 0)
 
         # Инициализируем инвентарь
         self.inventory = Inventory(user_id)
 
-        # Применяем бонус от рюкзака
-        if self.equipped_backpack:
-            backpack = next((b for b in self.inventory.backpacks if b['name'] == self.equipped_backpack), None)
-            if backpack:
-                self.max_weight += backpack.get('backpack_bonus', 0)
+        # Пересчитываем переносимый вес сразу с учетом всех источников.
+        self._recalculate_max_weight()
 
     def _get_artifact_bonuses(self) -> dict:
         """Получить бонусы от экипированных артефактов"""
         bonuses = database.get_artifact_bonuses(self.user_id)
         return bonuses
+
+    def _recalculate_max_weight(self):
+        """Пересчитать переносимый вес с учетом силы, пассивок, артефактов и рюкзака."""
+        passive = self._get_passive_bonuses()
+        passive_weight_bonus = int(passive.get('max_weight', 0) or 0)
+        artifact_weight_bonus = int(self._artifact_bonuses.get('max_weight', 0) or 0)
+        base_max_weight = 20 + self.effective_strength * 2 + passive_weight_bonus + artifact_weight_bonus
+
+        backpack_bonus = 0
+        if self.equipped_backpack:
+            backpack = next((b for b in self.inventory.backpacks if b['name'] == self.equipped_backpack), None)
+            if backpack:
+                backpack_bonus = int(backpack.get('backpack_bonus', 0) or 0)
+
+        self.max_weight = max(10, base_max_weight + backpack_bonus)
 
     # === Вычисляемые характеристики ===
 
@@ -246,21 +259,31 @@ class Player:
             self.equipped_armor_hands = self._data.get('equipped_armor_hands')
             self.equipped_armor_feet = self._data.get('equipped_armor_feet')
 
-            # max_weight с учётом пассивных навыков
-            passive = self._get_passive_bonuses()
-            passive_weight_bonus = passive.get('max_weight', 0)
-            base_max_weight = 20 + self.strength * 2 + passive_weight_bonus
-            self.max_weight = base_max_weight
-            if self.equipped_backpack:
-                backpack = next((b for b in self.inventory.backpacks if b['name'] == self.equipped_backpack), None)
-                if backpack:
-                    self.max_weight += backpack.get('backpack_bonus', 0)
-
-            # Обновляем бонусы от артефактов И max_health_bonus
+            self.inventory.reload()
+            # Обновляем бонусы от артефактов, HP и переносимый вес
             self._artifact_bonuses = self._get_artifact_bonuses()
             self.max_health_bonus = self._artifact_bonuses.get('max_health_bonus', 0)
+            self._recalculate_max_weight()
 
-            self.inventory.reload()
+    @property
+    def effective_strength(self) -> int:
+        """Сила с учетом бонусов от артефактов."""
+        return max(1, int(self.strength + self._artifact_bonuses.get('strength', 0)))
+
+    @property
+    def effective_stamina(self) -> int:
+        """Выносливость с учетом бонусов от артефактов."""
+        return max(1, int(self.stamina + self._artifact_bonuses.get('stamina', 0)))
+
+    @property
+    def effective_perception(self) -> int:
+        """Восприятие с учетом бонусов от артефактов."""
+        return max(1, int(self.perception + self._artifact_bonuses.get('perception', 0)))
+
+    @property
+    def effective_luck(self) -> int:
+        """Удача с учетом бонусов от артефактов."""
+        return max(1, int(self.luck + self._artifact_bonuses.get('luck', 0)))
 
     @property
     def dodge_chance(self) -> int:
@@ -278,7 +301,7 @@ class Player:
     @property
     def find_chance(self) -> int:
         """Шанс что-либо найти (%)"""
-        base = self.perception * 3  # 3% за каждый пункт восприятия
+        base = self.effective_perception * 3  # 3% за каждый пункт восприятия
         artifact_bonus = self._artifact_bonuses.get('find_chance', 0)
 
         # Бонус от детектора
@@ -295,7 +318,7 @@ class Player:
     @property
     def crit_chance(self) -> int:
         """Шанс критического удара (%)"""
-        base = 5 + (self.luck - 1) * 2  # Базовый 5% + 2% за каждый пункт удачи свыше 1
+        base = 5 + (self.effective_luck - 1) * 2  # Базовый 5% + 2% за каждый пункт удачи свыше 1
         artifact_bonus = self._artifact_bonuses.get('crit', 0)
         passive_bonus = self._get_passive_bonuses().get('crit_chance', 0)
         return min(100, base + artifact_bonus + passive_bonus)
@@ -309,7 +332,7 @@ class Player:
     @property
     def rare_find_chance(self) -> int:
         """Шанс редкой находки (%)"""
-        base = self.luck * 2  # 2% за каждый пункт удачи
+        base = self.effective_luck * 2  # 2% за каждый пункт удачи
         artifact_bonus = self._artifact_bonuses.get('rare_find_chance', 0)
         passive_bonus = self._get_passive_bonuses().get('rare_find_chance', 0)
         return min(100, base + artifact_bonus + passive_bonus)
@@ -319,7 +342,11 @@ class Player:
         """Урон в ближнем бою"""
         passive = self._get_passive_bonuses()
         strength_bonus = passive.get('strength', 0)
-        return 5 + self.strength + strength_bonus
+        artifact_damage_boost = int(self._artifact_bonuses.get('damage_boost', 0) or 0)
+        base_damage = 5 + self.effective_strength + strength_bonus
+        if artifact_damage_boost > 0:
+            base_damage = int(base_damage * (1 + artifact_damage_boost / 100))
+        return base_damage
 
     @property
     def sell_bonus(self) -> int:
@@ -330,7 +357,7 @@ class Player:
     @property
     def max_health(self) -> int:
         """Максимальное здоровье: 25 HP за единицу выносливости"""
-        return self.stamina * 25 + self.max_health_bonus + self.hp_upgrade_bonus
+        return self.effective_stamina * 25 + self.max_health_bonus + self.hp_upgrade_bonus
 
     def _get_hp_upgrade_settings(self) -> tuple[int, int]:
         """Получить параметры прокачки HP с безопасными дефолтами."""
@@ -550,8 +577,8 @@ class Player:
 
         # --- Характеристики ---
         lines.append(ui.section("Характеристики"))
-        lines.append(f"⚔️ Сила: {self.strength}  |  🏃 Выносливость: {self.stamina}")
-        lines.append(f"👁️ Восприятие: {self.perception}  |  🍀 Удача: {self.luck}")
+        lines.append(f"⚔️ Сила: {self.effective_strength}  |  🏃 Выносливость: {self.effective_stamina}")
+        lines.append(f"👁️ Восприятие: {self.effective_perception}  |  🍀 Удача: {self.effective_luck}")
         lines.append(f"🧬 Прокачка HP: {self.hp_upgrade_level}/{self.hp_upgrade_max_level} (+{self.hp_upgrade_bonus} HP)")
         lines.append("")
         lines.append(f"📊 Урон: {self.melee_damage}  |  Броня: {self.total_defense}")
@@ -609,9 +636,6 @@ class Player:
             self._check_level_up()
         if strength is not None:
             self.strength = max(1, min(20, strength))
-            passive = self._get_passive_bonuses()
-            passive_weight_bonus = passive.get('max_weight', 0)
-            self.max_weight = 20 + self.strength * 2 + passive_weight_bonus
         if stamina is not None:
             self.stamina = max(1, min(20, stamina))
         if perception is not None:
@@ -622,22 +646,38 @@ class Player:
             self.armor_defense = max(0, armor_defense)
         if max_weight is not None:
             self.max_weight = max(10, max_weight)
+        elif strength is not None:
+            self._recalculate_max_weight()
 
-        database.update_user_stats(
-            self.user_id,
-            self.health if health else None,
-            self.energy if energy else None,
-            self.radiation if radiation else None,
-            self.money if money else None,
-            self.level if level else None,
-            self.experience if experience else None,
-            self.strength if strength else None,
-            self.stamina if stamina else None,
-            self.perception if perception else None,
-            self.luck if luck else None,
-            self.armor_defense if armor_defense else None,
-            self.max_weight if max_weight else None
-        )
+        update_fields = {}
+        if health is not None:
+            update_fields["health"] = self.health
+        if energy is not None:
+            update_fields["energy"] = self.energy
+        if radiation is not None:
+            update_fields["radiation"] = self.radiation
+        if money is not None:
+            update_fields["money"] = self.money
+        if level is not None:
+            update_fields["level"] = self.level
+        if experience is not None:
+            update_fields["experience"] = self.experience
+        if strength is not None:
+            update_fields["strength"] = self.strength
+            update_fields["max_weight"] = self.max_weight
+        if stamina is not None:
+            update_fields["stamina"] = self.stamina
+        if perception is not None:
+            update_fields["perception"] = self.perception
+        if luck is not None:
+            update_fields["luck"] = self.luck
+        if armor_defense is not None:
+            update_fields["armor_defense"] = self.armor_defense
+        if max_weight is not None:
+            update_fields["max_weight"] = self.max_weight
+
+        if update_fields:
+            database.update_user_stats(self.user_id, **update_fields)
 
     def save(self):
         """Сохранить текущую локацию игрока"""
@@ -755,6 +795,7 @@ class Player:
             stat = random.choice(['strength', 'stamina', 'perception', 'luck'])
             old_value = getattr(self, stat)
             setattr(self, stat, old_value + 1)
+            self._recalculate_max_weight()
 
             stat_names = {
                 'strength': 'Сила',
@@ -771,7 +812,8 @@ class Player:
                 strength=self.strength,
                 stamina=self.stamina,
                 perception=self.perception,
-                luck=self.luck
+                luck=self.luck,
+                max_weight=self.max_weight
             )
 
             return (
@@ -797,9 +839,7 @@ class Player:
         if backpack_name is None:
             if self.equipped_backpack:
                 self.equipped_backpack = None
-                passive = self._get_passive_bonuses()
-                passive_weight_bonus = passive.get('max_weight', 0)
-                self.max_weight = 20 + self.strength * 2 + passive_weight_bonus
+                self._recalculate_max_weight()
                 database.update_user_stats(self.user_id, equipped_backpack=None, max_weight=self.max_weight)
                 return True, "Рюкзак снят."
             return False, "Рюкзак не надет."
@@ -809,13 +849,10 @@ class Player:
             return False, f"У тебя нет рюкзака '{backpack_name}' в инвентаре."
 
         self.equipped_backpack = backpack_name
-        passive = self._get_passive_bonuses()
-        passive_weight_bonus = passive.get('max_weight', 0)
-        base_max_weight = 20 + self.strength * 2 + passive_weight_bonus
         backpack_bonus = backpack.get('backpack_bonus', 0)
-        self.max_weight = base_max_weight + backpack_bonus
+        self._recalculate_max_weight()
 
-        database.update_user_stats(self.user_id, equipped_backpack=backpack_name, max_weight=base_max_weight)
+        database.update_user_stats(self.user_id, equipped_backpack=backpack_name, max_weight=self.max_weight)
 
         return True, f"Надет рюкзак: {backpack_name} (+{backpack_bonus}кг к переносимому весу)"
 

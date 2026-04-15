@@ -325,9 +325,12 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
         if result['success']:
             player._artifact_bonuses = player._get_artifact_bonuses()
             player.max_health_bonus = player._artifact_bonuses.get('max_health_bonus', 0)
+            player._recalculate_max_weight()
             if player.health > player.max_health:
                 player.health = player.max_health
-                database.update_user_stats(user_id, health=player.health)
+                database.update_user_stats(user_id, health=player.health, max_weight=player.max_weight)
+            else:
+                database.update_user_stats(user_id, max_weight=player.max_weight)
             player.inventory.reload()
             msg = f"Артефакт {artifact_name} снят!"
         else:
@@ -343,9 +346,12 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
         if result['success']:
             player._artifact_bonuses = player._get_artifact_bonuses()
             player.max_health_bonus = player._artifact_bonuses.get('max_health_bonus', 0)
+            player._recalculate_max_weight()
             if player.health > player.max_health:
                 player.health = player.max_health
-                database.update_user_stats(user_id, health=player.health)
+                database.update_user_stats(user_id, health=player.health, max_weight=player.max_weight)
+            else:
+                database.update_user_stats(user_id, max_weight=player.max_weight)
             player.inventory.reload()
             msg = f"{result['message']}\n\n"
 
