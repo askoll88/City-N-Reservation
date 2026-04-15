@@ -1703,7 +1703,6 @@ def create_combat_keyboard(player=None, user_id=None):
     class_from_weapon = get_class_by_weapon(player.equipped_weapon) if player and player.equipped_weapon else None
     if player and (player.player_class or class_from_weapon):
         keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
     return keyboard
 
 
