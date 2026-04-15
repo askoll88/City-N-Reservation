@@ -38,6 +38,10 @@ HEAL_BASE_PRICE = 100          # базовая цена за лечение (2-
 HEAL_LEVEL_MULTIPLIER = 50     # добавка за каждый уровень игрока
 HEAL_PRICE_CAP = 3000          # максимальная цена лечения
 
+# Прокачка максимального HP через расходники (мягкий кап для баланса)
+HP_UPGRADE_PER_LEVEL = int(os.getenv('HP_UPGRADE_PER_LEVEL', '3'))   # +3 HP за 1 апгрейд
+HP_UPGRADE_MAX_LEVEL = int(os.getenv('HP_UPGRADE_MAX_LEVEL', '10'))  # максимум +30 HP
+
 # Исследование
 RESEARCH_TIME = 30  # секунд
 RESEARCH_BONUS_XP = 50

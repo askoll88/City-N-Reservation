@@ -146,6 +146,7 @@ def init_db():
                 armor_defense     INTEGER DEFAULT 0,
                 max_weight        INTEGER DEFAULT 20,
                 max_health_bonus  INTEGER DEFAULT 0,
+                hp_upgrade_level  INTEGER DEFAULT 0,
                 artifact_slots    INTEGER DEFAULT 3,
                 shells            INTEGER DEFAULT 0,
                 player_class      VARCHAR(50),
@@ -392,6 +393,7 @@ def _migrate_legacy_schema():
             ("previous_location",     "VARCHAR(50)"),
             ("hospital_treatments",   "INTEGER DEFAULT 0"),
             ("max_health_bonus",      "INTEGER DEFAULT 0"),
+            ("hp_upgrade_level",      "INTEGER DEFAULT 0"),
             ("artifact_slots",        "INTEGER DEFAULT 3"),
             ("shells",                "INTEGER DEFAULT 0"),
             ("is_admin",              "INTEGER DEFAULT 0"),
@@ -856,7 +858,7 @@ _ALLOWED_USER_FIELDS = frozenset({
     "health", "energy", "radiation", "money",
     "level", "experience",
     "strength", "stamina", "perception", "luck",
-    "armor_defense", "max_weight", "max_health_bonus",
+    "armor_defense", "max_weight", "max_health_bonus", "hp_upgrade_level",
     "artifact_slots", "shells",
     "player_class", "location", "previous_location",
     "hospital_treatments", "newbie_kit_received",
@@ -2560,11 +2562,14 @@ def get_artifact_bonuses(vk_id: int) -> dict:
     for artifact_name in equipped:
         bonus_data = ARTIFACT_BONUSES.get(artifact_name, {})
         for key, value in bonus_data.items():
-            if key in bonuses:
+            # Исторически часть артефактов использовала ключ "health" для бонуса к макс. HP.
+            # Сводим его к единому полю max_health_bonus.
+            normalized_key = "max_health_bonus" if key == "health" else key
+            if normalized_key in bonuses:
                 if isinstance(value, bool):
-                    bonuses[key] = bonuses[key] or value
+                    bonuses[normalized_key] = bonuses[normalized_key] or value
                 else:
-                    bonuses[key] += value
+                    bonuses[normalized_key] += value
 
     return bonuses
 

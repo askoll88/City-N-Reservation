@@ -1015,13 +1015,14 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
             new_health = max(0, user['health'] - damage)
             database.update_user_stats(user_id, health=new_health)
 
+            max_hp = int(getattr(player, "max_health", 100) or 100)
             vk.messages.send(
                 user_id=user_id,
                 message=(
                     f"{anomaly_icon} НЕУДАЧНЫЙ ОБХОД\n\n"
                     f"Не удалось обойти аномалию '{anomaly_name}'!\n\n"
                     f"Получен урон: {damage}\n"
-                    f"Текущее HP: {new_health}/100"
+                    f"Текущее HP: {new_health}/{max_hp}"
                 ),
                 keyboard=create_location_keyboard(location_id).get_keyboard(),
                 random_id=0
@@ -1116,6 +1117,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
         new_health = max(0, user['health'] - damage)
         database.update_user_stats(user_id, health=new_health)
 
+        max_hp = int(getattr(player, "max_health", 100) or 100)
         vk.messages.send(
             user_id=user_id,
             message=(
@@ -1123,7 +1125,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 f"Ты решил отступить от аномалии '{anomaly_name}'.\n\n"
                 f"При отступлении аномалия нанесла удар:\n"
                 f"Получен урон: {damage}\n"
-                f"Текущее HP: {new_health}/100"
+                f"Текущее HP: {new_health}/{max_hp}"
             ),
             keyboard=create_location_keyboard(location_id).get_keyboard(),
             random_id=0
@@ -1150,6 +1152,7 @@ def _handle_radiation(player, vk, user_id: int):
 
     rad_mult_text = f" (x{rad_mult:.1f} зона)" if rad_mult != 1.0 else ""
 
+    max_hp = int(getattr(player, "max_health", 100) or 100)
     vk.messages.send(
         user_id=user_id,
         message=(
@@ -1157,7 +1160,7 @@ def _handle_radiation(player, vk, user_id: int):
             f"Ты вошёл в зону повышенной радиации!{rad_mult_text}\n\n"
             f"Получен урон: {rad_damage}\n"
             f"Радиация: +{rad_gain}\n"
-            f"HP: {new_health}/100"
+            f"HP: {new_health}/{max_hp}"
         ),
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
         random_id=0
@@ -1177,13 +1180,14 @@ def _handle_trap(player, vk, user_id: int):
     new_health = max(0, user['health'] - damage)
     database.update_user_stats(user_id, health=new_health)
 
+    max_hp = int(getattr(player, "max_health", 100) or 100)
     vk.messages.send(
         user_id=user_id,
         message=(
             f"ЛОВУШКА!\n\n"
             f"Ты задел растяжку! Раздался щелчок...\n\n"
             f"Получен урон: {damage}\n"
-            f"Текущее HP: {new_health}/100"
+            f"Текущее HP: {new_health}/{max_hp}"
         ),
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
         random_id=0
@@ -1656,12 +1660,14 @@ def _spawn_item(player, vk, user_id: int):
 def create_combat_keyboard(player=None, user_id=None):
     """Клавиатура боя"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+    from classes import get_class_by_weapon
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
     keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
     # Кнопка навыков - показываем только если есть класс
-    if player and player.player_class:
+    class_from_weapon = get_class_by_weapon(player.equipped_weapon) if player and player.equipped_weapon else None
+    if player and (player.player_class or class_from_weapon):
         keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
     return keyboard
@@ -1973,7 +1979,6 @@ def use_skill(player, vk, user_id: int, skill_name: str):
 def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, effect: dict):
     """Применить эффект навыка"""
     from classes import get_class, get_class_by_weapon
-    import database
 
     skill_name = skill["name"]
     message = ""
@@ -1982,15 +1987,10 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
     if "double_shot" in effect:
         second_mult = effect.get("second_damage_mult", 0.7)
 
-        # Первый выстрел
-        weapon_damage = 0
-        if player.equipped_weapon:
-            item = database.get_item_by_name(player.equipped_weapon)
-            if item:
-                weapon_damage = item.get('attack', 0)
-
+        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         first_damage = weapon_damage + melee
+        first_damage, _ = _apply_weapon_damage_bonus(player, first_damage)
 
         # Второй выстрел
         second_damage = int(first_damage * second_mult)
@@ -2020,14 +2020,10 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         burst_count = effect.get("burst_count", 3)
         burst_damage = effect.get("burst_damage", 0.4)
 
-        weapon_damage = 0
-        if player.equipped_weapon:
-            item = database.get_item_by_name(player.equipped_weapon)
-            if item:
-                weapon_damage = item.get('attack', 0)
-
+        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         base_damage = weapon_damage + melee
+        base_damage, _ = _apply_weapon_damage_bonus(player, base_damage)
         per_shot = int(base_damage * burst_damage)
         total_damage = per_shot * burst_count
 
@@ -2055,14 +2051,10 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         mult = effect.get("damage_mult", 2.5)
         cannot_dodge = effect.get("cannot_dodge", False)
 
-        weapon_damage = 0
-        if player.equipped_weapon:
-            item = database.get_item_by_name(player.equipped_weapon)
-            if item:
-                weapon_damage = item.get('attack', 0)
-
+        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         base_damage = weapon_damage + melee
+        base_damage, _ = _apply_weapon_damage_bonus(player, base_damage)
         total_damage = int(base_damage * mult)
 
         combat['enemy_hp'] -= total_damage
@@ -2090,14 +2082,10 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         burst_count = effect.get("burst_count", 5)
         burst_damage = effect.get("burst_damage", 0.3)
 
-        weapon_damage = 0
-        if player.equipped_weapon:
-            item = database.get_item_by_name(player.equipped_weapon)
-            if item:
-                weapon_damage = item.get('attack', 0)
-
+        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         base_damage = weapon_damage + melee
+        base_damage, _ = _apply_weapon_damage_bonus(player, base_damage)
         per_shot = int(base_damage * burst_damage)
         total_damage = per_shot * burst_count
 
@@ -2125,14 +2113,10 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
     elif "ignore_defense" in effect:
         ignore_def = effect.get("ignore_defense", 20)
 
-        weapon_damage = 0
-        if player.equipped_weapon:
-            item = database.get_item_by_name(player.equipped_weapon)
-            if item:
-                weapon_damage = item.get('attack', 0)
-
+        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         base_damage = weapon_damage + melee
+        base_damage, _ = _apply_weapon_damage_bonus(player, base_damage)
         total_damage = int(base_damage * 1.5)  # 150% урона
 
         combat['enemy_hp'] -= total_damage
@@ -2192,6 +2176,51 @@ def get_active_effects(user_id: int) -> dict:
     return _active_skill_effects.get(user_id, {})
 
 
+def _resolve_player_weapon(player, user_id: int | None = None) -> tuple[int, str | None, bool]:
+    """Вернуть урон экипированного оружия; если предмета уже нет — снять экипировку."""
+    weapon_damage = 0
+    weapon_name = None
+    weapon_is_knife = False
+
+    equipped_name = getattr(player, "equipped_weapon", None)
+    if not equipped_name:
+        return weapon_damage, weapon_name, weapon_is_knife
+
+    player.inventory.reload()
+    inv_weapon = next((w for w in player.inventory.weapons if w.get("name") == equipped_name), None)
+    if not inv_weapon:
+        player.equipped_weapon = None
+        if user_id is not None:
+            database.update_user_stats(user_id, equipped_weapon=None)
+        return weapon_damage, weapon_name, weapon_is_knife
+
+    weapon_name = equipped_name
+    weapon_damage = int(inv_weapon.get('attack', 0) or 0)
+    weapon_lower = weapon_name.lower()
+    weapon_is_knife = (
+        "knife" in weapon_lower or "machete" in weapon_lower or
+        "bayonet" in weapon_lower or "dagger" in weapon_lower or
+        "нож" in weapon_lower or "мачете" in weapon_lower
+    )
+    return weapon_damage, weapon_name, weapon_is_knife
+
+
+def _apply_weapon_damage_bonus(player, damage: int) -> tuple[int, int]:
+    """Применить пассивный бонус урона оружия класса."""
+    passive = player._get_passive_bonuses()
+    bonus_pct = int(passive.get('weapon_damage', 0) or 0)
+    if bonus_pct <= 0:
+        return damage, 0
+    return int(damage * (1 + bonus_pct / 100)), bonus_pct
+
+
+def _apply_crit_damage_bonus(player, damage: int) -> tuple[int, int]:
+    """Применить крит-множитель с учётом бонуса крит-урона класса."""
+    crit_bonus_pct = int(getattr(player, "crit_damage", 0) or 0)
+    crit_mult = 1.5 + (crit_bonus_pct / 100.0)
+    return int(damage * crit_mult), crit_bonus_pct
+
+
 def handle_combat_attack(player, vk, user_id: int):
     """Атаковать врага"""
     _combat_state, create_location_keyboard, _, _ = _get_main_imports()
@@ -2203,23 +2232,11 @@ def handle_combat_attack(player, vk, user_id: int):
     # === Проверяем активные эффекты ===
     active_effects = get_active_effects(user_id)
 
-    weapon_damage = 0
-    weapon_name = None
-    weapon_is_knife = False
-
-    if player.equipped_weapon:
-        item = database.get_item_by_name(player.equipped_weapon)
-        if item:
-            weapon_damage = item.get('attack', 0)
-            weapon_name = player.equipped_weapon
-            # Проверяем, нож ли это
-            weapon_lower = weapon_name.lower()
-            weapon_is_knife = ("knife" in weapon_lower or "machete" in weapon_lower or
-                             "bayonet" in weapon_lower or "dagger" in weapon_lower or
-                             "нож" in weapon_lower or "мачете" in weapon_lower)
+    weapon_damage, weapon_name, weapon_is_knife = _resolve_player_weapon(player, user_id=user_id)
 
     melee = player.melee_damage
     total_damage = weapon_damage + melee
+    total_damage, weapon_bonus_pct = _apply_weapon_damage_bonus(player, total_damage)
     
     # === Применяем эффекты навыков ===
     skill_message = ""
@@ -2232,7 +2249,9 @@ def handle_combat_attack(player, vk, user_id: int):
 
     is_crit = random.randint(1, 100) <= player.crit_chance
     if is_crit:
-        total_damage = int(total_damage * 1.5)
+        total_damage, crit_bonus_pct = _apply_crit_damage_bonus(player, total_damage)
+    else:
+        crit_bonus_pct = 0
 
     # Роль "Хищник": враг может уклониться от атаки.
     enemy_evaded = False
@@ -2263,6 +2282,8 @@ def handle_combat_attack(player, vk, user_id: int):
     if weapon_damage > 0:
         damage_details.append(f"Оружие {weapon_name}: {weapon_damage}")
     damage_details.append(f"Рукопашный: {melee}")
+    if weapon_bonus_pct > 0:
+        damage_details.append(f"Пассив класса: +{weapon_bonus_pct}%")
 
     # Добавляем информацию о характеристиках
     crit_chance = player.crit_chance
@@ -2278,7 +2299,10 @@ def handle_combat_attack(player, vk, user_id: int):
     if enemy_evaded:
         message += "\n💨 Враг резко сместился и уклонился от удара!\n"
     elif is_crit:
-        message += f"\n🔥КРИТИЧЕСКИЙ УДАР! x1.5\n"
+        crit_msg = "🔥КРИТИЧЕСКИЙ УДАР! x1.5"
+        if crit_bonus_pct > 0:
+            crit_msg += f" +{crit_bonus_pct}%"
+        message += f"\n{crit_msg}\n"
     message += f"Нанесён урон: {total_damage}\n"
     message += f"({(' | '.join(damage_details))})\n"
 

@@ -146,6 +146,7 @@ class Player:
         self.max_weight = self._data['max_weight']   # Максимальный переносимый вес
         self.artifact_slots = self._data.get('artifact_slots', 3)  # Слоты для артефактов
         self.max_health_bonus = self._data.get('max_health_bonus', 0)  # Бонус к HP от артефактов
+        self.hp_upgrade_level = int(self._data.get('hp_upgrade_level', 0) or 0)
         self.inventory_section = self._data.get('inventory_section')  # Текущий раздел инвентаря
         self.previous_location = self._data.get('previous_location')  # Предыдущая локация для возврата
         self.player_class = self._data.get('player_class')  # Класс персонажа
@@ -205,6 +206,7 @@ class Player:
             self.equipped_armor = self._data.get('equipped_armor')
             self.equipped_device = self._data.get('equipped_device')
             self.newbie_kit_received = self._data.get('newbie_kit_received', 0)
+            self.hp_upgrade_level = int(self._data.get('hp_upgrade_level', 0) or 0)
             self.inventory_section = self._data.get('inventory_section')
             self.previous_location = self._data.get('previous_location')
             self.is_admin = self._data.get('is_admin', 0)
@@ -301,7 +303,28 @@ class Player:
     @property
     def max_health(self) -> int:
         """Максимальное здоровье: 25 HP за единицу выносливости"""
-        return self.stamina * 25 + self.max_health_bonus
+        return self.stamina * 25 + self.max_health_bonus + self.hp_upgrade_bonus
+
+    def _get_hp_upgrade_settings(self) -> tuple[int, int]:
+        """Получить параметры прокачки HP с безопасными дефолтами."""
+        try:
+            import config as game_config
+            per_level = max(1, int(getattr(game_config, "HP_UPGRADE_PER_LEVEL", 3) or 3))
+            max_level = max(0, int(getattr(game_config, "HP_UPGRADE_MAX_LEVEL", 10) or 10))
+            return per_level, max_level
+        except Exception:
+            return 3, 10
+
+    @property
+    def hp_upgrade_bonus(self) -> int:
+        """Перманентный бонус к максимальному HP от прокачки."""
+        per_level, max_level = self._get_hp_upgrade_settings()
+        return min(max_level, self.hp_upgrade_level) * per_level
+
+    @property
+    def hp_upgrade_max_level(self) -> int:
+        _, max_level = self._get_hp_upgrade_settings()
+        return max_level
 
     @property
     def total_defense(self) -> int:
@@ -545,6 +568,7 @@ class Player:
         lines.append(f"💪 ХАРАКТЕРИСТИКИ")
         lines.append(f"⚔️ Сила: {self.strength}  |  🏃 Выносливость: {self.stamina}")
         lines.append(f"👁️ Восприятие: {self.perception}  |  🍀 Удача: {self.luck}")
+        lines.append(f"🧬 Прокачка HP: {self.hp_upgrade_level}/{self.hp_upgrade_max_level} (+{self.hp_upgrade_bonus} HP)")
         lines.append("")
         lines.append(f"📊 Урон: {self.melee_damage}  |  Броня: {self.total_defense}")
         lines.append(f"🎯 Крит: {self.crit_chance}%  |  Уклонение: {self.dodge_chance}%")
@@ -958,66 +982,85 @@ class Player:
 
         used = False
         msg = ""
+        item_key = item_name.lower().strip()
 
-        if item_name.lower() in ['супер энергетик', 'super energy']:
-            old_energy = self.energy
-            self.energy = 100
-            database.update_user_stats(self.user_id, energy=100)
-            msg = f"Супер энергетик! Энергия: {old_energy} -> 100"
+        old_health = int(self.health)
+        old_energy = int(self.energy)
+        old_radiation = int(self.radiation)
+        old_max_health = int(self.max_health)
+
+        hp_restore = {
+            "аптечка": 50,
+            "научная аптечка": 80,
+            "бинт": 20,
+            "стимулятор": 50,
+            "боевой стимулятор": 80,
+            "боевой стимулятор упак": 80,
+            "чистая вода": 30,
+            "лечебная трава": 25,
+        }
+        energy_restore = {
+            "супер энергетик": 9999,  # полный заряд
+            "super energy": 9999,
+            "энергетик": 30,
+            "кофе": 15,
+            "вода": 10,
+            "хлеб": 15,
+            "колбаса": 20,
+            "консервы": 25,
+            "стимулятор": 20,
+            "боевой стимулятор": 50,
+            "боевой стимулятор упак": 50,
+        }
+        radiation_delta = {
+            "антирад": -50,
+            "чистая вода": -10,
+        }
+
+        if item_key == "витамины":
+            per_upgrade_hp, max_upgrade_level = self._get_hp_upgrade_settings()
+            if self.hp_upgrade_level >= max_upgrade_level:
+                return False, (
+                    "🧬 Витамины больше не дают эффект.\n"
+                    f"Достигнут лимит прокачки HP: {self.hp_upgrade_level}/{max_upgrade_level}."
+                )
+            self.hp_upgrade_level += 1
+            self.health = min(self.max_health, self.health + per_upgrade_hp)
+            database.update_user_stats(
+                self.user_id,
+                hp_upgrade_level=self.hp_upgrade_level,
+                health=self.health,
+            )
+            msg = (
+                f"🧬 Витамины приняты!\n"
+                f"Макс. HP: {old_max_health} -> {self.max_health}\n"
+                f"Текущее HP: {old_health} -> {self.health}\n"
+                f"Прокачка: {self.hp_upgrade_level}/{max_upgrade_level}"
+            )
             used = True
-        elif item_name.lower() == 'энергетик':
-            old_energy = self.energy
-            self.energy = min(100, self.energy + 30)
-            database.update_user_stats(self.user_id, energy=self.energy)
-            msg = f"Энергетик выпит! Энергия: {old_energy} -> {self.energy}"
-            used = True
-        elif item_name.lower() == 'кофе':
-            old_energy = self.energy
-            self.energy = min(100, self.energy + 15)
-            database.update_user_stats(self.user_id, energy=self.energy)
-            msg = f"Кофе выпит. Энергия: {old_energy} -> {self.energy}"
-            used = True
-        elif item_name.lower() == 'аптечка':
-            old_health = self.health
-            self.health = 100
-            database.update_user_stats(self.user_id, health=100)
-            msg = f"Аптечка использована! Здоровье: {old_health} -> 100"
-            used = True
-        elif item_name.lower() == 'бинт':
-            old_health = self.health
-            self.health = min(100, self.health + 25)
-            database.update_user_stats(self.user_id, health=self.health)
-            msg = f"Бинт использован. Здоровье: {old_health} -> {self.health}"
-            used = True
-        elif item_name.lower() == 'антирад':
-            old_radiation = self.radiation
-            self.radiation = max(0, self.radiation - 50)
-            database.update_user_stats(self.user_id, radiation=self.radiation)
-            msg = f"Антирад принят. Радиация: {old_radiation} -> {self.radiation}"
-            used = True
-        elif item_name.lower() == 'вода':
-            old_energy = self.energy
-            self.energy = min(100, self.energy + 10)
-            database.update_user_stats(self.user_id, energy=self.energy)
-            msg = f"Вода выпита. Энергия: {old_energy} -> {self.energy}"
-            used = True
-        elif item_name.lower() == 'хлеб':
-            old_energy = self.energy
-            self.energy = min(100, self.energy + 15)
-            database.update_user_stats(self.user_id, energy=self.energy)
-            msg = f"Хлеб съеден. Энергия: {old_energy} -> {self.energy}"
-            used = True
-        elif item_name.lower() == 'колбаса':
-            old_energy = self.energy
-            self.energy = min(100, self.energy + 20)
-            database.update_user_stats(self.user_id, energy=self.energy)
-            msg = f"Колбаса съедена. Энергия: {old_energy} -> {self.energy}"
-            used = True
-        elif item_name.lower() == 'консервы':
-            old_energy = self.energy
-            self.energy = min(100, self.energy + 25)
-            database.update_user_stats(self.user_id, energy=self.energy)
-            msg = f"Консервы съедены. Энергия: {old_energy} -> {self.energy}"
+        elif item_key in hp_restore or item_key in energy_restore or item_key in radiation_delta:
+            if item_key in hp_restore:
+                self.health = min(self.max_health, self.health + hp_restore[item_key])
+            if item_key in energy_restore:
+                self.energy = min(100, self.energy + energy_restore[item_key])
+            if item_key in radiation_delta:
+                self.radiation = max(0, self.radiation + radiation_delta[item_key])
+            database.update_user_stats(
+                self.user_id,
+                health=self.health,
+                energy=self.energy,
+                radiation=self.radiation
+            )
+            parts = [f"Использовано: {item_name}"]
+            if self.health != old_health:
+                parts.append(f"❤️ HP: {old_health} -> {self.health}/{self.max_health}")
+            if self.energy != old_energy:
+                parts.append(f"⚡ Энергия: {old_energy} -> {self.energy}/100")
+            if self.radiation != old_radiation:
+                parts.append(f"☢️ Радиация: {old_radiation} -> {self.radiation}")
+            if len(parts) == 1:
+                parts.append("Эффект не сработал, параметры уже были на максимуме.")
+            msg = "\n".join(parts)
             used = True
         else:
             return False, f"Предмет '{item_name}' нельзя использовать."

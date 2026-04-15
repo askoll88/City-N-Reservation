@@ -1899,7 +1899,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
             if "energy" in eff:
                 player.energy = max(0, player.energy + eff["energy"])
             if "hp" in eff:
-                player.health = max(1, player.health + eff["hp"])
+                player.health = max(1, min(player.max_health, player.health + eff["hp"]))
             if eff.get("random_loot"):
                 _apply_random_loot(player)
             if eff.get("random_artifact"):
@@ -1922,7 +1922,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
             if "energy" in final_effect:
                 player.energy = max(0, player.energy + final_effect["energy"])
             if "hp" in final_effect:
-                player.health = max(1, player.health + final_effect["hp"])
+                player.health = max(1, min(player.max_health, player.health + final_effect["hp"]))
 
             # Квестовая цепочка
             _check_quest_progression(event, user_id)
