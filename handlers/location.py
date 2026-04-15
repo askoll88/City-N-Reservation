@@ -6,7 +6,7 @@ import random
 import time
 from typing import Optional
 import database
-from constants import RESEARCH_LOCATIONS, NPC_LOCATIONS
+from constants import RESEARCH_LOCATIONS, NPC_LOCATIONS, SAFE_LOCATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -507,6 +507,24 @@ def go_to_location(player, location_id: str, vk, user_id: int):
             random_id=0,
         )
         return
+
+    if location_id in SAFE_LOCATIONS:
+        from emission import is_emission_safe_entry_blocked_for_user
+        blocked, seconds_to_impact = is_emission_safe_entry_blocked_for_user(user_id)
+        if blocked:
+            mins = max(0, seconds_to_impact // 60)
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    "☢️ Вход в безопасные зоны закрыт.\n\n"
+                    "Ты выбрал остаться в Зоне во время предупреждения о выбросе.\n"
+                    "Теперь до конца выброса отступление невозможно.\n"
+                    f"До удара: ~{mins} мин."
+                ),
+                keyboard=create_location_keyboard(from_location, player.level).get_keyboard(),
+                random_id=0,
+            )
+            return
 
     if _is_location_locked(user_id, location_id):
         set_ui_screen(user_id, {"name": "location"}, clear_stack=True)

@@ -22,6 +22,9 @@ from handlers.keyboards import (
 
 logger = logging.getLogger(__name__)
 
+_EMISSION_RISK_LOCK_FLAG = "emission_risk_lock"
+_EMISSION_RISK_EID_FLAG = "emission_risk_emission_id"
+
 
 # =========================================================================
 # Фаза выброса
@@ -294,6 +297,17 @@ def emission_tick(vk):
 def _send_warning_to_all_players(vk, emission_id: int):
     """Отправить предупреждение всем игрокам в опасных зонах"""
     players = database.get_all_active_players()
+    active = database.get_active_emission()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    lock_timer_text = "⏳ Блок безопасных мест для рискнувших через 10:00."
+    if active and int(active.get("id") or 0) == int(emission_id):
+        impact_time = active.get("impact_time")
+        if impact_time:
+            lock_time = impact_time - timedelta(minutes=5)
+            lock_in_sec = max(0, int((lock_time - now).total_seconds()))
+            m, s = divmod(lock_in_sec, 60)
+            lock_timer_text = f"⏳ Блок безопасных мест для рискнувших через {m}:{s:02d}."
 
     warned_count = 0
     safe_count = 0
@@ -313,6 +327,7 @@ def _send_warning_to_all_players(vk, emission_id: int):
                         "Зона предупреждает: через 15 минут начнётся Выброс!\n"
                         f"Ты в укрытии ({location}) — ты в безопасности.\n\n"
                         "🛡️ Укрытия: Город, Больница, Убежище\n\n"
+                        f"{lock_timer_text}\n\n"
                         "Если ты в Зоне — срочно возвращайся в укрытие!"
                     ),
                     random_id=0,
@@ -334,6 +349,7 @@ def _send_warning_to_all_players(vk, emission_id: int):
                     f"Ты сейчас в: {location}\n\n"
                     "🚨 Срочно ищи укрытие!\n"
                     "🛡️ Укрытия: Город, Больница, Убежище\n\n"
+                    f"{lock_timer_text}\n\n"
                     "Если не успеешь — Зона не будет щадить..."
                 ),
                 "choices": [
@@ -418,15 +434,20 @@ def _handle_warning_choice(player, vk, user_id: int, event: dict, text: str) -> 
     clear_emission_pending(user_id)
 
     if choice["effect"].get("flee_to_safe"):
+        database.set_user_flag(user_id, _EMISSION_RISK_LOCK_FLAG, 0)
+        database.set_user_flag(user_id, _EMISSION_RISK_EID_FLAG, 0)
         return _flee_to_safe_location(player, vk, user_id)
 
     elif choice["effect"].get("stay_and_risk"):
+        database.set_user_flag(user_id, _EMISSION_RISK_LOCK_FLAG, 1)
+        database.set_user_flag(user_id, _EMISSION_RISK_EID_FLAG, int(event.get("emission_id") or 0))
         vk.messages.send(
             user_id=user_id,
             message=(
                 "😰 Ты решил остаться в Зоне...\n\n"
                 "Выброс не будет щадить. Готовься к последствиям.\n"
-                "🩺 Попробуй восстановить HP перед ударом!"
+                "🩺 Попробуй восстановить HP перед ударом!\n\n"
+                "⚠️ Важно: за 5 минут до удара путь в безопасные места будет закрыт."
             ),
             keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
             random_id=0,
@@ -451,6 +472,19 @@ def _handle_impact_choice(player, vk, user_id: int, event: dict, text: str) -> b
 
     # "Бежать в укрытие" during impact
     if "бежать" in text_lower or "укрытие" in text_lower:
+        blocked, _ = is_emission_safe_entry_blocked_for_user(user_id)
+        if blocked:
+            clear_emission_pending(user_id)
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    "☢️ Слишком поздно.\n"
+                    "Ты выбрал риск и путь в безопасные зоны уже закрыт до конца выброса."
+                ),
+                keyboard=create_emission_impact_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0,
+            )
+            return True
         clear_emission_pending(user_id)
         return _flee_to_safe_location(player, vk, user_id)
 
@@ -484,6 +518,8 @@ def _flee_to_safe_location(player, vk, user_id: int) -> bool:
 
     player.current_location_id = safe_location
     player.energy = max(0, player.energy - 10)  # Затраты энергии на бегство
+    database.set_user_flag(user_id, _EMISSION_RISK_LOCK_FLAG, 0)
+    database.set_user_flag(user_id, _EMISSION_RISK_EID_FLAG, 0)
 
     database.update_user_stats(
         user_id,
@@ -692,6 +728,8 @@ def _announce_emission_cancelled(vk, emission_id: int):
         vk_id = player_data["vk_id"]
         # Очищаем pending событие выброса
         clear_emission_pending(vk_id)
+        database.set_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0)
+        database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
 
         try:
             vk.messages.send(
@@ -711,6 +749,8 @@ def _announce_aftermath(vk, emission_id: int):
 
     for player_data in players:
         vk_id = player_data["vk_id"]
+        database.set_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0)
+        database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
         try:
             vk.messages.send(
                 user_id=vk_id,
@@ -754,6 +794,42 @@ def is_emission_rare_enemy_bonus() -> bool:
     if not is_emission_aftermath_active():
         return False
     return random.random() < config.EMISSION_BONUS_RARE_ENEMY_CHANCE
+
+
+def is_emission_safe_entry_blocked_for_user(user_id: int) -> tuple[bool, int]:
+    """
+    Блок входа в безопасные локации для игроков, выбравших риск.
+    Возвращает (blocked, seconds_to_impact).
+    """
+    lock_flag = int(database.get_user_flag(user_id, _EMISSION_RISK_LOCK_FLAG, 0) or 0)
+    if lock_flag != 1:
+        return False, 0
+
+    emission = database.get_active_emission()
+    if not emission:
+        return False, 0
+
+    emission_id = int(emission.get("id") or 0)
+    locked_eid = int(database.get_user_flag(user_id, _EMISSION_RISK_EID_FLAG, 0) or 0)
+    if locked_eid and locked_eid != emission_id:
+        return False, 0
+
+    status = emission.get("status")
+    impact_time = emission.get("impact_time")
+    end_time = emission.get("end_time")
+    if not impact_time or not end_time:
+        return False, 0
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    lock_start = impact_time - timedelta(minutes=5)
+    seconds_to_impact = max(0, int((impact_time - now).total_seconds()))
+
+    if status == EMISSION_PHASE_WARNING and lock_start <= now <= end_time:
+        return True, seconds_to_impact
+    if status == EMISSION_PHASE_IMPACT and now <= end_time:
+        return True, seconds_to_impact
+
+    return False, seconds_to_impact
 
 
 # =========================================================================
