@@ -160,6 +160,42 @@ def emission_tick(vk):
     if not config.EMISSION_ENABLED:
         return
 
+    # Перед обычным тиком выравниваем возможные рассинхроны статусов.
+    # Это защищает от зависаний фаз после рестартов/пропущенных тиков.
+    try:
+        reconcile = database.reconcile_emission_statuses()
+        reset_count = len(reconcile.get("reset_to_pending", []))
+        finished_impacts = reconcile.get("finished_impacts", [])
+        cancelled_count = len(reconcile.get("cancelled_warnings", [])) + len(reconcile.get("cancelled_pendings", []))
+
+        if reset_count or finished_impacts or cancelled_count:
+            logger.warning(
+                "reconcile_emission_statuses: reset=%d, finished_impacts=%d, cancelled=%d",
+                reset_count, len(finished_impacts), cancelled_count,
+            )
+
+        now_for_reconcile = datetime.now(timezone.utc).replace(tzinfo=None)
+        for row in finished_impacts:
+            eid = row["id"]
+            aftermath_end = row.get("aftermath_end")
+            if aftermath_end and getattr(aftermath_end, "tzinfo", None):
+                aftermath_end = aftermath_end.replace(tzinfo=None)
+
+            # Анонс aftermath только если окно последствий ещё актуально.
+            if aftermath_end and now_for_reconcile < aftermath_end:
+                _announce_aftermath(vk, eid)
+                logger.info("Выброс #%d: reconcile -> FINISHED, aftermath объявлен", eid)
+            else:
+                logger.info("Выброс #%d: reconcile -> FINISHED, aftermath окно уже истекло", eid)
+
+        if finished_impacts or cancelled_count:
+            active_after_reconcile = database.get_active_emission()
+            if not active_after_reconcile:
+                next_id = schedule_next_emission()
+                logger.info("reconcile: следующий выброс запланирован, id=%s", next_id)
+    except Exception as e:
+        logger.error("reconcile_emission_statuses: ошибка: %s", e, exc_info=True)
+
     emission = database.get_active_emission()
     if not emission:
         logger.debug("emission_tick: нет активных выбросов")
@@ -466,102 +502,107 @@ def _apply_emission_impact(vk, emission_id: int):
     damaged = 0
     safe = 0
     died = 0
+    failed = 0
 
     for player_data in players:
-        vk_id = player_data["vk_id"]
-        location = player_data.get("location", "город")
-        current_health = player_data.get("health", 100)
-
-        if location in SAFE_LOCATIONS:
-            safe += 1
-            continue
-
-        # --- УРОН ---
-        damage_pct = random.uniform(
-            config.EMISSION_DAMAGE_PCT_MIN,
-            config.EMISSION_DAMAGE_PCT_MAX,
-        )
-        damage = int(current_health * damage_pct)
-        new_health = max(1, current_health - damage)
-
-        # Радиация
-        radiation = config.EMISSION_RADIATION + random.randint(-5, 10)
-
-        # Потеря предметов
-        items_lost = 0
-        lost_items_msg = ""
-        if random.random() < config.EMISSION_ITEM_LOSS_CHANCE:
-            items_lost = random.randint(1, config.EMISSION_ITEM_LOSS_MAX)
-            # Удаляем случайные предметы (не экипировку)
-            lost_items_msg = _remove_random_items(vk_id, items_lost)
-
-        # Сохраняем
-        database.update_user_stats(
-            vk_id,
-            health=new_health,
-            radiation=min(100, player_data.get("radiation", 0) + radiation),
-        )
-
-        # Логируем
-        database.record_emission_damage(
-            vk_id=vk_id,
-            emission_id=emission_id,
-            damage=damage,
-            radiation=radiation,
-            items_lost=items_lost,
-            was_safe=False,
-        )
-
-        damaged += 1
-        if new_health <= 1:
-            died += 1
-
-        # Ставим pending событие для возможности убежать
-        items_line = ""
-        if lost_items_msg:
-            items_line = f"📦 Потеряны предметы: {lost_items_msg}\n"
-        death_line = ""
-        if new_health <= 1:
-            death_line = "💀 Ты на грани смерти! Срочно лечись!\n\n"
-
-        impact_event = {
-            "type": "emission_impact",
-            "id": f"emission_impact_{emission_id}",
-            "emission_id": emission_id,
-            "phase": "impact",
-            "location": location,
-            "text": (
-                f"☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
-                f"Ты был в: {location}\n"
-                f"💔 Получено урона: -{damage} HP ({current_health} → {new_health})\n"
-                f"☢️ Радиация: +{radiation}\n"
-                f"{items_line}"
-                f"{death_line}"
-                "Что делать?"
-            ),
-            "choices": [
-                {
-                    "label": "🏃 Бежать в укрытие",
-                    "effect": {"flee_to_safe": True},
-                },
-            ],
-        }
-        set_emission_pending(vk_id, impact_event)
-
-        # Отправляем результат игроку
         try:
-            vk.messages.send(
-                user_id=vk_id,
-                message=impact_event["text"],
-                keyboard=create_emission_impact_keyboard(location).get_keyboard(),
-                random_id=0,
+            vk_id = player_data["vk_id"]
+            location = player_data.get("location", "город")
+            current_health = int(player_data.get("health") or 100)
+
+            if location in SAFE_LOCATIONS:
+                safe += 1
+                continue
+
+            # --- УРОН ---
+            damage_pct = random.uniform(
+                config.EMISSION_DAMAGE_PCT_MIN,
+                config.EMISSION_DAMAGE_PCT_MAX,
             )
+            damage = int(current_health * damage_pct)
+            new_health = max(1, current_health - damage)
+
+            # Радиация
+            radiation = config.EMISSION_RADIATION + random.randint(-5, 10)
+
+            # Потеря предметов
+            items_lost = 0
+            lost_items_msg = ""
+            if random.random() < config.EMISSION_ITEM_LOSS_CHANCE:
+                items_lost = random.randint(1, config.EMISSION_ITEM_LOSS_MAX)
+                # Удаляем случайные предметы (не экипировку)
+                lost_items_msg = _remove_random_items(vk_id, items_lost)
+
+            # Сохраняем
+            database.update_user_stats(
+                vk_id,
+                health=new_health,
+                radiation=min(100, int(player_data.get("radiation") or 0) + radiation),
+            )
+
+            # Логируем
+            database.record_emission_damage(
+                vk_id=vk_id,
+                emission_id=emission_id,
+                damage=damage,
+                radiation=radiation,
+                items_lost=items_lost,
+                was_safe=False,
+            )
+
+            damaged += 1
+            if new_health <= 1:
+                died += 1
+
+            # Ставим pending событие для возможности убежать
+            items_line = ""
+            if lost_items_msg:
+                items_line = f"📦 Потеряны предметы: {lost_items_msg}\n"
+            death_line = ""
+            if new_health <= 1:
+                death_line = "💀 Ты на грани смерти! Срочно лечись!\n\n"
+
+            impact_event = {
+                "type": "emission_impact",
+                "id": f"emission_impact_{emission_id}",
+                "emission_id": emission_id,
+                "phase": "impact",
+                "location": location,
+                "text": (
+                    f"☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
+                    f"Ты был в: {location}\n"
+                    f"💔 Получено урона: -{damage} HP ({current_health} → {new_health})\n"
+                    f"☢️ Радиация: +{radiation}\n"
+                    f"{items_line}"
+                    f"{death_line}"
+                    "Что делать?"
+                ),
+                "choices": [
+                    {
+                        "label": "🏃 Бежать в укрытие",
+                        "effect": {"flee_to_safe": True},
+                    },
+                ],
+            }
+            set_emission_pending(vk_id, impact_event)
+
+            # Отправляем результат игроку
+            try:
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=impact_event["text"],
+                    keyboard=create_emission_impact_keyboard(location).get_keyboard(),
+                    random_id=0,
+                )
+            except Exception as e:
+                logger.error("Выброс #%d: не удалось отправить impact игроку %s: %s", emission_id, vk_id, e)
         except Exception as e:
-            logger.error("Выброс #%d: не удалось отправить impact игроку %s: %s", emission_id, vk_id, e)
+            failed += 1
+            logger.error("Выброс #%d: ошибка обработки игрока %s: %s", emission_id, player_data.get("vk_id"), e, exc_info=True)
 
     logger.info(
-        "Выброс #%d: удар применён. Повреждено: %d, погибло: %d, в безопасности: %d",
-        emission_id, damaged, died, safe,
+        "Выброс #%d: удар применён. Повреждено: %d, погибло: %d, в безопасности: %d, ошибок: %d",
+        emission_id, damaged, died, safe, failed,
     )
 
 

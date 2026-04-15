@@ -2675,9 +2675,26 @@ def get_active_emission():
     with db_cursor() as (cursor, _):
         cursor.execute("""
             SELECT * FROM emissions
-            WHERE status IN ('pending', 'warning', 'impact')
-              AND end_time > NOW()
-            ORDER BY impact_time ASC
+            WHERE
+                -- impact должен оставаться "активным" до смены статуса на finished
+                -- (иначе тик не увидит событие и не переведет в aftermath)
+                status = 'impact'
+                OR
+                -- warning валиден только после warning_time
+                (status = 'warning' AND warning_time <= NOW())
+                OR
+                -- pending живет до планового конца окна выброса
+                (status = 'pending' AND end_time > NOW())
+            ORDER BY
+                CASE status
+                    WHEN 'impact' THEN 0
+                    WHEN 'warning' THEN 1
+                    ELSE 2
+                END,
+                -- среди impact сначала самый свежий (текущий/только что завершившийся)
+                CASE WHEN status = 'impact' THEN end_time END DESC,
+                -- среди warning/pending — ближайший по impact_time
+                CASE WHEN status IN ('warning', 'pending') THEN impact_time END ASC
             LIMIT 1
         """)
         row = cursor.fetchone()
@@ -2711,6 +2728,66 @@ def update_emission_status(emission_id: int, status: str):
         cursor.execute("""
             UPDATE emissions SET status = %s WHERE id = %s
         """, (status, emission_id))
+
+
+def reconcile_emission_statuses() -> dict:
+    """
+    Привести статусы выбросов в консистентное состояние по времени.
+
+    Возвращает:
+        {
+            "reset_to_pending": [id, ...],
+            "finished_impacts": [{"id": int, "aftermath_end": datetime}, ...],
+            "cancelled_warnings": [id, ...],
+            "cancelled_pendings": [id, ...],
+        }
+    """
+    with db_cursor() as (cursor, _):
+        # warning с warning_time в будущем — это рассинхрон, откатываем в pending
+        cursor.execute("""
+            UPDATE emissions
+               SET status = 'pending'
+             WHERE status = 'warning'
+               AND warning_time > NOW()
+         RETURNING id
+        """)
+        reset_to_pending = [r["id"] for r in cursor.fetchall()]
+
+        # impact, у которого end_time уже прошёл — должен быть finished
+        cursor.execute("""
+            UPDATE emissions
+               SET status = 'finished'
+             WHERE status = 'impact'
+               AND end_time <= NOW()
+         RETURNING id, aftermath_end
+        """)
+        finished_impacts = [dict(r) for r in cursor.fetchall()]
+
+        # warning/pending, у которых окно полностью истекло — считаем отменёнными
+        cursor.execute("""
+            UPDATE emissions
+               SET status = 'cancelled'
+             WHERE status = 'warning'
+               AND end_time <= NOW()
+         RETURNING id
+        """)
+        cancelled_warnings = [r["id"] for r in cursor.fetchall()]
+
+        cursor.execute("""
+            UPDATE emissions
+               SET status = 'cancelled'
+             WHERE status = 'pending'
+               AND end_time <= NOW()
+         RETURNING id
+        """)
+        cancelled_pendings = [r["id"] for r in cursor.fetchall()]
+
+    return {
+        "reset_to_pending": reset_to_pending,
+        "finished_impacts": finished_impacts,
+        "cancelled_warnings": cancelled_warnings,
+        "cancelled_pendings": cancelled_pendings,
+    }
 
 
 def get_all_active_players():
@@ -2759,4 +2836,3 @@ def record_emission_damage(vk_id: int, emission_id: int, damage: int, radiation:
             INSERT INTO emission_damage_log (vk_id, emission_id, damage, radiation, items_lost, was_safe)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (vk_id, emission_id, damage, radiation, items_lost, was_safe))
-
