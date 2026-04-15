@@ -828,7 +828,14 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 
         # Бросок гильзы - пытаемся получить артефакт
         luck = user.get('luck', 5)
-        result = database.roll_artifact_from_anomaly(anomaly_type, luck, detector_bonus)
+        from emission import get_emission_artifact_bonus
+        artifact_bonus_mult = get_emission_artifact_bonus()
+        result = database.roll_artifact_from_anomaly(
+            anomaly_type,
+            luck,
+            detector_bonus,
+            chance_multiplier=artifact_bonus_mult,
+        )
 
         if result:
             # Артефакт получен!
@@ -1055,12 +1062,18 @@ def _handle_found_something(player, vk, user_id: int):
 def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None):
     """Спавн врага"""
     _combat_state, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
+    from emission import is_emission_rare_enemy_bonus
 
     # Если указан тип врага - используем его, иначе - случайный для локации
     if enemy_type:
         enemy = enemies.get_enemy_by_type(enemy_type)
     else:
         enemy = enemies.get_enemy_for_location(player.current_location_id)
+        # Бонус aftermath: повышенный шанс встречи с редким/сильным мутантом.
+        if is_emission_rare_enemy_bonus():
+            loc_enemies = enemies.ENEMIES.get(player.current_location_id, [])
+            if loc_enemies:
+                enemy = max(loc_enemies, key=lambda e: (e.get("hp", 0), e.get("damage", 0)))
 
     if not enemy:
         return

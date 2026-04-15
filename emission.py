@@ -526,6 +526,18 @@ def _apply_emission_impact(vk, emission_id: int):
 
             if location in SAFE_LOCATIONS:
                 safe += 1
+                try:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=(
+                            "☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
+                            f"Ты в укрытии ({location}) — урон не получен.\n"
+                            "Оставайся в безопасности до окончания выброса."
+                        ),
+                        random_id=0,
+                    )
+                except Exception as e:
+                    logger.error("Выброс #%d: не удалось отправить impact-safe игроку %s: %s", emission_id, vk_id, e)
                 continue
 
             # --- УРОН ---

@@ -2047,9 +2047,11 @@ def _apply_random_artifact(player):
 def _apply_artifact_chance(player, effect=None):
     from anomalies import get_random_anomaly, get_artifact_from_anomaly
     import database
+    from emission import get_emission_artifact_bonus
     anomaly = get_random_anomaly()
     artifact = get_artifact_from_anomaly(anomaly["type"])
-    if random.randint(1, 100) <= 30:
+    success_chance = min(95, int(30 * get_emission_artifact_bonus()))
+    if random.randint(1, 100) <= success_chance:
         if artifact:
             database.add_item_to_inventory(player.vk_id, artifact, 1)
             from handlers.quests import track_quest_artifact
