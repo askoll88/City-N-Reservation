@@ -313,11 +313,15 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
         if end_page - start_page < 4:
             start_page = max(1, end_page - 4)
 
+        # Безопасно раскладываем номера страниц: не больше 3 кнопок в ряду.
+        buttons_in_row = 0
         for p in range(start_page, end_page + 1):
             color = VkKeyboardColor.PRIMARY if p == page else VkKeyboardColor.SECONDARY
             keyboard.add_button(f"📄 {p}", color=color)
-            if p < end_page and (p - start_page + 1) % 3 == 0 and p < end_page:
+            buttons_in_row += 1
+            if p < end_page and buttons_in_row >= 3:
                 keyboard.add_line()
+                buttons_in_row = 0
 
         keyboard.add_line()
 
@@ -335,9 +339,12 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
         ("💰 Дешевле", "cheap"),
         ("💎 Дороже", "expensive"),
     ]
-    for label, sort_key in sort_labels:
+    for idx, (label, sort_key) in enumerate(sort_labels, 1):
         color = VkKeyboardColor.POSITIVE if sort == sort_key else VkKeyboardColor.SECONDARY
         keyboard.add_button(label, color=color)
+        # Держим сортировку в 2 кнопки на ряд, чтобы не ловить лимиты VK.
+        if idx % 2 == 0 and idx < len(sort_labels):
+            keyboard.add_line()
     keyboard.add_line()
 
     # Ряд действий
@@ -366,9 +373,14 @@ def create_my_listings_keyboard(page: int, pages: int):
         if end_page - start_page < 4:
             start_page = max(1, end_page - 4)
 
+        buttons_in_row = 0
         for p in range(start_page, end_page + 1):
             color = VkKeyboardColor.PRIMARY if p == page else VkKeyboardColor.SECONDARY
             keyboard.add_button(f"📄 {p}", color=color)
+            buttons_in_row += 1
+            if p < end_page and buttons_in_row >= 3:
+                keyboard.add_line()
+                buttons_in_row = 0
         keyboard.add_line()
 
     keyboard.add_button("📋 Активные", color=VkKeyboardColor.PRIMARY)
