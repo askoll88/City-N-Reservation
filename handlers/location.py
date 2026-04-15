@@ -534,7 +534,7 @@ def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
     return travel_tick(player, vk, user_id, silent=False)
 
 
-def go_to_location(player, location_id: str, vk, user_id: int):
+def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confirm: bool = False):
     """Запустить переход в локацию через коридор перемещения."""
     from handlers.keyboards import create_travel_keyboard
     from state_manager import has_travel_state, set_travel_state, set_ui_screen
@@ -552,6 +552,14 @@ def go_to_location(player, location_id: str, vk, user_id: int):
     from_location = player.current_location_id
     if from_location == "инвентарь" and player.previous_location:
         from_location = player.previous_location
+
+    if not bypass_risk_confirm:
+        try:
+            from emission import prompt_emission_risk_exit_confirmation
+            if prompt_emission_risk_exit_confirmation(player, vk, user_id, from_location, location_id):
+                return
+        except Exception:
+            logger.exception("Не удалось запросить подтверждение риска выхода из safe: user_id=%s", user_id)
 
     # Если игрок вышел из укрытия во время impact — возврат в safe закрыт до конца impact.
     try:
@@ -573,7 +581,9 @@ def go_to_location(player, location_id: str, vk, user_id: int):
     if location_id in SAFE_LOCATIONS:
         from emission import is_emission_safe_entry_blocked_for_user
         blocked, seconds_to_impact = is_emission_safe_entry_blocked_for_user(user_id)
-        if blocked:
+        # Во время impact разрешаем перемещение ВНУТРИ safe-зон (город/больница/убежище).
+        # Блокируем только вход в safe из опасных локаций.
+        if blocked and from_location not in SAFE_LOCATIONS:
             mins = max(0, seconds_to_impact // 60)
             vk.messages.send(
                 user_id=user_id,
@@ -896,8 +906,9 @@ def show_welcome(vk, user_id: int):
     user_data = database.get_user_by_vk(user_id)
 
     if user_data:
-        # Игрок уже существует - показываем город
-        loc = get_location("город")
+        # Игрок уже существует - показываем ТЕКУЩУЮ локацию, без телепорта в город.
+        current_location = user_data.get("location") or "город"
+        loc = get_location(current_location) or get_location("город")
         player_level = user_data.get('level', 0)
         vk.messages.send(
             user_id=user_id,
@@ -906,7 +917,7 @@ def show_welcome(vk, user_id: int):
                 "P2P рынок игроков находится на Черном рынке "
                 "(доступ с 25 уровня)."
             ),
-            keyboard=create_location_keyboard("город", player_level).get_keyboard(),
+            keyboard=create_location_keyboard(current_location, player_level).get_keyboard(),
             random_id=0
         )
         set_ui_screen(user_id, {"name": "location"}, clear_stack=True)

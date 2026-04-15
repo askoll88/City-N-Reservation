@@ -614,3 +614,12 @@ def create_emission_impact_keyboard(location: str):
     keyboard.add_line()
     keyboard.add_button("Пропустить", color=VkKeyboardColor.SECONDARY)
     return keyboard
+
+
+def create_emission_risk_confirm_keyboard():
+    """Подтверждение выхода из safe во время impact."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("⚠️ Подтвердить риск", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("Отмена", color=VkKeyboardColor.SECONDARY)
+    return keyboard

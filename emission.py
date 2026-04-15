@@ -20,10 +20,13 @@ from state_manager import (
     is_in_anomaly, get_anomaly_data, clear_anomaly_state,
     is_in_combat, clear_combat_state,
     has_travel_state, clear_travel_state, get_travel_data,
+    has_pending_emission_risk_exit, set_pending_emission_risk_exit,
+    get_pending_emission_risk_exit, clear_pending_emission_risk_exit,
 )
 from handlers.keyboards import (
     create_emission_warning_keyboard,
     create_emission_impact_keyboard,
+    create_emission_risk_confirm_keyboard,
     create_location_keyboard,
     create_npc_dialog_keyboard,
     create_random_event_keyboard,
@@ -604,6 +607,7 @@ def _handle_impact_choice(player, vk, user_id: int, event: dict, text: str) -> b
 def _abort_interrupted_context(user_id: int):
     """Автостоп прерванных сценариев, если игрок убежал в safe."""
     clear_pending_event(user_id)
+    clear_pending_emission_risk_exit(user_id)
     clear_dialog_state(user_id)
     clear_research_state(user_id)
     clear_anomaly_state(user_id)
@@ -1146,6 +1150,7 @@ def _apply_emission_death_penalty(vk_id: int, user_row: dict) -> dict:
     database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
     database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1)
     database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0)
+    clear_pending_emission_risk_exit(vk_id)
 
     return {
         "money_lost": money_lost,
@@ -1215,6 +1220,7 @@ def _announce_emission_cancelled(vk, emission_id: int):
         vk_id = player_data["vk_id"]
         # Очищаем pending событие выброса
         clear_emission_pending(vk_id)
+        clear_pending_emission_risk_exit(vk_id)
         database.set_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0)
         database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
         database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1)
@@ -1247,6 +1253,7 @@ def _announce_aftermath(vk, emission_id: int):
         database.set_user_flag(vk_id, _EMISSION_RISK_EID_FLAG, 0)
         database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1)
         database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0)
+        clear_pending_emission_risk_exit(vk_id)
         try:
             vk.messages.send(
                 user_id=vk_id,
@@ -1357,6 +1364,113 @@ def mark_emission_safe_exit_during_impact(user_id: int, from_location: str, to_l
 
     database.set_user_flag(user_id, _EMISSION_RISK_LOCK_FLAG, 1)
     database.set_user_flag(user_id, _EMISSION_RISK_EID_FLAG, int(emission.get("id") or 0))
+    return True
+
+
+def should_confirm_emission_safe_exit(user_id: int, from_location: str, to_location: str) -> tuple[bool, int]:
+    """
+    Нужно ли подтверждение риска при выходе из safe в impact.
+    Возвращает (need_confirm, seconds_to_end).
+    """
+    if from_location not in SAFE_LOCATIONS or to_location in SAFE_LOCATIONS:
+        return False, 0
+
+    emission = database.get_active_emission()
+    if not emission:
+        return False, 0
+    if emission.get("status") != EMISSION_PHASE_IMPACT:
+        return False, 0
+
+    impact_time = emission.get("impact_time")
+    end_time = emission.get("end_time")
+    if not impact_time or not end_time:
+        return False, 0
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if not (impact_time <= now <= end_time):
+        return False, 0
+
+    return True, max(0, int((end_time - now).total_seconds()))
+
+
+def prompt_emission_risk_exit_confirmation(player, vk, user_id: int, from_location: str, to_location: str) -> bool:
+    """Показать предупреждение и запросить подтверждение риска выхода из safe во время impact."""
+    need_confirm, seconds_left = should_confirm_emission_safe_exit(user_id, from_location, to_location)
+    if not need_confirm:
+        return False
+
+    active = database.get_active_emission() or {}
+    emission_id = int(active.get("id") or 0)
+    mins, secs = divmod(seconds_left, 60)
+
+    set_pending_emission_risk_exit(
+        user_id,
+        {
+            "emission_id": emission_id,
+            "from_location": from_location,
+            "to_location": to_location,
+        },
+    )
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "☢️ **ВЫХОД ИЗ УКРЫТИЯ ВО ВРЕМЯ ИМПАКТА**\n\n"
+            f"Ты собираешься выйти из безопасной зоны: {from_location} → {to_location}.\n"
+            "После выхода возврат в safe будет закрыт до конца выброса.\n"
+            f"До конца импакта: {mins}:{secs:02d}.\n\n"
+            "Подтверждаешь риск?"
+        ),
+        keyboard=create_emission_risk_confirm_keyboard().get_keyboard(),
+        random_id=0,
+    )
+    return True
+
+
+def handle_emission_risk_exit_response(player, vk, user_id: int, text: str) -> bool:
+    """Обработать подтверждение риска выхода из safe во время impact."""
+    if not has_pending_emission_risk_exit(user_id):
+        return False
+
+    data = get_pending_emission_risk_exit(user_id) or {}
+    text_lower = (text or "").strip().lower()
+
+    if text_lower in ("отмена", "cancel", "нет", "назад"):
+        clear_pending_emission_risk_exit(user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message="✅ Риск отменён. Ты остаёшься в укрытии.",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    if text_lower in ("⚠️ подтвердить риск", "подтвердить риск", "подтверждаю", "да", "выйти"):
+        target = data.get("to_location")
+        source = data.get("from_location") or player.current_location_id
+        clear_pending_emission_risk_exit(user_id)
+        if not target:
+            vk.messages.send(
+                user_id=user_id,
+                message="❌ Не удалось подтвердить выход: цель перехода потеряна.",
+                keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+                random_id=0,
+            )
+            return True
+
+        # После подтверждения сразу фиксируем риск-лок до конца impact.
+        mark_emission_safe_exit_during_impact(user_id, source, target)
+
+        from handlers.location import go_to_location
+        go_to_location(player, target, vk, user_id, bypass_risk_confirm=True)
+        return True
+
+    vk.messages.send(
+        user_id=user_id,
+        message="Выбери: '⚠️ Подтвердить риск' или 'Отмена'.",
+        keyboard=create_emission_risk_confirm_keyboard().get_keyboard(),
+        random_id=0,
+    )
     return True
 
 

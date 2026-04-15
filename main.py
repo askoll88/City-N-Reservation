@@ -64,6 +64,7 @@ from state_manager import (
     is_in_anomaly,
     has_pending_purchase,
     has_pending_loot_choice, get_pending_loot_choice, clear_pending_loot_choice,
+    has_pending_emission_risk_exit,
     has_travel_state, get_all_travel_states, clear_travel_state,
     get_ui_current_screen, set_ui_screen,
 )
@@ -162,6 +163,12 @@ def handle_message(event, vk):
     if has_pending_event(user_id):
         from handlers.events import handle_event_response
         if handle_event_response(player, vk, user_id, text):
+            return
+
+    # === Приоритет 3.65: Подтверждение выхода из safe во время impact ===
+    if has_pending_emission_risk_exit(user_id):
+        from emission import handle_emission_risk_exit_response
+        if handle_emission_risk_exit_response(player, vk, user_id, text):
             return
 
     # === Приоритет 3.7: Коридор перемещения ===

@@ -72,6 +72,7 @@ _research_state = LockedDict()  # {user_id: research_data}
 _anomaly_state = LockedDict()  # {user_id: anomaly_data}
 _pending_purchase_state = LockedDict()  # {user_id: purchase_data}
 _pending_loot_choice_state = LockedDict()  # {user_id: loot_choice_data}
+_pending_emission_risk_exit_state = LockedDict()  # {user_id: risk_exit_data}
 _travel_state = LockedDict()  # {user_id: travel_data}
 _ui_state = LockedDict()  # {user_id: {"current": dict, "stack": [dict, ...]}}
 
@@ -304,6 +305,13 @@ def cleanup_inactive_states(max_idle_seconds: int = 300):
             del _pending_loot_choice_state[user_id]
             removed += 1
 
+    # Очистка pending подтверждения риска выброса (если слишком долго)
+    for user_id in list(_pending_emission_risk_exit_state.keys()):
+        data = _pending_emission_risk_exit_state.get(user_id)
+        if data and (current_time - data.get('created_at', current_time)) > max_idle_seconds:
+            del _pending_emission_risk_exit_state[user_id]
+            removed += 1
+
     return removed
 
 
@@ -353,6 +361,29 @@ def get_pending_loot_choice(user_id: int) -> dict | None:
 def clear_pending_loot_choice(user_id: int):
     """Очистить состояние ожидающего выбора найденного лута"""
     _pending_loot_choice_state.pop(user_id, None)
+
+
+def has_pending_emission_risk_exit(user_id: int) -> bool:
+    """Проверить, есть ли ожидающее подтверждение выхода из safe в impact."""
+    return user_id in _pending_emission_risk_exit_state
+
+
+def set_pending_emission_risk_exit(user_id: int, data: dict):
+    """Установить ожидающее подтверждение риска выхода из safe."""
+    _pending_emission_risk_exit_state[user_id] = {
+        **data,
+        "created_at": time.time(),
+    }
+
+
+def get_pending_emission_risk_exit(user_id: int) -> dict | None:
+    """Получить данные ожидающего подтверждения риска выхода из safe."""
+    return _pending_emission_risk_exit_state.get(user_id)
+
+
+def clear_pending_emission_risk_exit(user_id: int):
+    """Очистить ожидающее подтверждение риска выхода из safe."""
+    _pending_emission_risk_exit_state.pop(user_id, None)
 
 
 # === Работа с состоянием перемещения (travel corridor) ===
