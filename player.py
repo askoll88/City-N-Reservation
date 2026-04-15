@@ -822,10 +822,32 @@ class Player:
         self.inventory.reload()
 
         if armor_name is None:
-            if self.equipped_armor:
+            has_any_armor = any([
+                self.equipped_armor,
+                self.equipped_armor_head,
+                self.equipped_armor_body,
+                self.equipped_armor_legs,
+                self.equipped_armor_hands,
+                self.equipped_armor_feet,
+            ])
+            if has_any_armor:
                 self.equipped_armor = None
+                self.equipped_armor_head = None
+                self.equipped_armor_body = None
+                self.equipped_armor_legs = None
+                self.equipped_armor_hands = None
+                self.equipped_armor_feet = None
                 self.armor_defense = 0
-                database.update_user_stats(self.user_id, equipped_armor=None, armor_defense=0)
+                database.update_user_stats(
+                    self.user_id,
+                    equipped_armor=None,
+                    equipped_armor_head=None,
+                    equipped_armor_body=None,
+                    equipped_armor_legs=None,
+                    equipped_armor_hands=None,
+                    equipped_armor_feet=None,
+                    armor_defense=0
+                )
                 return True, "Броня снята."
             return False, "Броня не надета."
 
@@ -838,15 +860,20 @@ class Player:
 
         # Определяем, в какой слот надевать
         if armor_type == 'head':
-            database.update_user_stats(self.user_id, equipped_armor_head=armor_name)
+            database.update_user_stats(self.user_id, equipped_armor_head=armor_name, equipped_armor=None)
+            self.equipped_armor_head = armor_name
         elif armor_type == 'body':
-            database.update_user_stats(self.user_id, equipped_armor_body=armor_name)
+            database.update_user_stats(self.user_id, equipped_armor_body=armor_name, equipped_armor=None)
+            self.equipped_armor_body = armor_name
         elif armor_type == 'legs':
-            database.update_user_stats(self.user_id, equipped_armor_legs=armor_name)
+            database.update_user_stats(self.user_id, equipped_armor_legs=armor_name, equipped_armor=None)
+            self.equipped_armor_legs = armor_name
         elif armor_type == 'hands':
-            database.update_user_stats(self.user_id, equipped_armor_hands=armor_name)
+            database.update_user_stats(self.user_id, equipped_armor_hands=armor_name, equipped_armor=None)
+            self.equipped_armor_hands = armor_name
         elif armor_type == 'feet':
-            database.update_user_stats(self.user_id, equipped_armor_feet=armor_name)
+            database.update_user_stats(self.user_id, equipped_armor_feet=armor_name, equipped_armor=None)
+            self.equipped_armor_feet = armor_name
         else:
             # Для старой брони - в основной слот
             database.update_user_stats(self.user_id, equipped_armor=armor_name, armor_defense=defense)
@@ -880,8 +907,12 @@ class Player:
             user_data.get('equipped_armor_feet'),
         ]
 
+        seen = set()
         for armor_name in armor_slots:
             if armor_name:
+                if armor_name in seen:
+                    continue
+                seen.add(armor_name)
                 item = database.get_item_by_name(armor_name)
                 if item:
                     total_defense += item.get('defense', 0)

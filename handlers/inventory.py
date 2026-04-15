@@ -25,9 +25,139 @@ def _screen_footer(action_hint: str) -> str:
     return (
         f"\n{ui.section('Действия')}\n"
         f"• Цифра: {action_hint}\n"
+        "• осмотреть <номер|название>\n"
         "• выбросить <номер|название>\n"
         "• Назад"
     )
+
+
+def _iter_all_inventory_items(player) -> list[dict]:
+    return (
+        player.inventory.weapons +
+        player.inventory.armor +
+        player.inventory.backpacks +
+        player.inventory.artifacts +
+        player.inventory.other
+    )
+
+
+def _artifact_effect_lines(item_name: str) -> list[str]:
+    effects = database.ARTIFACT_BONUSES.get(item_name, {})
+    if not effects:
+        return []
+
+    labels = {
+        "max_health_bonus": "❤️ Макс. HP",
+        "health": "❤️ Макс. HP",
+        "defense": "🛡️ Защита",
+        "defense_fire": "🔥 Защита от огня",
+        "energy": "⚡ Энергия",
+        "radiation": "☢️ Радиация",
+        "crit": "🎯 Крит. шанс",
+        "find_chance": "🔍 Шанс находок",
+        "dodge": "🌀 Уклонение",
+        "rare_find_chance": "💎 Редкая находка",
+        "luck": "🍀 Удача",
+        "perception": "👁️ Восприятие",
+        "max_weight": "🎒 Переносимый вес",
+        "all_stats": "📈 Все статы",
+    }
+
+    lines = []
+    for key, value in effects.items():
+        label = labels.get(key, key)
+        if isinstance(value, bool):
+            if value:
+                lines.append(f"• {label}: да")
+            continue
+        sign = "+" if value > 0 else ""
+        lines.append(f"• {label}: {sign}{value}")
+    return lines
+
+
+def build_item_details(item: dict) -> str:
+    """Красивый блок с подробностями по предмету."""
+    name = item.get("name", "Неизвестный предмет")
+    category = item.get("category", "other")
+    rarity = item.get("rarity")
+    description = (item.get("description") or "Описание отсутствует.").strip()
+
+    category_title = {
+        "weapons": "Оружие",
+        "armor": "Броня",
+        "backpacks": "Рюкзак",
+        "artifacts": "Артефакт",
+        "shells_bag": "Мешочек",
+    }.get(category, "Предмет")
+
+    lines = [ui.title(f"Осмотр: {name}")]
+    lines.append(f"📦 Тип: {category_title}")
+    if rarity:
+        lines.append(f"💠 Редкость: {rarity}")
+    lines.append(f"⚖️ Вес: {_fmt_weight(item, default=0.5)}")
+    if item.get("price"):
+        lines.append(f"💰 Цена: {int(item.get('price', 0))} руб.")
+
+    attack = int(item.get("attack", 0) or 0)
+    defense = int(item.get("defense", 0) or 0)
+    backpack_bonus = int(item.get("backpack_bonus", 0) or 0)
+    if attack:
+        lines.append(f"🔫 Урон: {attack}")
+    if defense:
+        lines.append(f"🛡️ Защита: {defense}")
+    if backpack_bonus:
+        lines.append(f"🎒 Бонус веса: +{backpack_bonus} кг")
+
+    artifact_lines = _artifact_effect_lines(name)
+    if artifact_lines:
+        lines.append("")
+        lines.append(ui.section("Эффекты"))
+        lines.extend(artifact_lines)
+
+    lines.append("")
+    lines.append(ui.section("Описание"))
+    lines.append(description)
+    return "\n".join(lines)
+
+
+def _get_inventory_item_by_target(player, target: str) -> tuple[dict | None, str | None]:
+    player.inventory.reload()
+
+    if target.isdigit():
+        idx = int(target)
+        if idx <= 0:
+            return None, "Номер должен быть от 1."
+
+        section = player.inventory_section or "other"
+        if section == "weapons":
+            items = player.inventory.weapons
+        elif section == "armor":
+            items = player.inventory.armor
+        elif section == "backpacks":
+            items = player.inventory.backpacks
+        elif section == "artifacts":
+            equipped = [{"name": name, "category": "artifacts"} for name in player.equipped_artifacts]
+            items = equipped + player.inventory.artifacts
+        elif section == "other":
+            items = player.inventory.other
+        else:
+            items = _iter_all_inventory_items(player)
+
+        if idx > len(items):
+            return None, f"Нет предмета с номером {idx} в текущем разделе."
+
+        item = items[idx - 1]
+        if len(item.keys()) <= 2 or not item.get("description"):
+            full = database.get_item_by_name(item["name"])
+            if full:
+                item = full
+        return item, None
+
+    item = next((i for i in _iter_all_inventory_items(player) if i["name"].lower() == target.lower()), None)
+    if not item:
+        return None, f"Предмет '{target}' не найден в инвентаре."
+    full = database.get_item_by_name(item["name"])
+    return (full or item), None
 
 
 def handle_inventory_digit(player, text: str, vk, user_id: int) -> bool:
@@ -59,6 +189,21 @@ def handle_inventory_digit(player, text: str, vk, user_id: int) -> bool:
         return _handle_artifact_digit(player, item_num, vk, user_id)
     
     return False
+
+
+def handle_inspect_item(player, target: str, vk, user_id: int):
+    """Показать подробное описание предмета из инвентаря."""
+    from main import create_inventory_keyboard, create_location_keyboard
+
+    item, err = _get_inventory_item_by_target(player, target.strip())
+    if err:
+        keyboard = create_inventory_keyboard().get_keyboard() if player.current_location_id == "инвентарь" else create_location_keyboard(player.current_location_id).get_keyboard()
+        vk.messages.send(user_id=user_id, message=f"❌ {err}", keyboard=keyboard, random_id=0)
+        return
+
+    details = build_item_details(item)
+    keyboard = create_inventory_keyboard().get_keyboard() if player.current_location_id == "инвентарь" else create_location_keyboard(player.current_location_id).get_keyboard()
+    vk.messages.send(user_id=user_id, message=details, keyboard=keyboard, random_id=0)
 
 
 def _equip_weapon(player, index: int, vk, user_id: int) -> bool:
@@ -269,6 +414,7 @@ def show_armor(player, vk, user_id: int):
             item_name = item['name']
             # Проверяем, экипирована ли броня в любом слоте
             if item_name in [
+                player.equipped_armor,
                 player.equipped_armor_head,
                 player.equipped_armor_body,
                 player.equipped_armor_legs,
@@ -808,6 +954,7 @@ def handle_drop_item(player, item_name: str, vk, user_id: int):
 
     # Проверяем, не экипирована ли броня
     equipped_armor = [
+        player.equipped_armor,
         player.equipped_armor_head,
         player.equipped_armor_body,
         player.equipped_armor_legs,
@@ -907,6 +1054,7 @@ def handle_drop_item_by_index(player, index: int, vk, user_id: int):
             return
 
         equipped_armor = [
+            player.equipped_armor,
             player.equipped_armor_head,
             player.equipped_armor_body,
             player.equipped_armor_legs,

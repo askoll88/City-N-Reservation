@@ -63,6 +63,7 @@ from state_manager import (
     is_researching, cancel_research, get_research_status,
     is_in_anomaly,
     has_pending_purchase,
+    has_pending_loot_choice, get_pending_loot_choice, clear_pending_loot_choice,
     has_travel_state, get_all_travel_states,
     get_ui_current_screen, set_ui_screen,
 )
@@ -149,6 +150,11 @@ def handle_message(event, vk):
     if has_pending_purchase(user_id):
         from handlers.market import handle_market_confirm_purchase
         if handle_market_confirm_purchase(player, vk, user_id, text):
+            return
+
+    # === Приоритет 3.55: Выбор найденного лута (аномалия) ===
+    if has_pending_loot_choice(user_id):
+        if _handle_pending_loot_choice(player, vk, user_id, text):
             return
 
     # === Приоритет 3.6: Случайное событие (если есть pending event) ===
@@ -336,6 +342,7 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         handle_inventory_digit, handle_use_item,
         handle_buy_item, handle_sell_item,
         handle_buy_artifact_slot,
+        handle_inspect_item,
         handle_unequip_backpack, handle_drop_item, handle_drop_item_by_index,
         show_weapons, show_armor, show_backpacks,
         show_artifacts, show_other, show_resources_shop,
@@ -397,6 +404,19 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         else:
             item_name = text.replace('съесть ', '')
         handle_use_item(player, item_name, vk, user_id)
+        return True
+
+    # Осмотреть предмет
+    if text.startswith('осмотреть '):
+        target = text.replace('осмотреть ', '', 1).strip()
+        if not target:
+            vk.messages.send(
+                user_id=user_id,
+                message="Напиши: осмотреть <номер|название предмета>",
+                random_id=0
+            )
+            return True
+        handle_inspect_item(player, target, vk, user_id)
         return True
 
     # Купить предмет — только на КПП или Черном рынке
@@ -540,6 +560,60 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         return True
 
     return False
+
+
+def _handle_pending_loot_choice(player, vk, user_id: int, text: str) -> bool:
+    """Обработка выбора: оставить или выбросить найденный предмет."""
+    choice = text.strip().lower()
+    if choice not in {"оставить", "выбросить"}:
+        vk.messages.send(
+            user_id=user_id,
+            message="Найден предмет. Выбери: 'Оставить' или 'Выбросить'.",
+            random_id=0
+        )
+        return True
+
+    data = get_pending_loot_choice(user_id)
+    if not data:
+        return False
+
+    item_name = data.get("item_name")
+    location_id = data.get("location_id", player.current_location_id)
+    shells_after = data.get("shells_after")
+    item_type = data.get("item_type", "предмет")
+    clear_pending_loot_choice(user_id)
+
+    if not item_name:
+        vk.messages.send(
+            user_id=user_id,
+            message="Выбор устарел. Продолжай исследование.",
+            keyboard=create_location_keyboard(location_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    if choice == "оставить":
+        database.add_item_to_inventory(user_id, item_name, 1)
+        if item_type == "artifact":
+            from handlers.quests import track_quest_artifact
+            track_quest_artifact(user_id)
+        remain_part = f"\nГильз осталось: {shells_after}" if shells_after is not None else ""
+        vk.messages.send(
+            user_id=user_id,
+            message=f"✅ {item_name} добавлен в инвентарь.{remain_part}",
+            keyboard=create_location_keyboard(location_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    remain_part = f"\nГильз осталось: {shells_after}" if shells_after is not None else ""
+    vk.messages.send(
+        user_id=user_id,
+        message=f"🗑️ Ты выбросил {item_name}.{remain_part}",
+        keyboard=create_location_keyboard(location_id).get_keyboard(),
+        random_id=0
+    )
+    return True
 
 
 def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:

@@ -985,7 +985,7 @@ def _handle_anomaly(player, vk, user_id: int):
 def handle_anomaly_action(player, vk, user_id: int, action: str):
     """Обработка действия игрока с аномалией"""
     import anomalies as anomalies_module
-    from state_manager import get_anomaly_data, clear_anomaly_state
+    from state_manager import get_anomaly_data, clear_anomaly_state, set_pending_loot_choice
 
     _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
 
@@ -1086,11 +1086,12 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
             # Артефакт получен!
             artifact_name = result["name"]
             rarity = result["rarity"]
-
-            # Добавляем артефакт в инвентарь
-            database.add_item_to_inventory(user_id, artifact_name, 1)
-            from handlers.quests import track_quest_artifact
-            track_quest_artifact(user_id)
+            artifact_item = database.get_item_by_name(artifact_name) or {
+                "name": artifact_name,
+                "category": "artifacts",
+                "rarity": rarity,
+                "description": "Описание отсутствует."
+            }
 
             # Формируем сообщение об успехе
             rarity_emoji = {
@@ -1100,6 +1101,21 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 "legendary": "🟡"
             }.get(rarity, "⚪")
 
+            # Ожидаем решение игрока: оставить или выбросить
+            set_pending_loot_choice(user_id, {
+                "item_type": "artifact",
+                "item_name": artifact_name,
+                "location_id": location_id,
+                "shells_after": shells_after,
+            })
+
+            from handlers.inventory import build_item_details
+            details = build_item_details(artifact_item)
+
+            choice_keyboard = VkKeyboard(one_time=False)
+            choice_keyboard.add_button("Оставить", color=VkKeyboardColor.POSITIVE)
+            choice_keyboard.add_button("Выбросить", color=VkKeyboardColor.NEGATIVE)
+
             vk.messages.send(
                 user_id=user_id,
                 message=(
@@ -1108,9 +1124,10 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                     f"{rarity_emoji}{artifact_name}\n"
                     f"Редкость: {rarity}\n\n"
                     f"Гильз осталось: {shells_after}\n\n"
-                    f"Артефакт добавлен в инвентарь!"
+                    f"{details}\n\n"
+                    f"Реши, что делать с находкой:"
                 ),
-                keyboard=create_location_keyboard(location_id).get_keyboard(),
+                keyboard=choice_keyboard.get_keyboard(),
                 random_id=0
             )
         else:
