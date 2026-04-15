@@ -1,6 +1,7 @@
 """
 Модуль диалогов с NPC
 """
+import time
 import database
 import player as player_module
 from player import invalidate_player_cache, get_player as get_player_from_module
@@ -24,6 +25,13 @@ from handlers.inventory import (
 
 # === Константы ===
 CLASS_CHANGE_COST = 500000  # Цена смены класса
+MEDIC_FIELD_CHECK_COOLDOWN = 6 * 60 * 60
+MEDIC_SUPPLY_COOLDOWN = 12 * 60 * 60
+MEDIC_FIELD_HEAL = 40
+MEDIC_FIELD_RAD_REDUCE = 10
+MEDIC_DETOX_COST = 150
+MEDIC_DETOX_RAD_REDUCE = 35
+MEDIC_SUPPLY_ENERGY = 20
 
 
 def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None):
@@ -146,7 +154,163 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
     if dialog_id == "my_class":
         return _handle_show_class(player, vk, user_id, npc_id)
 
+    # Сервисы медика
+    if dialog_id == "осмотр":
+        return _handle_medic_field_check(player, vk, user_id, npc_id)
+
+    if dialog_id == "детокс":
+        return _handle_medic_detox(player, vk, user_id, npc_id)
+
+    if dialog_id == "пайки":
+        return _handle_medic_supply(player, vk, user_id, npc_id)
+
     return False
+
+
+def _format_seconds_left(seconds: int) -> str:
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    if hours > 0:
+        return f"{hours}ч {minutes}м"
+    return f"{minutes}м"
+
+
+def _handle_medic_field_check(player, vk, user_id: int, npc_id: str):
+    """Бесплатный полевой осмотр с кулдауном."""
+    now = int(time.time())
+    last_use = int(database.get_user_flag(user_id, "medic_field_check_last", 0) or 0)
+    elapsed = now - last_use if last_use else MEDIC_FIELD_CHECK_COOLDOWN
+
+    if elapsed < MEDIC_FIELD_CHECK_COOLDOWN:
+        wait_left = MEDIC_FIELD_CHECK_COOLDOWN - elapsed
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🩺Медик:\n\n"
+                f"Полевой осмотр на перерыве. Подходи через {_format_seconds_left(wait_left)}."
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    old_health = int(player.health)
+    old_radiation = int(player.radiation)
+    new_health = min(int(player.max_health), old_health + MEDIC_FIELD_HEAL)
+    new_radiation = max(0, old_radiation - MEDIC_FIELD_RAD_REDUCE)
+
+    database.update_user_stats(user_id, health=new_health, radiation=new_radiation)
+    database.set_user_flag(user_id, "medic_field_check_last", now)
+    player.health = new_health
+    player.radiation = new_radiation
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🩺Медик:\n\n"
+            "Готово. Обработал раны и снял часть заражения.\n\n"
+            f"❤️ HP: {old_health} → {new_health}\n"
+            f"☢️ Радиация: {old_radiation} → {new_radiation}\n\n"
+            f"Следующий бесплатный осмотр: через {_format_seconds_left(MEDIC_FIELD_CHECK_COOLDOWN)}."
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def _handle_medic_detox(player, vk, user_id: int, npc_id: str):
+    """Платный детокс радиации."""
+    if int(player.money) < MEDIC_DETOX_COST:
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🩺Медик:\n\n"
+                f"Полный детокс стоит {MEDIC_DETOX_COST} руб.\n"
+                f"У тебя: {player.money} руб."
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    if int(player.radiation) <= 0:
+        vk.messages.send(
+            user_id=user_id,
+            message="🩺Медик:\n\nСейчас детокс не нужен — радиация в норме.",
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    old_money = int(player.money)
+    old_radiation = int(player.radiation)
+    new_money = max(0, old_money - MEDIC_DETOX_COST)
+    new_radiation = max(0, old_radiation - MEDIC_DETOX_RAD_REDUCE)
+
+    database.update_user_stats(user_id, money=new_money, radiation=new_radiation)
+    player.money = new_money
+    player.radiation = new_radiation
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🩺Медик:\n\n"
+            "Детокс завершён.\n\n"
+            f"☢️ Радиация: {old_radiation} → {new_radiation}\n"
+            f"💰 Деньги: {old_money} → {new_money}"
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def _handle_medic_supply(player, vk, user_id: int, npc_id: str):
+    """Паёк перед выходом в рейд (кулдаун)."""
+    now = int(time.time())
+    last_use = int(database.get_user_flag(user_id, "medic_supply_last", 0) or 0)
+    elapsed = now - last_use if last_use else MEDIC_SUPPLY_COOLDOWN
+
+    if elapsed < MEDIC_SUPPLY_COOLDOWN:
+        wait_left = MEDIC_SUPPLY_COOLDOWN - elapsed
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🩺Медик:\n\n"
+                f"Паёк выдается раз в 12 часов. Осталось: {_format_seconds_left(wait_left)}."
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    old_energy = int(player.energy)
+    new_energy = min(100, old_energy + MEDIC_SUPPLY_ENERGY)
+    database.update_user_stats(user_id, energy=new_energy)
+    database.add_item_to_inventory(user_id, "Бинт", 1)
+    database.add_item_to_inventory(user_id, "Антирад", 1)
+    database.add_item_to_inventory(user_id, "Вода", 1)
+    database.set_user_flag(user_id, "medic_supply_last", now)
+
+    player.energy = new_energy
+    try:
+        player.inventory.reload()
+    except Exception:
+        pass
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🩺Медик:\n\n"
+            "Держи паёк перед выходом.\n\n"
+            f"⚡ Энергия: {old_energy} → {new_energy}\n"
+            "📦 Выдано: Бинт x1, Антирад x1, Вода x1"
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
 
 
 def _handle_get_class(player, vk, user_id: int, npc_id: str):

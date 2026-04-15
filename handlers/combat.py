@@ -4,6 +4,7 @@
 import random
 import time
 import threading
+import config
 import database
 import enemies
 from constants import RESEARCH_LOCATIONS
@@ -157,11 +158,81 @@ def _clamp(value: int, min_val: int, max_val: int) -> int:
     return max(min_val, min(max_val, value))
 
 
+def _format_mult_delta(mult: float) -> str:
+    """Форматирование множителя в вид +N% / -N%."""
+    delta_pct = int(round((float(mult) - 1.0) * 100))
+    if delta_pct > 0:
+        return f"+{delta_pct}%"
+    if delta_pct < 0:
+        return f"{delta_pct}%"
+    return "0%"
+
+
+def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str, str]:
+    """Собрать инфо по модификаторам локации/событий для сообщения старта исследования."""
+    from location_mechanics import (
+        get_location_modifier,
+        get_zone_mutation_state,
+        get_energy_cost_mult,
+        get_find_chance_mult,
+        get_danger_mult,
+        get_radiation_mult,
+    )
+    from emission import is_emission_aftermath_active, get_emission_artifact_bonus
+
+    mod = get_location_modifier(location_id) or {}
+    loc_name = mod.get("name", location_id)
+
+    energy_mult = get_energy_cost_mult(location_id)
+    find_mult = get_find_chance_mult(location_id)
+    danger_mult = get_danger_mult(location_id)
+    radiation_mult = get_radiation_mult(location_id)
+
+    mode = RESEARCH_TIME_MULTIPLIERS.get(time_sec, {"chance": 1.0, "danger": 1.0})
+    mode_find_mult = float(mode.get("chance", 1.0))
+    mode_danger_mult = float(mode.get("danger", 1.0))
+
+    lines = [
+        f"• Локация: ⚡ {_format_mult_delta(energy_mult)} к расходу энергии",
+        f"• Локация: 🔍 {_format_mult_delta(find_mult)} к шансу находок",
+        f"• Локация: ⚠️ {_format_mult_delta(danger_mult)} к опасным событиям",
+        f"• Локация: ☢️ {_format_mult_delta(radiation_mult)} к радиации",
+        f"• Режим поиска: 🔍 {_format_mult_delta(mode_find_mult)} к находкам",
+        f"• Режим поиска: ⚠️ {_format_mult_delta(mode_danger_mult)} к риску",
+    ]
+
+    mutation = get_zone_mutation_state(location_id)
+    if mutation.get("active"):
+        lines.append(
+            f"• Ивент Зоны: 🌀 активна мутация (+{int(mutation.get('bonus_find', 0) * 100)}% находки, "
+            f"+{int(mutation.get('bonus_danger', 0) * 100)}% опасность)"
+        )
+
+    unique = mod.get("unique_mechanic")
+    if unique == "ambush":
+        lines.append(f"• Ивент Зоны: 💀 шанс засады {int(float(mod.get('ambush_chance', 0)) * 100)}%")
+    elif unique == "zone_mutation":
+        lines.append(f"• Ивент Зоны: 🌀 шанс мутации {int(float(mod.get('zone_mutation_chance', 0)) * 100)}%")
+    elif unique == "mutant_hunt":
+        lines.append(
+            f"• Ивент Зоны: 🐺 шанс охоты мутантов {int(float(mod.get('mutant_hunt_chance', 0)) * 100)}%"
+        )
+
+    if is_emission_aftermath_active():
+        artifact_mult = get_emission_artifact_bonus()
+        artifact_bonus = int(round((artifact_mult - 1.0) * 100))
+        rare_enemy_bonus = int(round(float(config.EMISSION_BONUS_RARE_ENEMY_CHANCE) * 100))
+        lines.append(f"• После выброса: 💎 +{artifact_bonus}% к шансу артефакта")
+        lines.append(f"• После выброса: ☣️ шанс редкого врага {rare_enemy_bonus}%")
+
+    return loc_name, "\n".join(lines)
+
+
 def _get_zone_level(location_id: str) -> int:
     return ZONE_LEVELS.get(location_id, 10)
 
 
-def _scale_enemy_for_player(player, base_enemy: dict, location_id: str) -> dict:
+def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_elite: bool = True) -> dict:
     """Собрать боевой профиль врага с мягким скейлингом от уровня игрока и роли."""
     player_level = max(1, int(getattr(player, "level", 1) or 1))
     zone_level = _get_zone_level(location_id)
@@ -182,9 +253,10 @@ def _scale_enemy_for_player(player, base_enemy: dict, location_id: str) -> dict:
     hp_mult *= role.get("hp_mult", 1.0)
     dmg_mult *= role.get("dmg_mult", 1.0)
 
-    # Элитные версии дают всплеск сложности и награды
+    # Элитные версии дают всплеск сложности и награды.
+    # allow_elite=False используется для режимов, где элитки нужно ограничить (например travel).
     elite_chance = min(0.20, 0.04 + player_level * 0.004)
-    is_elite = enemy_level >= zone_level and random.random() < elite_chance
+    is_elite = allow_elite and enemy_level >= zone_level and random.random() < elite_chance
     if is_elite:
         hp_mult *= 1.20
         dmg_mult *= 1.15
@@ -426,16 +498,17 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
         return
 
     # Тратим энергию
+    energy_before = player.energy
     player.energy -= energy_cost
     database.update_user_stats(user_id, energy=player.energy)
+    energy_after = player.energy
 
     # Запускаем таймер исследования
     start_time = time.time()
     location_id = player.current_location_id
     find_chance = player.find_chance
     rare_find_chance = player.rare_find_chance
-    current_energy = player.energy
-    max_energy = player.max_health  # используем для энергии
+    current_energy = energy_after
 
     # Сохраняем состояние исследования
     _research_timers[user_id] = {
@@ -454,17 +527,24 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
     timer.start()
 
     # Отправляем сообщение о начале исследования
-    current_energy = player.energy
-    remaining_energy = current_energy - energy_cost
+    multiplier = RESEARCH_TIME_MULTIPLIERS.get(time_sec, {"name": "Поиск", "chance": 1.0, "danger": 1.0})
+    scan_name = multiplier.get("name", "Поиск")
+    danger_mark = "низкий" if multiplier.get("danger", 1.0) <= 0.8 else "средний" if multiplier.get("danger", 1.0) <= 1.2 else "высокий"
+    loc_display_name, mods_info = _build_research_modifiers_info(location_id, time_sec)
 
     vk.messages.send(
         user_id=user_id,
         message=(
-            f"🔍ИССЛЕДОВАНИЕ НАЧАТО\n\n"
-            f"⏱️ Время: {time_sec} секунд\n"
-            f"⚡ Энергия: {current_energy} → {remaining_energy} (-{energy_cost})\n\n"
-            f"Сканирование территории...\n"
-            f"Результат придёт автоматически."
+            "═ 🔍 ИССЛЕДОВАНИЕ ЗАПУЩЕНО ═\n\n"
+            f"📍 Зона: {loc_display_name}\n"
+            f"🧭 Режим: {scan_name}\n"
+            f"⏱️ Длительность: {time_sec} сек\n"
+            f"⚠️ Риск: {danger_mark}\n"
+            f"⚡ Энергия: {energy_before} → {energy_after} (-{energy_cost})\n\n"
+            "Активные модификаторы:\n"
+            f"{mods_info}\n\n"
+            "Сканирую местность...\n"
+            "Результат придёт автоматически."
         ),
         random_id=0
     )
@@ -723,13 +803,10 @@ def _handle_research_event(player, vk, user_id: int, event_id: str, time_sec: in
         return
 
 
-# Состояние взаимодействия с аномалиями
-_anomaly_state = {}
-
-
 def _handle_anomaly(player, vk, user_id: int):
     """Обработка попадания в аномалию"""
     import anomalies as anomalies_module
+    from state_manager import set_anomaly_state
     _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
 
     # Получаем данные игрока
@@ -775,8 +852,8 @@ def _handle_anomaly(player, vk, user_id: int):
     # Получаем количество гильз
     shells = database.get_user_shells(user_id)
 
-    # Сохраняем состояние аномалии
-    _anomaly_state[user_id] = {
+    # Сохраняем состояние аномалии в централизованный state_manager
+    set_anomaly_state(user_id, {
         "anomaly_type": anomaly_type,
         "anomaly_name": anomaly_name,
         "anomaly_icon": anomaly_icon,
@@ -786,7 +863,7 @@ def _handle_anomaly(player, vk, user_id: int):
         "detector": detector_name,
         "detector_bonus": detector_bonus,
         "location_id": player.current_location_id
-    }
+    })
 
     # Формируем сообщение
     message = (
@@ -825,11 +902,12 @@ def _handle_anomaly(player, vk, user_id: int):
 def handle_anomaly_action(player, vk, user_id: int, action: str):
     """Обработка действия игрока с аномалией"""
     import anomalies as anomalies_module
+    from state_manager import get_anomaly_data, clear_anomaly_state
 
     _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
 
     # Получаем состояние аномалии
-    anomaly_data = _anomaly_state.get(user_id)
+    anomaly_data = get_anomaly_data(user_id)
     if not anomaly_data:
         return
 
@@ -846,7 +924,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
         return
 
     # Удаляем состояние аномалии
-    del _anomaly_state[user_id]
+    clear_anomaly_state(user_id)
 
     if action == "обойти":
         # Попытка обойти - зависит от восприятия
@@ -883,7 +961,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 random_id=0
             )
 
-    elif action == "бросить гильзу" or action == "добыть":
+    elif action in {"бросить гильзу", "добыть", "извлечь"}:
         # === НОВАЯ МЕХАНИКА: бросок гильзы ===
         shells = database.get_user_shells(user_id)
 
@@ -1142,7 +1220,7 @@ def _handle_found_something(player, vk, user_id: int):
         _spawn_item(player, vk, user_id)
 
 
-def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None):
+def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: bool = True):
     """Спавн врага"""
     _combat_state, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
     from emission import is_emission_rare_enemy_bonus
@@ -1161,7 +1239,12 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None):
     if not enemy:
         return
 
-    scaled_enemy = _scale_enemy_for_player(player, enemy, player.current_location_id)
+    scaled_enemy = _scale_enemy_for_player(
+        player,
+        enemy,
+        player.current_location_id,
+        allow_elite=allow_elite,
+    )
     initiative = _roll_initiative(player, scaled_enemy["enemy_speed"])
 
     # Сохраняем состояние боя

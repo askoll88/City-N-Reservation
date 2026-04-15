@@ -410,6 +410,7 @@ def create_npc_select_keyboard(location_id: str):
         "барыга": "Барыга",
         "местный житель": "Местный житель",
         "наставник": "Наставник",
+        "медик": "Медик",
     }
 
     for npc in npcs:

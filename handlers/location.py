@@ -22,6 +22,12 @@ TRAVEL_MIN_SECONDS = 15
 TRAVEL_ACCELERATION_SECONDS = 15
 TRAVEL_ACCELERATION_ENERGY = 8
 TRAVEL_SCOUT_COOLDOWN = 15
+TRAVEL_MAX_COMBAT_ENCOUNTERS = 1
+TRAVEL_EVENT_CHANCE = 18
+TRAVEL_EVENT_CHANCE_FORCED = 28
+TRAVEL_ENEMY_CHANCE = 30
+TRAVEL_ENEMY_CHANCE_FORCED = 42
+TRAVEL_POST_EMISSION_ELITE_CHANCE = 0.12
 
 
 def _should_use_travel_corridor(from_location: str, to_location: str) -> bool:
@@ -236,14 +242,17 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
     Сгенерировать событие в коридоре перехода.
     Возвращает True если сгенерирован интерактивный контент (бой/ивент).
     """
-    from state_manager import set_pending_event
+    from state_manager import set_pending_event, update_travel_data
     from random_events import get_random_event, format_event_message
     from handlers.keyboards import create_random_event_keyboard
     from handlers.combat import _spawn_enemy
+    from emission import is_emission_rare_enemy_bonus
 
     roll = random.randint(1, 100)
-    event_threshold = 45 if forced else 38
-    enemy_threshold = 80 if forced else 68
+    event_threshold = TRAVEL_EVENT_CHANCE_FORCED if forced else TRAVEL_EVENT_CHANCE
+    enemy_threshold = TRAVEL_ENEMY_CHANCE_FORCED if forced else TRAVEL_ENEMY_CHANCE
+    combat_encounters = int(travel.get("combat_encounters", 0) or 0)
+    max_combat_encounters = int(travel.get("max_combat_encounters", TRAVEL_MAX_COMBAT_ENCOUNTERS) or TRAVEL_MAX_COMBAT_ENCOUNTERS)
 
     # 1) Ивент
     if roll <= event_threshold and _check_event_cooldown(user_id):
@@ -263,11 +272,14 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
             return True
 
     # 2) Бой в пути
-    if roll <= enemy_threshold:
+    if combat_encounters < max_combat_encounters and roll <= enemy_threshold:
         encounter_loc = travel.get("to_location")
         if encounter_loc not in RESEARCH_LOCATIONS:
             encounter_loc = travel.get("from_location")
         if encounter_loc in RESEARCH_LOCATIONS:
+            allow_elite = False
+            if is_emission_rare_enemy_bonus() and random.random() < TRAVEL_POST_EMISSION_ELITE_CHANCE:
+                allow_elite = True
             original_loc = player.current_location_id
             try:
                 player.current_location_id = encounter_loc
@@ -276,7 +288,8 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
                     message="🚨 Засада в коридоре перехода! Будь готов к бою.",
                     random_id=0,
                 )
-                _spawn_enemy(player, vk, user_id)
+                _spawn_enemy(player, vk, user_id, allow_elite=allow_elite)
+                update_travel_data(user_id, {"combat_encounters": combat_encounters + 1})
                 return True
             finally:
                 player.current_location_id = original_loc
@@ -530,6 +543,8 @@ def go_to_location(player, location_id: str, vk, user_id: int):
         "pause_started_at": None,
         "seed": random.randint(1, 10_000_000),
         "resolved_checkpoints": [],
+        "combat_encounters": 0,
+        "max_combat_encounters": TRAVEL_MAX_COMBAT_ENCOUNTERS,
     })
 
     vk.messages.send(

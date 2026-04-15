@@ -247,7 +247,7 @@ def handle_anomaly_commands(player, vk, user_id: int, text: str):
     if not is_in_anomaly(user_id):
         return False
     
-    if text in ['обойти', 'извлечь', 'отступить']:
+    if text in ['обойти', 'извлечь', 'бросить гильзу', 'добыть', 'отступить']:
         handle_anomaly_action(player, vk, user_id, text)
         return True
     
@@ -293,6 +293,7 @@ def handle_npc_selection(player, vk, user_id: int, text: str):
         'барыга': 'барыга',
         'местный житель': 'местный житель',
         'наставник': 'наставник',
+        'медик': 'медик',
     }
     
     npc_id = npc_map.get(text)
