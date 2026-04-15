@@ -49,6 +49,141 @@ SORT_MAP = {
 PER_PAGE = 8  # Лотов на страницу
 
 
+def _start_listing_flow(user_id: int):
+    """Запустить пошаговый сценарий выставления лота."""
+    def updater(s):
+        s = s or {}
+        s["listing_flow"] = {"step": "item"}
+        return s
+    _market_browse_state.update(user_id, updater)
+
+
+def _clear_listing_flow(user_id: int):
+    """Очистить пошаговый сценарий выставления лота."""
+    def updater(s):
+        s = s or {}
+        s.pop("listing_flow", None)
+        return s
+    _market_browse_state.update(user_id, updater)
+
+
+def _get_listing_flow(state: dict) -> dict | None:
+    flow = state.get("listing_flow")
+    return flow if isinstance(flow, dict) else None
+
+
+def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bool:
+    """Пошаговый мастер выставления лота без ручной команды."""
+    flow = _get_listing_flow(state)
+    if not flow:
+        return False
+
+    text_raw = text.strip()
+    text_lower = text_raw.lower()
+    if text_lower in ("✖️ отмена", "отмена", "отменить", "назад"):
+        _clear_listing_flow(user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message="❌ Выставление лота отменено.",
+            keyboard=create_player_market_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    step = flow.get("step", "item")
+
+    if step == "item":
+        if len(text_raw) < 2:
+            vk.messages.send(
+                user_id=user_id,
+                message="Напиши название предмета из инвентаря. Пример: АК-74",
+                keyboard=create_market_search_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
+
+        flow["item_name"] = text_raw
+        flow["step"] = "price"
+        _market_browse_state.update(user_id, lambda s: {**(s or {}), "listing_flow": flow})
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                f"📦 Предмет: {flow['item_name']}\n\n"
+                "Шаг 2/3: укажи цену за 1 шт. (целое число)\n"
+                "Пример: 1500"
+            ),
+            keyboard=create_market_search_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    if step == "price":
+        if not text_raw.isdigit() or int(text_raw) <= 0:
+            vk.messages.send(
+                user_id=user_id,
+                message="Цена должна быть положительным числом. Пример: 1500",
+                keyboard=create_market_search_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
+
+        flow["price"] = int(text_raw)
+        flow["step"] = "qty"
+        _market_browse_state.update(user_id, lambda s: {**(s or {}), "listing_flow": flow})
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                f"📦 {flow['item_name']} | 💵 {flow['price']:,} руб/шт\n\n"
+                "Шаг 3/3: укажи количество (или напиши 'пропустить' для 1 шт.)"
+            ),
+            keyboard=create_market_search_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    if step == "qty":
+        qty = 1
+        if text_lower not in ("пропустить", "skip", "1"):
+            if not text_raw.isdigit() or int(text_raw) <= 0:
+                vk.messages.send(
+                    user_id=user_id,
+                    message="Количество должно быть положительным числом или 'пропустить'.",
+                    keyboard=create_market_search_keyboard().get_keyboard(),
+                    random_id=0,
+                )
+                return True
+            qty = int(text_raw)
+
+        item_name = flow.get("item_name", "").strip()
+        price = int(flow.get("price", 0) or 0)
+        _clear_listing_flow(user_id)
+
+        if not item_name or price <= 0:
+            vk.messages.send(
+                user_id=user_id,
+                message="⚠️ Данные выставления повреждены. Начни заново: «Выставить лот».",
+                keyboard=create_player_market_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
+
+        result = database.create_market_listing(user_id, item_name, price, qty)
+        if result.get("success"):
+            from handlers.quests import track_quest_market_list
+            track_quest_market_list(user_id)
+
+        vk.messages.send(
+            user_id=user_id,
+            message=result.get("message", "Не удалось выставить лот."),
+            keyboard=create_player_market_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    _clear_listing_flow(user_id)
+    return True
+
+
 def _format_listing(row: dict) -> str:
     """Компактный формат одного лота."""
     rarity_emoji = {"common": "⚪", "rare": "🔵", "unique": "🟣", "legendary": "🟡"}.get(
@@ -161,7 +296,7 @@ def show_market_menu(player, vk, user_id):
             f"⏱️ Срок лота: {config.MARKET_LISTING_TTL_HOURS}ч\n\n"
             "Быстрый старт:\n"
             "• Открыть лоты: «Все лоты»\n"
-            "• Продать: выставить <предмет> <цена> [кол-во]\n"
+            "• Продать: «Выставить лот» (пошагово) или командой\n"
             "• Купить: купить лот <id>"
         ),
         keyboard=create_player_market_keyboard().get_keyboard(),
@@ -459,6 +594,25 @@ def handle_market_input(player, vk, user_id, text):
     search = state.get("search")
     searching = state.get("searching", False)
     pages = max(1, int(state.get("pages", 1) or 1))
+
+    # --- Пошаговое выставление лота ---
+    if _handle_listing_flow(player, vk, user_id, text, state):
+        return True
+
+    if text_lower in ("➕ выставить лот", "выставить лот"):
+        _start_listing_flow(user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🧾 ВЫСТАВЛЕНИЕ ЛОТА\n\n"
+                "Шаг 1/3: напиши название предмета из инвентаря.\n"
+                "Пример: АК-74\n\n"
+                "Для отмены: «Отмена»"
+            ),
+            keyboard=create_market_search_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
 
     if text_lower in ("✖️ отмена", "отмена", "отменить"):
         if searching:
