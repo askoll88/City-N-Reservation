@@ -722,6 +722,7 @@ def go_back(player, vk, user_id: int):
 def handle_sleep(player, vk, user_id: int):
     """Спать в убежище"""
     from main import create_location_keyboard
+    from player import format_radiation_rate, get_radiation_stage
     import config
     
     if player.current_location_id == "убежище":
@@ -777,7 +778,9 @@ def handle_sleep(player, vk, user_id: int):
             "🛏️ Ты устроился в убежище и немного выспался.\n\n"
             f"❤️ HP: {old_hp} → {new_hp}/{player.max_health}\n"
             f"⚡ Энергия: {old_energy} → {new_energy}/100\n"
-            f"☢️ Радиация: {old_rad} → {new_rad}\n\n"
+            f"☢️ Радиация: {old_rad} → {new_rad} ед.\n"
+            f"   ({format_radiation_rate(old_rad)} → {format_radiation_rate(new_rad)})\n"
+            f"🧪 Стадия: {get_radiation_stage(new_rad)['name']}\n\n"
             "Сон в Зоне тревожный, но силы восстановлены."
         )
         vk.messages.send(

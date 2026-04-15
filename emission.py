@@ -14,11 +14,20 @@ import database
 from constants import SAFE_LOCATIONS, DANGEROUS_LOCATIONS
 from state_manager import (
     set_emission_pending, get_emission_pending, clear_emission_pending,
+    has_pending_event, get_pending_event, clear_pending_event,
+    is_in_dialog, get_dialog_info, clear_dialog_state,
+    is_researching, get_research_data, clear_research_state,
+    is_in_anomaly, get_anomaly_data, clear_anomaly_state,
+    is_in_combat, clear_combat_state,
+    has_travel_state, clear_travel_state, get_travel_data,
 )
 from handlers.keyboards import (
     create_emission_warning_keyboard,
     create_emission_impact_keyboard,
     create_location_keyboard,
+    create_npc_dialog_keyboard,
+    create_random_event_keyboard,
+    create_travel_keyboard,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,6 +44,48 @@ EMISSION_PREPARED_HP_MIN = int(getattr(config, "EMISSION_PREPARED_HP_MIN", 65) o
 EMISSION_PREPARED_ENERGY_MIN = int(getattr(config, "EMISSION_PREPARED_ENERGY_MIN", 35) or 35)
 EMISSION_PREPARED_MAX_RADIATION = int(getattr(config, "EMISSION_PREPARED_MAX_RADIATION", 90) or 90)
 EMISSION_IMPACT_HALF_DEATH_RAD = int(getattr(config, "EMISSION_IMPACT_HALF_DEATH_RAD", 250) or 250)
+
+
+def _log_emission_exception(
+    action: str,
+    *,
+    emission_id: int | None = None,
+    phase: str | None = None,
+    user_id: int | None = None,
+    location: str | None = None,
+    extra: dict | None = None,
+):
+    """Единый формат логирования ошибок выброса с контекстом."""
+    details = []
+    if emission_id is not None:
+        details.append(f"emission_id={emission_id}")
+    if phase:
+        details.append(f"phase={phase}")
+    if user_id is not None:
+        details.append(f"user_id={user_id}")
+    if location:
+        details.append(f"location={location}")
+    if extra:
+        details.append(f"extra={extra}")
+    suffix = (" | " + ", ".join(details)) if details else ""
+    logger.exception("Emission error: %s%s", action, suffix)
+
+
+def _safe_vk_send(vk, *, action: str, emission_id: int | None = None, phase: str | None = None, ctx_user_id: int | None = None, location: str | None = None, **kwargs) -> bool:
+    """Безопасная отправка VK-сообщения с обязательным логированием ошибок."""
+    try:
+        vk.messages.send(**kwargs)
+        return True
+    except Exception:
+        _log_emission_exception(
+            action,
+            emission_id=emission_id,
+            phase=phase,
+            user_id=ctx_user_id,
+            location=location,
+            extra={"keys": sorted(list(kwargs.keys()))},
+        )
+        return False
 
 
 # =========================================================================
@@ -337,21 +388,24 @@ def _send_warning_to_all_players(vk, emission_id: int):
         if location in SAFE_LOCATIONS:
             safe_count += 1
             # Игрок в безопасности — просто уведомляем
-            try:
-                vk.messages.send(
-                    user_id=vk_id,
-                    message=(
-                        "⚠️ **ВНИМАНИЕ! ВЫБРОС!**\n\n"
-                        "Зона предупреждает: через 15 минут начнётся Выброс!\n"
-                        f"Ты в укрытии ({location}) — ты в безопасности.\n\n"
-                        "🛡️ Укрытия: Город, Больница, Убежище\n\n"
-                        f"{lock_timer_text}\n\n"
-                        "Если ты в Зоне — срочно возвращайся в укрытие!"
-                    ),
-                    random_id=0,
-                )
-            except Exception as e:
-                logger.error("Выброс #%d: не удалось отправить warning (safe) игроку %s: %s", emission_id, vk_id, e)
+            _safe_vk_send(
+                vk,
+                action="send_warning_safe",
+                emission_id=emission_id,
+                phase=EMISSION_PHASE_WARNING,
+                ctx_user_id=vk_id,
+                location=location,
+                user_id=vk_id,
+                message=(
+                    "⚠️ **ВНИМАНИЕ! ВЫБРОС!**\n\n"
+                    "Зона предупреждает: через 15 минут начнётся Выброс!\n"
+                    f"Ты в укрытии ({location}) — ты в безопасности.\n\n"
+                    "🛡️ Укрытия: Город, Больница, Убежище\n\n"
+                    f"{lock_timer_text}\n\n"
+                    "Если ты в Зоне — срочно возвращайся в укрытие!"
+                ),
+                random_id=0,
+            )
         else:
             warned_count += 1
             # Игрок в опасности — ставим pending событие
@@ -384,15 +438,18 @@ def _send_warning_to_all_players(vk, emission_id: int):
 
             set_emission_pending(vk_id, emission_event)
 
-            try:
-                vk.messages.send(
-                    user_id=vk_id,
-                    message=emission_event["text"],
-                    keyboard=create_emission_warning_keyboard().get_keyboard(),
-                    random_id=0,
-                )
-            except Exception as e:
-                logger.error("Выброс #%d: не удалось отправить warning игроку %s: %s", emission_id, vk_id, e)
+            _safe_vk_send(
+                vk,
+                action="send_warning_danger",
+                emission_id=emission_id,
+                phase=EMISSION_PHASE_WARNING,
+                ctx_user_id=vk_id,
+                location=location,
+                user_id=vk_id,
+                message=emission_event["text"],
+                keyboard=create_emission_warning_keyboard().get_keyboard(),
+                random_id=0,
+            )
 
     logger.info(
         "Выброс #%d: предупреждение отправлено. В опасности: %d, в безопасности: %d",
@@ -410,14 +467,24 @@ def handle_emission_warning_response(player, vk, user_id: int, text: str) -> boo
     if not event:
         return False
 
-    # Handle both warning and impact phases
-    phase = event.get("phase")
-    if phase == "warning":
-        return _handle_warning_choice(player, vk, user_id, event, text)
-    elif phase == "impact":
-        return _handle_impact_choice(player, vk, user_id, event, text)
-
-    return False
+    try:
+        # Handle both warning and impact phases
+        phase = event.get("phase")
+        if phase == "warning":
+            return _handle_warning_choice(player, vk, user_id, event, text)
+        if phase == "impact":
+            return _handle_impact_choice(player, vk, user_id, event, text)
+        return False
+    except Exception:
+        _log_emission_exception(
+            "handle_emission_warning_response",
+            emission_id=int(event.get("emission_id") or 0),
+            phase=str(event.get("phase") or ""),
+            user_id=user_id,
+            location=getattr(player, "current_location_id", None),
+            extra={"text": text[:64]},
+        )
+        return True
 
 
 def _handle_warning_choice(player, vk, user_id: int, event: dict, text: str) -> bool:
@@ -427,12 +494,7 @@ def _handle_warning_choice(player, vk, user_id: int, event: dict, text: str) -> 
     # Пропуск
     if text_lower in ("пропустить", "skip"):
         clear_emission_pending(user_id)
-        vk.messages.send(
-            user_id=user_id,
-            message="Зона запомнит твою смелость... или глупость.",
-            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
-            random_id=0,
-        )
+        _restore_interrupted_context(player, vk, user_id, "Ты остался в Зоне. Возвращаю к прерванному действию.")
         return True
 
     # Выбор
@@ -446,12 +508,19 @@ def _handle_warning_choice(player, vk, user_id: int, event: dict, text: str) -> 
                 break
 
     if choice_idx is None:
-        return False
+        vk.messages.send(
+            user_id=user_id,
+            message="Выбери: 'Бежать в укрытие' или 'Остаться и рискнуть'.",
+            keyboard=create_emission_warning_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return True
 
     choice = event["choices"][choice_idx]
     clear_emission_pending(user_id)
 
     if choice["effect"].get("flee_to_safe"):
+        _abort_interrupted_context(user_id)
         database.set_user_flag(user_id, _EMISSION_RISK_LOCK_FLAG, 0)
         database.set_user_flag(user_id, _EMISSION_RISK_EID_FLAG, 0)
         return _flee_to_safe_location(player, vk, user_id)
@@ -470,6 +539,7 @@ def _handle_warning_choice(player, vk, user_id: int, event: dict, text: str) -> 
             keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
             random_id=0,
         )
+        _restore_interrupted_context(player, vk, user_id, "Ты остался в Зоне. Прерванный сценарий продолжен.")
 
     return True
 
@@ -480,12 +550,7 @@ def _handle_impact_choice(player, vk, user_id: int, event: dict, text: str) -> b
 
     if text_lower in ("пропустить", "skip"):
         clear_emission_pending(user_id)
-        vk.messages.send(
-            user_id=user_id,
-            message="Выброс бушует. Надеюсь, ты найдёшь укрытие...",
-            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
-            random_id=0,
-        )
+        _restore_interrupted_context(player, vk, user_id, "Выброс бушует. Продолжаем прерванное действие.")
         return True
 
     # "Бежать в укрытие" during impact
@@ -503,6 +568,7 @@ def _handle_impact_choice(player, vk, user_id: int, event: dict, text: str) -> b
                 random_id=0,
             )
             return True
+        _abort_interrupted_context(user_id)
         clear_emission_pending(user_id)
         return _flee_to_safe_location(player, vk, user_id)
 
@@ -526,7 +592,127 @@ def _handle_impact_choice(player, vk, user_id: int, event: dict, text: str) -> b
         handle_inventory_command(player, vk, user_id)
         return True
 
-    return False
+    vk.messages.send(
+        user_id=user_id,
+        message="Во время выброса доступны: 'Бежать в укрытие', 'Лечиться' или 'Инвентарь'.",
+        keyboard=create_emission_impact_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0,
+    )
+    return True
+
+
+def _abort_interrupted_context(user_id: int):
+    """Автостоп прерванных сценариев, если игрок убежал в safe."""
+    clear_pending_event(user_id)
+    clear_dialog_state(user_id)
+    clear_research_state(user_id)
+    clear_anomaly_state(user_id)
+    clear_combat_state(user_id)
+    clear_travel_state(user_id)
+
+
+def _restore_interrupted_context(player, vk, user_id: int, header: str = ""):
+    """
+    Восстановить интерфейс прерванного сценария после ответа на выброс.
+    Приоритет: бой -> аномалия -> квест/рандом-ивент -> диалог -> исследование -> путь.
+    """
+    from random_events import format_event_message
+    from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+    from handlers.combat import create_combat_keyboard
+
+    if is_in_combat(user_id):
+        msg = "⚔️ Бой продолжается."
+        if header:
+            msg = f"{header}\n\n{msg}"
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
+            random_id=0,
+        )
+        return
+
+    if is_in_anomaly(user_id):
+        anomaly = get_anomaly_data(user_id) or {}
+        anomaly_name = anomaly.get("anomaly_name", "аномалия")
+        shells = database.get_user_shells(user_id)
+        keyboard = VkKeyboard(one_time=False)
+        keyboard.add_button("Обойти", color=VkKeyboardColor.POSITIVE)
+        if shells > 0:
+            keyboard.add_button("Бросить гильзу", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+        keyboard.add_button("Отступить", color=VkKeyboardColor.NEGATIVE)
+        msg = f"⚠️ Ты всё ещё в аномалии: {anomaly_name}.\nВыбери действие."
+        if header:
+            msg = f"{header}\n\n{msg}"
+        vk.messages.send(user_id=user_id, message=msg, keyboard=keyboard.get_keyboard(), random_id=0)
+        return
+
+    if has_pending_event(user_id):
+        event = get_pending_event(user_id)
+        if event:
+            stage = int(event.get("_stage_index", 0) or 0)
+            msg = format_event_message(event, stage)
+            if header:
+                msg = f"{header}\n\n{msg}"
+            vk.messages.send(
+                user_id=user_id,
+                message=msg,
+                keyboard=create_random_event_keyboard(event, stage_index=stage).get_keyboard(),
+                random_id=0,
+            )
+            return
+
+    if is_in_dialog(user_id):
+        dialog = get_dialog_info(user_id) or {}
+        npc_id = dialog.get("npc")
+        msg = "💬 Диалог продолжается."
+        if header:
+            msg = f"{header}\n\n{msg}"
+        if npc_id:
+            vk.messages.send(
+                user_id=user_id,
+                message=msg,
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0,
+            )
+            return
+
+    if is_researching(user_id):
+        data = get_research_data(user_id) or {}
+        remaining = int(max(0, data.get("duration", 0) - (time.time() - data.get("start_time", 0))))
+        msg = (
+            "⏳ Исследование продолжается.\n\n"
+            f"Осталось: {remaining} сек.\n"
+            "Можно ждать результат или написать 'отмена'."
+        )
+        if header:
+            msg = f"{header}\n\n{msg}"
+        vk.messages.send(user_id=user_id, message=msg, random_id=0)
+        return
+
+    if has_travel_state(user_id):
+        travel = get_travel_data(user_id) or {}
+        frm = travel.get("from_location", "?")
+        to = travel.get("to_location", "?")
+        msg = f"🧭 Путь продолжается: {frm} → {to}"
+        if header:
+            msg = f"{header}\n\n{msg}"
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            keyboard=create_travel_keyboard().get_keyboard(),
+            random_id=0,
+        )
+        return
+
+    if header:
+        vk.messages.send(
+            user_id=user_id,
+            message=header,
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0,
+        )
 
 
 def _flee_to_safe_location(player, vk, user_id: int) -> bool:
@@ -583,18 +769,21 @@ def _apply_emission_impact(vk, emission_id: int):
 
             if location in SAFE_LOCATIONS:
                 safe += 1
-                try:
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message=(
-                            "☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
-                            f"Ты в укрытии ({location}) — урон не получен.\n"
-                            "Оставайся в безопасности до окончания выброса."
-                        ),
-                        random_id=0,
-                    )
-                except Exception as e:
-                    logger.error("Выброс #%d: не удалось отправить impact-safe игроку %s: %s", emission_id, vk_id, e)
+                _safe_vk_send(
+                    vk,
+                    action="send_impact_safe",
+                    emission_id=emission_id,
+                    phase=EMISSION_PHASE_IMPACT,
+                    ctx_user_id=vk_id,
+                    location=location,
+                    user_id=vk_id,
+                    message=(
+                        "☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
+                        f"Ты в укрытии ({location}) — урон не получен.\n"
+                        "Оставайся в безопасности до окончания выброса."
+                    ),
+                    random_id=0,
+                )
                 continue
 
             # --- УРОН ---
@@ -610,7 +799,7 @@ def _apply_emission_impact(vk, emission_id: int):
             new_radiation = int(user_row.get("radiation") or 0) + radiation
 
             # Урон от накопленной радиации: чем выше накопление, тем быстрее тает HP.
-            from player import calculate_radiation_hp_loss
+            from player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
             rad_overload_damage = calculate_radiation_hp_loss(new_radiation, new_health)
             new_health = max(1, new_health - rad_overload_damage)
 
@@ -635,24 +824,27 @@ def _apply_emission_impact(vk, emission_id: int):
 
                 prep_line = "Неподготовлен: " + ", ".join(prep_state.get("missing", []))
                 risk_line = "Да" if risk_locked else "Нет"
-                try:
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message=(
-                            "☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
-                            "Ты не успел укрыться, а Зона не прощает ошибок.\n"
-                            "💀 Смертельная волна выброса накрыла тебя.\n\n"
-                            f"🎲 Шанс фатального исхода: {fatal_chance * 100:.1f}% (бросок {fatal_roll * 100:.1f}%)\n"
-                            f"⚠️ Риск-режим: {risk_line}\n"
-                            f"📉 {prep_line}\n\n"
-                            f"Штраф: -{death_result['money_lost']} руб, -{death_result['experience_lost']} XP.\n"
-                            "Ты очнулся в больнице."
-                        ),
-                        keyboard=create_location_keyboard("больница", user_row.get("level")).get_keyboard(),
-                        random_id=0,
-                    )
-                except Exception as e:
-                    logger.error("Выброс #%d: не удалось отправить fatal-impact игроку %s: %s", emission_id, vk_id, e)
+                _safe_vk_send(
+                    vk,
+                    action="send_impact_fatal",
+                    emission_id=emission_id,
+                    phase=EMISSION_PHASE_IMPACT,
+                    ctx_user_id=vk_id,
+                    location=location,
+                    user_id=vk_id,
+                    message=(
+                        "☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
+                        "Ты не успел укрыться, а Зона не прощает ошибок.\n"
+                        "💀 Смертельная волна выброса накрыла тебя.\n\n"
+                        f"🎲 Шанс фатального исхода: {fatal_chance * 100:.1f}% (бросок {fatal_roll * 100:.1f}%)\n"
+                        f"⚠️ Риск-режим: {risk_line}\n"
+                        f"📉 {prep_line}\n\n"
+                        f"Штраф: -{death_result['money_lost']} руб, -{death_result['experience_lost']} XP.\n"
+                        "Ты очнулся в больнице."
+                    ),
+                    keyboard=create_location_keyboard("больница", user_row.get("level")).get_keyboard(),
+                    random_id=0,
+                )
                 continue
 
             # Потеря предметов
@@ -691,6 +883,7 @@ def _apply_emission_impact(vk, emission_id: int):
             death_line = ""
             if new_health <= 1:
                 death_line = "💀 Ты на грани смерти! Срочно лечись!\n\n"
+            stage = get_radiation_stage(new_radiation)
 
             impact_event = {
                 "type": "emission_impact",
@@ -703,6 +896,8 @@ def _apply_emission_impact(vk, emission_id: int):
                     f"Ты был в: {location}\n"
                     f"💔 Получено урона: -{damage} HP ({current_health} → {new_health})\n"
                     f"☢️ Радиация: +{radiation}\n"
+                    f"☢️ Уровень: {new_radiation} ед. ({format_radiation_rate(new_radiation)})\n"
+                    f"🧪 Стадия: {stage['name']}\n"
                     f"☣️ Токсичность: -{rad_overload_damage} HP (накопление)\n"
                     f"{items_line}"
                     f"{death_line}"
@@ -718,18 +913,28 @@ def _apply_emission_impact(vk, emission_id: int):
             set_emission_pending(vk_id, impact_event)
 
             # Отправляем результат игроку
-            try:
-                vk.messages.send(
-                    user_id=vk_id,
-                    message=impact_event["text"],
-                    keyboard=create_emission_impact_keyboard(location).get_keyboard(),
-                    random_id=0,
-                )
-            except Exception as e:
-                logger.error("Выброс #%d: не удалось отправить impact игроку %s: %s", emission_id, vk_id, e)
+            _safe_vk_send(
+                vk,
+                action="send_impact_damage",
+                emission_id=emission_id,
+                phase=EMISSION_PHASE_IMPACT,
+                ctx_user_id=vk_id,
+                location=location,
+                user_id=vk_id,
+                message=impact_event["text"],
+                keyboard=create_emission_impact_keyboard(location).get_keyboard(),
+                random_id=0,
+            )
         except Exception as e:
             failed += 1
-            logger.error("Выброс #%d: ошибка обработки игрока %s: %s", emission_id, player_data.get("vk_id"), e, exc_info=True)
+            _log_emission_exception(
+                "apply_emission_impact_player",
+                emission_id=emission_id,
+                phase=EMISSION_PHASE_IMPACT,
+                user_id=player_data.get("vk_id"),
+                location=player_data.get("location"),
+                extra={"error": str(e)},
+            )
 
     logger.info(
         "Выброс #%d: удар применён. Повреждено: %d, погибло: %d, в безопасности: %d, ошибок: %d",
@@ -762,51 +967,94 @@ def _apply_impact_radiation_accumulation(vk, emission: dict):
     minute_slot = int((now - impact_time).total_seconds() // 60)
     per_min_gain = _impact_radiation_gain_per_minute(impact_time, end_time)
     players = database.get_all_active_players()
-    from player import calculate_radiation_hp_loss
+    from player import calculate_radiation_hp_loss, format_radiation_rate
 
     for player_data in players:
-        vk_id = int(player_data["vk_id"])
-        location = player_data.get("location", "город")
-        if location in SAFE_LOCATIONS:
-            continue
+        try:
+            vk_id = int(player_data["vk_id"])
+            location = player_data.get("location", "город")
+            if location in SAFE_LOCATIONS:
+                continue
 
-        last_eid = int(database.get_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0) or 0)
-        last_slot = int(database.get_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1) or -1)
-        if last_eid == emission_id and last_slot == minute_slot:
-            continue
+            last_eid = int(database.get_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, 0) or 0)
+            last_slot = int(database.get_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, -1) or -1)
+            if last_eid == emission_id and last_slot == minute_slot:
+                continue
 
-        database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, emission_id)
-        database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, minute_slot)
+            database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_EID_FLAG, emission_id)
+            database.set_user_flag(vk_id, _EMISSION_IMPACT_RAD_SLOT_FLAG, minute_slot)
 
-        user = database.get_user_by_vk(vk_id) or {}
-        hp = int(user.get("health") or 1)
-        rad = int(user.get("radiation") or 0)
+            user = database.get_user_by_vk(vk_id) or {}
+            hp = int(user.get("health") or 1)
+            rad = int(user.get("radiation") or 0)
 
-        risk_locked = bool(int(database.get_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0) or 0))
-        risk_mult = 1.2 if risk_locked else 1.0
-        rad_gain = max(1, int((per_min_gain + random.randint(-2, 3)) * risk_mult))
-        new_radiation = rad + rad_gain
-        overload = calculate_radiation_hp_loss(new_radiation, hp)
-        new_health = max(1, hp - overload)
+            risk_locked = bool(int(database.get_user_flag(vk_id, _EMISSION_RISK_LOCK_FLAG, 0) or 0))
+            risk_mult = 1.2 if risk_locked else 1.0
+            rad_gain = max(1, int((per_min_gain + random.randint(-2, 3)) * risk_mult))
+            new_radiation = rad + rad_gain
+            overload = calculate_radiation_hp_loss(new_radiation, hp)
+            new_health = max(1, hp - overload)
 
-        database.update_user_stats(vk_id, health=new_health, radiation=new_radiation)
+            # При критическом накоплении больше не держим игрока "вечно на 1 HP":
+            # выброс добивает и отправляет в больницу.
+            if new_health <= 1 and new_radiation >= EMISSION_IMPACT_HALF_DEATH_RAD:
+                death_result = _apply_emission_death_penalty(vk_id, user)
+                clear_emission_pending(vk_id)
+                _safe_vk_send(
+                    vk,
+                    action="send_impact_critical_radiation_death",
+                    emission_id=emission_id,
+                    phase=EMISSION_PHASE_IMPACT,
+                    ctx_user_id=vk_id,
+                    location=location,
+                    user_id=vk_id,
+                    message=(
+                        "☣️ **Критическое облучение**\n\n"
+                        f"☢️ Радиация достигла {new_radiation} ед. ({format_radiation_rate(new_radiation)}).\n"
+                        "Организм не выдержал продолжающийся выброс.\n\n"
+                        f"Штраф: -{death_result['money_lost']} руб, -{death_result['experience_lost']} XP.\n"
+                        "Ты очнулся в больнице."
+                    ),
+                    keyboard=create_location_keyboard("больница", user.get("level")).get_keyboard(),
+                    random_id=0,
+                )
+                continue
 
-        # Сообщения редко: каждые 5 минут и при критических порогах.
-        if (minute_slot % 5 == 0) or new_radiation >= 220 or new_health <= 15:
-            try:
-                vk.messages.send(
+            database.update_user_stats(vk_id, health=new_health, radiation=new_radiation)
+
+            # Сообщения редко: каждые 5 минут и при критических порогах.
+            if (minute_slot % 5 == 0) or new_radiation >= 220 or new_health <= 15:
+                escape_hint = (
+                    "Путь в укрытие уже закрыт до конца выброса."
+                    if risk_locked else
+                    "Можно попытаться прорваться в укрытие."
+                )
+                _safe_vk_send(
+                    vk,
+                    action="send_impact_radiation_tick",
+                    emission_id=emission_id,
+                    phase=EMISSION_PHASE_IMPACT,
+                    ctx_user_id=vk_id,
+                    location=location,
                     user_id=vk_id,
                     message=(
                         "☣️ **Выброс усиливается**\n\n"
-                        f"☢️ Радиация: +{rad_gain} (итого {new_radiation})\n"
+                        f"☢️ Радиация: +{rad_gain} (итого {new_radiation} ед., {format_radiation_rate(new_radiation)})\n"
                         f"💔 Урон от токсичности: -{overload} HP (осталось {new_health})\n\n"
-                        "Спастись поможет только антирад и укрытие."
+                        f"Спастись поможет антирад. {escape_hint}"
                     ),
                     keyboard=create_emission_impact_keyboard(location).get_keyboard(),
                     random_id=0,
                 )
-            except Exception:
-                pass
+        except Exception as e:
+            _log_emission_exception(
+                "impact_radiation_accumulation_player",
+                emission_id=emission_id,
+                phase=EMISSION_PHASE_IMPACT,
+                user_id=player_data.get("vk_id"),
+                location=player_data.get("location"),
+                extra={"error": str(e), "minute_slot": minute_slot},
+            )
 
 
 def _is_player_prepared_for_emission(vk_id: int, user_row: dict) -> tuple[bool, dict]:
@@ -979,7 +1227,12 @@ def _announce_emission_cancelled(vk, emission_id: int):
                 random_id=0,
             )
         except Exception:
-            pass
+            _log_emission_exception(
+                "announce_cancelled_send",
+                emission_id=emission_id,
+                phase=EMISSION_PHASE_CANCELLED,
+                user_id=vk_id,
+            )
 
     logger.info("Выброс #%d: отменён, сообщения отправлены", emission_id)
 
@@ -1010,7 +1263,12 @@ def _announce_aftermath(vk, emission_id: int):
                 random_id=0,
             )
         except Exception:
-            pass
+            _log_emission_exception(
+                "announce_aftermath_send",
+                emission_id=emission_id,
+                phase=EMISSION_PHASE_FINISHED,
+                user_id=vk_id,
+            )
 
     logger.info("Выброс #%d: объявлены последствия (бонусы)", emission_id)
 
@@ -1143,7 +1401,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
     player.health = max(1, player.health - damage)
     player.radiation = player.radiation + config.EMISSION_RADIATION
 
-    from player import calculate_radiation_hp_loss
+    from player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
     rad_overload_damage = calculate_radiation_hp_loss(player.radiation, player.health)
     player.health = max(1, player.health - rad_overload_damage)
 
@@ -1153,6 +1411,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
         radiation=player.radiation,
     )
 
+    stage = get_radiation_stage(player.radiation)
     try:
         vk.messages.send(
             user_id=user_id,
@@ -1162,12 +1421,19 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
                 f"💔 Урон: -{damage} HP\n"
                 f"☣️ Токсичность: -{rad_overload_damage} HP\n"
                 f"❤️ HP: {player.health}\n"
-                f"☢️ Радиация: +{config.EMISSION_RADIATION}\n\n"
+                f"☢️ Радиация: {player.radiation} ед. ({format_radiation_rate(player.radiation)})\n"
+                f"🧪 Стадия: {stage['name']}\n\n"
                 "Беги в укрытие!"
             ),
             random_id=0,
         )
     except Exception:
-        pass
+        _log_emission_exception(
+            "check_emission_during_action_send",
+            emission_id=int(emission.get("id") or 0),
+            phase=EMISSION_PHASE_IMPACT,
+            user_id=user_id,
+            location=location,
+        )
 
     return True

@@ -1230,7 +1230,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 def _handle_radiation(player, vk, user_id: int):
     """Обработка радиоактивного заражения (с модификатором локации)"""
     from location_mechanics import get_radiation_mult
-    from player import calculate_radiation_hp_loss
+    from player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
     _, create_location_keyboard, _, _ = _get_main_imports()
 
     # Получаем реальные данные игрока
@@ -1249,6 +1249,7 @@ def _handle_radiation(player, vk, user_id: int):
     database.update_user_stats(user_id, health=new_health, radiation=new_radiation)
 
     rad_mult_text = f" (x{rad_mult:.1f} зона)" if rad_mult != 1.0 else ""
+    stage = get_radiation_stage(new_radiation)
 
     max_hp = int(getattr(player, "max_health", 100) or 100)
     vk.messages.send(
@@ -1260,7 +1261,8 @@ def _handle_radiation(player, vk, user_id: int):
             f"Токсичность накопления: {rad_overload}\n"
             f"Итоговый урон: {total_rad_damage}\n"
             f"Радиация: +{rad_gain}\n"
-            f"☢️ Текущая радиация: {new_radiation}\n"
+            f"☢️ Текущая радиация: {new_radiation} ед. ({format_radiation_rate(new_radiation)})\n"
+            f"🧪 Стадия: {stage['name']}\n"
             f"HP: {new_health}/{max_hp}"
         ),
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),

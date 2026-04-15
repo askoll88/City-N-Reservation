@@ -9,6 +9,50 @@ import ui
 logger = logging.getLogger(__name__)
 
 
+RADIATION_RPH_PER_POINT = 0.2
+
+
+def radiation_points_to_rph(radiation: int) -> float:
+    """Перевести внутренние очки радиации в эквивалент мощности дозы (Р/ч)."""
+    rad = max(0, int(radiation or 0))
+    return rad * RADIATION_RPH_PER_POINT
+
+
+def format_radiation_rate(radiation: int) -> str:
+    """Строка мощности дозы в Р/ч."""
+    rate = radiation_points_to_rph(radiation)
+    if rate < 10:
+        return f"{rate:.2f} Р/ч"
+    return f"{rate:.1f} Р/ч"
+
+
+def get_radiation_stage(radiation: int) -> dict:
+    """
+    Игровая шкала стадий, вдохновлённая реальной лучевой болезнью.
+    Привязка по внутренним очкам, но в UI показываем эквивалент Р/ч.
+    """
+    rad = max(0, int(radiation or 0))
+    if rad < 30:
+        return {"name": "I. Фоновый уровень", "note": "Клинических симптомов нет"}
+    if rad < 80:
+        return {"name": "II. Лёгкое облучение", "note": "Риск ранних симптомов"}
+    if rad < 120:
+        return {"name": "III. Ранняя лучевая реакция", "note": "Слабость, тошнота, падение выносливости"}
+    if rad < 170:
+        return {"name": "IV. Средняя лучевая болезнь", "note": "Стабильный вред без лечения"}
+    if rad < 220:
+        return {"name": "V. Тяжёлая лучевая болезнь", "note": "Высокий риск отказа организма"}
+    if rad < 250:
+        return {"name": "VI. Критическое состояние", "note": "Нужен антирад немедленно"}
+    return {"name": "VII. Терминальная стадия", "note": "Почти неизбежная смерть без срочной помощи"}
+
+
+def format_radiation_state(radiation: int) -> str:
+    """Краткий формат радиации: очки, Р/ч и стадия."""
+    stage = get_radiation_stage(radiation)
+    return f"{int(max(0, radiation or 0))} ед. ({format_radiation_rate(radiation)}) • {stage['name']}"
+
+
 def calculate_radiation_hp_loss(radiation: int, current_hp: int) -> int:
     """
     Тик-урон от накопленной радиации.
@@ -464,7 +508,6 @@ class Player:
         # Прогресс-бары
         hp_line = ui.meter_line("HP", self.health, self.max_health, width=14)
         energy_line = ui.meter_line("Энергия", self.energy, 100, width=14)
-        radiation_line = ui.meter_line("Радиация", self.radiation, 100, width=14)
         exp_line = ui.meter_line("Опыт", self.experience, exp_needed, width=14)
 
         # ═══════════════════════════════════════════════════
@@ -546,7 +589,10 @@ class Player:
         lines.append(ui.section("Показатели"))
         lines.append(f"❤️ {hp_line}")
         lines.append(f"⚡ {energy_line}")
-        lines.append(f"☢️ {radiation_line}")
+        rad_stage = get_radiation_stage(self.radiation)
+        lines.append(f"☢️ Радфон: {int(self.radiation)} ед. ({format_radiation_rate(self.radiation)})")
+        lines.append(f"🧪 Стадия: {rad_stage['name']}")
+        lines.append(f"   {rad_stage['note']}")
         lines.append("")
 
         # --- Опыт и деньги ---
@@ -1118,7 +1164,12 @@ class Player:
             if self.energy != old_energy:
                 parts.append(f"⚡ Энергия: {old_energy} -> {self.energy}/100")
             if self.radiation != old_radiation:
-                parts.append(f"☢️ Радиация: {old_radiation} -> {self.radiation}")
+                parts.append(
+                    "☢️ Радиация: "
+                    f"{old_radiation} -> {self.radiation} ед. "
+                    f"({format_radiation_rate(old_radiation)} -> {format_radiation_rate(self.radiation)})"
+                )
+                parts.append(f"🧪 {get_radiation_stage(self.radiation)['name']}")
             if len(parts) == 1:
                 parts.append("Эффект не сработал, параметры уже были на максимуме.")
             msg = "\n".join(parts)

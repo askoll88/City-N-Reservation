@@ -177,6 +177,7 @@ def _format_seconds_left(seconds: int) -> str:
 
 def _handle_medic_field_check(player, vk, user_id: int, npc_id: str):
     """Бесплатный полевой осмотр с кулдауном."""
+    from player import format_radiation_rate, get_radiation_stage
     now = int(time.time())
     last_use = int(database.get_user_flag(user_id, "medic_field_check_last", 0) or 0)
     elapsed = now - last_use if last_use else MEDIC_FIELD_CHECK_COOLDOWN
@@ -210,7 +211,9 @@ def _handle_medic_field_check(player, vk, user_id: int, npc_id: str):
             "🩺Медик:\n\n"
             "Готово. Обработал раны и снял часть заражения.\n\n"
             f"❤️ HP: {old_health} → {new_health}\n"
-            f"☢️ Радиация: {old_radiation} → {new_radiation}\n\n"
+            f"☢️ Радиация: {old_radiation} → {new_radiation} ед.\n"
+            f"   ({format_radiation_rate(old_radiation)} → {format_radiation_rate(new_radiation)})\n"
+            f"🧪 Стадия: {get_radiation_stage(new_radiation)['name']}\n\n"
             f"Следующий бесплатный осмотр: через {_format_seconds_left(MEDIC_FIELD_CHECK_COOLDOWN)}."
         ),
         keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
@@ -221,6 +224,7 @@ def _handle_medic_field_check(player, vk, user_id: int, npc_id: str):
 
 def _handle_medic_detox(player, vk, user_id: int, npc_id: str):
     """Платный детокс радиации."""
+    from player import format_radiation_rate, get_radiation_stage
     if int(player.money) < MEDIC_DETOX_COST:
         vk.messages.send(
             user_id=user_id,
@@ -257,7 +261,9 @@ def _handle_medic_detox(player, vk, user_id: int, npc_id: str):
         message=(
             "🩺Медик:\n\n"
             "Детокс завершён.\n\n"
-            f"☢️ Радиация: {old_radiation} → {new_radiation}\n"
+            f"☢️ Радиация: {old_radiation} → {new_radiation} ед.\n"
+            f"   ({format_radiation_rate(old_radiation)} → {format_radiation_rate(new_radiation)})\n"
+            f"🧪 Стадия: {get_radiation_stage(new_radiation)['name']}\n"
             f"💰 Деньги: {old_money} → {new_money}"
         ),
         keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
