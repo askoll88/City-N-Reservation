@@ -189,14 +189,40 @@ STREAK_BONUSES = {
     5: {"multiplier": 2.0,  "title": "Пять дней подряд",       "bonus_item": ("Антидот", 1)},
     # Первая неделя: фиксированный "легендарный" подарок новичку (временная заглушка).
     7: {"multiplier": 2.5,  "title": "Первая неделя!",         "bonus_item": ("Мамины бусы", 1)},
-    # Дальше по стрикам: только предметы уровня rare и ниже.
-    14: {"multiplier": 3.0, "title": "Две недели подряд!",     "bonus_item": ("Ночная звезда", 1)},
-    30: {"multiplier": 5.0, "title": "Легенда Зоны (30 дней)", "bonus_item": ("Золотая рыбка", 1)},
+    # Дальше по стрикам: недельная ротация (одинакова для всех игроков в течение недели).
+    14: {"multiplier": 3.0, "title": "Две недели подряд!",     "bonus_item": "weekly_rotate"},
+    30: {"multiplier": 5.0, "title": "Легенда Зоны (30 дней)", "bonus_item": "weekly_rotate"},
+}
+
+# Пулы ротации по порогам стрика.
+# В рамках одной недели у всех игроков будет один и тот же предмет для конкретного порога.
+WEEKLY_STREAK_ITEM_POOLS = {
+    14: [
+        "Ночная звезда",
+        "Грави",
+        "Выверт",
+        "Колобок",
+        "Кровь камня",
+    ],
+    30: [
+        "Золотая рыбка",
+        "Мамины бусы",
+        "Лунный свет",
+        "Огненный шар",
+        "Каменный цветок",
+    ],
 }
 
 
 def _today_key() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _utc_week_key() -> str:
+    """UTC-ключ недели для синхронной ротации между всеми игроками."""
+    dt = datetime.now(timezone.utc)
+    iso = dt.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
 
 
 def _get_best_streak_bonus(streak: int) -> dict:
@@ -246,6 +272,31 @@ def calculate_quest_reward(quest: dict, streak: int):
     if streak in STREAK_BONUSES and STREAK_BONUSES[streak].get("bonus_item"):
         bonus_item = STREAK_BONUSES[streak]["bonus_item"]
     return xp, money, bonus_item
+
+
+def resolve_streak_bonus_item(streak: int):
+    """
+    Вернуть фактический бонусный предмет за конкретный порог стрика.
+    Для weekly_rotate выбирает предмет детерминированно по UTC-неделе.
+    """
+    bonus = STREAK_BONUSES.get(streak)
+    if not bonus:
+        return None
+
+    bonus_item = bonus.get("bonus_item")
+    if not bonus_item:
+        return None
+    if isinstance(bonus_item, (tuple, list)) and len(bonus_item) >= 2:
+        return (str(bonus_item[0]), int(bonus_item[1]))
+    if bonus_item != "weekly_rotate":
+        return None
+
+    pool = WEEKLY_STREAK_ITEM_POOLS.get(streak, [])
+    if not pool:
+        return None
+
+    rng = random.Random(f"streak-rotate:{streak}:{_utc_week_key()}")
+    return (rng.choice(pool), 1)
 
 
 def format_quest_display(quest: dict, progress: int, streak: int) -> str:

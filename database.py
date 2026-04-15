@@ -2994,9 +2994,10 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             total_money = int(total_money * mult)
 
             # Бонусный предмет выдаём только на пороговых значениях.
-            threshold_bonus = STREAK_BONUSES.get(new_streak)
-            if threshold_bonus and threshold_bonus.get("bonus_item"):
-                bonus_items.append(threshold_bonus["bonus_item"])
+            from daily_quests import resolve_streak_bonus_item
+            resolved_bonus_item = resolve_streak_bonus_item(new_streak)
+            if resolved_bonus_item:
+                bonus_items.append(resolved_bonus_item)
 
             # Обновляем streak и claimed
             cursor.execute("""
