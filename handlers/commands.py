@@ -159,9 +159,16 @@ def handle_navigation(player, vk, user_id: int, text: str):
 
 def handle_location_actions(player, vk, user_id: int, text: str):
     """Обработка действий в локации"""
+    from handlers.location import handle_sleep
+
     # Лечение
     if text in ['лечиться', 'лечение'] or 'лечиться' in text or 'лечение' in text:
         handle_heal(player, vk, user_id)
+        return True
+
+    # Отдых в убежище
+    if text in ['спать', 'сон', 'отдохнуть'] or 'спать' in text:
+        handle_sleep(player, vk, user_id)
         return True
     
     return False

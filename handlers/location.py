@@ -715,12 +715,63 @@ def go_back(player, vk, user_id: int):
 def handle_sleep(player, vk, user_id: int):
     """Спать в убежище"""
     from main import create_location_keyboard
+    import config
     
     if player.current_location_id == "убежище":
+        now = int(time.time())
+        cooldown = int(getattr(config, "SHELTER_SLEEP_COOLDOWN_SEC", 3 * 60 * 60) or (3 * 60 * 60))
+        last_sleep = int(database.get_user_flag(user_id, "shelter_sleep_last", 0) or 0)
+
+        if last_sleep and now - last_sleep < cooldown:
+            left = cooldown - (now - last_sleep)
+            hours = left // 3600
+            minutes = (left % 3600) // 60
+            wait_text = f"{hours}ч {minutes}м" if hours > 0 else f"{minutes}м"
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    "🛏️ Ты уже отдыхал недавно.\n\n"
+                    f"Следующий полноценный сон будет доступен через {wait_text}."
+                ),
+                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        old_hp = int(player.health)
+        old_energy = int(player.energy)
+        old_rad = int(player.radiation)
+
+        hp_heal = max(12, int(player.max_health * 0.18))
+        energy_heal = 35
+        rad_reduce = 10
+
+        new_hp = min(player.max_health, old_hp + hp_heal)
+        new_energy = min(100, old_energy + energy_heal)
+        new_rad = max(0, old_rad - rad_reduce)
+
+        # Если и так всё в порядке — даём только лёгкий восстановительный тик.
+        if new_hp == old_hp and new_energy == old_energy and new_rad == old_rad:
+            new_energy = min(100, old_energy + 8)
+
+        player.health = new_hp
+        player.energy = new_energy
+        player.radiation = new_rad
+
+        database.update_user_stats(
+            user_id,
+            health=new_hp,
+            energy=new_energy,
+            radiation=new_rad,
+        )
+        database.set_user_flag(user_id, "shelter_sleep_last", now)
+
         message = (
-            "Ты ложишься на старый матрас...\n\n"
-            "Сон беспокойный, снятся кошмары. Но ты отдохнул.\n"
-            "+20 выносливости"
+            "🛏️ Ты устроился в убежище и немного выспался.\n\n"
+            f"❤️ HP: {old_hp} → {new_hp}/{player.max_health}\n"
+            f"⚡ Энергия: {old_energy} → {new_energy}/100\n"
+            f"☢️ Радиация: {old_rad} → {new_rad}\n\n"
+            "Сон в Зоне тревожный, но силы восстановлены."
         )
         vk.messages.send(
             user_id=user_id,
