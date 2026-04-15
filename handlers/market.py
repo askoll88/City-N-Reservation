@@ -3,6 +3,7 @@ P2P рынок игроков (черный рынок)
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 
@@ -47,6 +48,28 @@ SORT_MAP = {
 }
 
 PER_PAGE = 8  # Лотов на страницу
+
+
+def _sanitize_keyboard_payload(keyboard_payload: str, max_cols: int = 2) -> str:
+    """
+    Принудительно ограничить количество кнопок в строке.
+    Предохранитель от VK API 911 (row contains too much columns).
+    """
+    try:
+        data = json.loads(keyboard_payload)
+        rows = data.get("buttons", [])
+        safe_rows = []
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            trimmed = row[:max_cols]
+            # Пустые строки не отправляем
+            if trimmed:
+                safe_rows.append(trimmed)
+        data["buttons"] = safe_rows
+        return json.dumps(data, ensure_ascii=False)
+    except Exception:
+        return keyboard_payload
 
 
 def _start_listing_flow(user_id: int):
@@ -263,11 +286,12 @@ def _show_market_listings_page(player, vk, user_id, page,
 
     keyboard = create_market_pagination_keyboard(cur_page, pages, category=category,
                                                    sort=sort, search=search)
+    keyboard_payload = _sanitize_keyboard_payload(keyboard.get_keyboard(), max_cols=2)
 
     vk.messages.send(
         user_id=user_id,
         message="\n".join(lines),
-        keyboard=keyboard.get_keyboard(),
+        keyboard=keyboard_payload,
         random_id=0,
     )
 
