@@ -622,6 +622,8 @@ class Player:
 
     def _handle_death(self):
         """Обработка смерти персонажа"""
+        from state_manager import clear_travel_state
+
         # Штрафы при смерти
         old_money = self.money
         old_experience = self.experience
@@ -651,6 +653,10 @@ class Player:
         self.health = self.max_health // 2  # 50% здоровья
         self.energy = 50  # 50% энергии
         self.radiation = 0
+        self.current_location_id = "больница"
+
+        clear_travel_state(self.user_id)
+        database.update_user_location(self.user_id, "больница")
 
         database.update_user_stats(
             self.user_id,
@@ -665,6 +671,8 @@ class Player:
 
     def _handle_radiation_death(self):
         """Обработка смерти от радиации"""
+        from state_manager import clear_travel_state
+
         # Штрафы при смерти от радиации
         old_money = self.money
         old_experience = self.experience
@@ -694,6 +702,10 @@ class Player:
         self.radiation = 0
         self.health = self.max_health // 2  # 50% здоровья
         self.energy = 50  # 50% энергии
+        self.current_location_id = "больница"
+
+        clear_travel_state(self.user_id)
+        database.update_user_location(self.user_id, "больница")
 
         database.update_user_stats(
             self.user_id,

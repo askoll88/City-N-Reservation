@@ -220,10 +220,15 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
     mod = get_location_modifier(location_id) or {}
     loc_name = mod.get("name", location_id)
 
-    energy_mult = get_energy_cost_mult(location_id)
+    # Базовые моды локации (без временных ивентов)
+    energy_mult = float(mod.get("energy_cost_mult", 1.0))
+    base_find_mult = float(mod.get("find_chance_mult", 1.0))
+    base_danger_mult = float(mod.get("danger_mult", 1.0))
+    radiation_mult = float(mod.get("radiation_mult", 1.0))
+
+    # Итоговые моды (с учётом ивентов, например мутации)
     find_mult = get_find_chance_mult(location_id)
     danger_mult = get_danger_mult(location_id)
-    radiation_mult = get_radiation_mult(location_id)
 
     mode = RESEARCH_TIME_MULTIPLIERS.get(time_sec, {"chance": 1.0, "danger": 1.0})
     mode_find_mult = float(mode.get("chance", 1.0))
@@ -231,8 +236,8 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
 
     lines = [
         f"• Локация: ⚡ {_format_mult_delta(energy_mult)} к расходу энергии",
-        f"• Локация: 🔍 {_format_mult_delta(find_mult)} к шансу находок",
-        f"• Локация: ⚠️ {_format_mult_delta(danger_mult)} к опасным событиям",
+        f"• Локация: 🔍 {_format_mult_delta(base_find_mult)} к шансу находок",
+        f"• Локация: ⚠️ {_format_mult_delta(base_danger_mult)} к опасным событиям",
         f"• Локация: ☢️ {_format_mult_delta(radiation_mult)} к радиации",
         f"• Режим поиска: 🔍 {_format_mult_delta(mode_find_mult)} к находкам",
         f"• Режим поиска: ⚠️ {_format_mult_delta(mode_danger_mult)} к риску",
@@ -244,6 +249,7 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
             f"• Ивент Зоны: 🌀 активна мутация (+{int(mutation.get('bonus_find', 0) * 100)}% находки, "
             f"+{int(mutation.get('bonus_danger', 0) * 100)}% опасность)"
         )
+        lines.append(f"• Итого по зоне: 🔍 {_format_mult_delta(find_mult)} | ⚠️ {_format_mult_delta(danger_mult)}")
 
     unique = mod.get("unique_mechanic")
     if unique == "ambush":
@@ -377,6 +383,7 @@ def _format_combat_hud(combat: dict, player) -> str:
 def _handle_death(player, vk, user_id: int):
     """Обработка смерти персонажа в бою"""
     _, create_location_keyboard, _, _ = _get_main_imports()
+    from state_manager import clear_travel_state
 
     # Штрафы при смерти
     lost_money = player.money // 2
@@ -387,8 +394,12 @@ def _handle_death(player, vk, user_id: int):
     player.health = player.max_health // 2  # 50% HP
     player.energy = 50
 
-    # Перемещаем игрока в город после смерти
-    database.update_user_location(user_id, "город")
+    # Смерть в коридоре должна моментально прерывать путь.
+    clear_travel_state(user_id)
+
+    # Перемещаем игрока в больницу после смерти.
+    player.current_location_id = "больница"
+    database.update_user_location(user_id, "больница")
 
     database.update_user_stats(
         user_id,
@@ -414,7 +425,7 @@ def _handle_death(player, vk, user_id: int):
     vk.messages.send(
         user_id=user_id,
         message=message,
-        keyboard=create_location_keyboard("город").get_keyboard(),
+        keyboard=create_location_keyboard("больница").get_keyboard(),
         random_id=0
     )
 
