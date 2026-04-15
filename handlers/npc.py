@@ -1,7 +1,11 @@
 """
 Модуль диалогов с NPC
 """
+import random
 import time
+from datetime import datetime, timedelta, timezone
+
+import config
 import database
 import player as player_module
 from player import invalidate_player_cache, get_player as get_player_from_module
@@ -32,6 +36,9 @@ MEDIC_FIELD_RAD_REDUCE = 10
 MEDIC_DETOX_COST = 150
 MEDIC_DETOX_RAD_REDUCE = 35
 MEDIC_SUPPLY_ENERGY = 20
+DOSIMETER_FORECAST_BASIC_COST = 12000
+DOSIMETER_FORECAST_ADVANCED_COST = 35000
+MSK_TZ = timezone(timedelta(hours=3))
 
 
 def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None):
@@ -164,6 +171,13 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
     if dialog_id == "пайки":
         return _handle_medic_supply(player, vk, user_id, npc_id)
 
+    # Прогнозы выброса от дозиметриста
+    if dialog_id == "прогноз":
+        return _handle_dosimeter_forecast(player, vk, user_id, npc_id, advanced=False)
+
+    if dialog_id == "прогнозпрем":
+        return _handle_dosimeter_forecast(player, vk, user_id, npc_id, advanced=True)
+
     return False
 
 
@@ -173,6 +187,208 @@ def _format_seconds_left(seconds: int) -> str:
     if hours > 0:
         return f"{hours}ч {minutes}м"
     return f"{minutes}м"
+
+
+def _fmt_clock_msk(dt_utc_naive: datetime | None) -> str:
+    """Преобразовать UTC-naive в часы/минуты МСК."""
+    if not dt_utc_naive:
+        return "--:--"
+    aware = dt_utc_naive.replace(tzinfo=timezone.utc).astimezone(MSK_TZ)
+    return aware.strftime("%H:%M")
+
+
+def _fmt_delta_short(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    minutes = seconds // 60
+    sec = seconds % 60
+    return f"{minutes}:{sec:02d}"
+
+
+def _build_emission_forecast(emission: dict, advanced: bool) -> tuple[str, str]:
+    """Сформировать текст прогноза и уровень качества."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    status = str(emission.get("status") or "pending")
+    warning_time = emission.get("warning_time")
+    impact_time = emission.get("impact_time")
+    end_time = emission.get("end_time")
+
+    to_warning = int((warning_time - now).total_seconds()) if warning_time else 0
+    to_impact = int((impact_time - now).total_seconds()) if impact_time else 0
+    to_end = int((end_time - now).total_seconds()) if end_time else 0
+    to_lock = to_impact - 5 * 60
+
+    roll = random.random()
+    if advanced:
+        if roll < 0.68:
+            quality = "точный"
+        elif roll < 0.95:
+            quality = "коридор"
+        else:
+            quality = "шум"
+    else:
+        if roll < 0.33:
+            quality = "точный"
+        elif roll < 0.82:
+            quality = "коридор"
+        elif roll < 0.95:
+            quality = "шум"
+        else:
+            quality = "ложный"
+
+    cancel_text = f"Вероятность отмены перед impact: ~{int(config.EMISSION_CANCEL_CHANCE * 100)}%"
+
+    if status == "impact":
+        if quality == "точный":
+            msg = (
+                "☣️ Фаза: IMPACT (идёт прямо сейчас)\n"
+                f"До конца волны: {_fmt_delta_short(to_end)}\n"
+                f"Ориентир окончания: {_fmt_clock_msk(end_time)} МСК\n"
+                "Рекомендация: не выходить из safe без антирада."
+            )
+        elif quality == "коридор":
+            lo = max(0, to_end - 4 * 60)
+            hi = max(0, to_end + 6 * 60)
+            msg = (
+                "☣️ Фаза: IMPACT\n"
+                f"Окончание ожидается через ~{_fmt_delta_short(lo)} .. {_fmt_delta_short(hi)}\n"
+                "Рекомендация: держать лечение на тиках и переждать волну."
+            )
+        elif quality == "ложный":
+            msg = (
+                "📡 Канал забит помехами.\n"
+                "Сигнал противоречивый: возможен быстрый спад в ближайшие минуты.\n"
+                "Доверие к прогнозу низкое."
+            )
+        else:
+            msg = (
+                "📡 Сильные помехи в эфире.\n"
+                "Сигнатура нестабильна: амплитуда волны скачет, точный тайминг недоступен."
+            )
+        return msg, quality
+
+    if status == "warning":
+        if quality == "точный":
+            msg = (
+                "⚠️ Фаза: WARNING\n"
+                f"До impact: {_fmt_delta_short(to_impact)}\n"
+                f"Блок safe для рискнувших: через {_fmt_delta_short(to_lock)}\n"
+                f"Impact ориентир: {_fmt_clock_msk(impact_time)} МСК\n"
+                f"{cancel_text}"
+            )
+        elif quality == "коридор":
+            lo = max(0, to_impact - 3 * 60)
+            hi = max(0, to_impact + 5 * 60)
+            msg = (
+                "⚠️ Фаза: WARNING\n"
+                f"Impact ожидается через ~{_fmt_delta_short(lo)} .. {_fmt_delta_short(hi)}\n"
+                "Совет: уходить в safe сейчас, без затяжки."
+            )
+        elif quality == "ложный":
+            msg = (
+                "📡 Сигнал размазан.\n"
+                "Есть версия, что удар может сорваться, но подтверждения нет.\n"
+                "Риск всё ещё высокий."
+            )
+        else:
+            msg = (
+                "📡 Эфир нестабилен.\n"
+                "Окно удара плавает в пределах ближайших 10-25 минут."
+            )
+        return msg, quality
+
+    # pending
+    if quality == "точный":
+        msg = (
+            "🛰️ Фаза: PENDING\n"
+            f"Предупреждение: через {_fmt_delta_short(to_warning)} ({_fmt_clock_msk(warning_time)} МСК)\n"
+            f"Impact: через {_fmt_delta_short(to_impact)} ({_fmt_clock_msk(impact_time)} МСК)\n"
+            f"{cancel_text}"
+        )
+    elif quality == "коридор":
+        spread = 8 if advanced else 16
+        lo_warn = max(0, to_warning - spread * 60)
+        hi_warn = max(0, to_warning + spread * 60)
+        lo_imp = max(0, to_impact - spread * 60)
+        hi_imp = max(0, to_impact + spread * 60)
+        msg = (
+            "🛰️ Фаза: PENDING\n"
+            f"WARNING окно: {_fmt_delta_short(lo_warn)} .. {_fmt_delta_short(hi_warn)}\n"
+            f"IMPACT окно: {_fmt_delta_short(lo_imp)} .. {_fmt_delta_short(hi_imp)}\n"
+            "Рекомендация: подготовить антирады заранее."
+        )
+    elif quality == "ложный":
+        msg = (
+            "📡 Ложный след в данных.\n"
+            "Похоже на затяжную паузу по активности, но точность прогноза низкая."
+        )
+    else:
+        msg = (
+            "📡 Сырые данные с датчиков.\n"
+            "В ближайшие часы ожидается рост аномальной активности, точное окно не фиксируется."
+        )
+
+    return msg, quality
+
+
+def _handle_dosimeter_forecast(player, vk, user_id: int, npc_id: str, advanced: bool):
+    """Платный прогноз выброса с вариативной точностью."""
+    tier_name = "Расширенный" if advanced else "Базовый"
+    cost = DOSIMETER_FORECAST_ADVANCED_COST if advanced else DOSIMETER_FORECAST_BASIC_COST
+
+    if int(player.money) < cost:
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "☢️Дозиметрист:\n\n"
+                f"{tier_name} прогноз стоит {cost:,} руб.\n"
+                f"У тебя: {int(player.money):,} руб."
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    emission = database.get_active_emission()
+    if not emission:
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "☢️Дозиметрист:\n\n"
+                "Сейчас нет активного цикла выброса в канале мониторинга.\n"
+                "Подойди чуть позже — сниму прогноз, когда появится окно."
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    old_money = int(player.money)
+    new_money = max(0, old_money - cost)
+    database.update_user_stats(user_id, money=new_money)
+    player.money = new_money
+
+    forecast_text, quality = _build_emission_forecast(emission, advanced=advanced)
+    quality_label = {
+        "точный": "высокая",
+        "коридор": "средняя",
+        "шум": "низкая",
+        "ложный": "критически низкая",
+    }.get(quality, "неизвестная")
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "☢️Дозиметрист:\n\n"
+            f"Принято. Пакет: {tier_name}.\n"
+            f"Списано: {cost:,} руб.\n"
+            f"Баланс: {old_money:,} → {new_money:,}\n\n"
+            f"{forecast_text}\n\n"
+            f"Надёжность сигнала: {quality_label}."
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
 
 
 def _handle_medic_field_check(player, vk, user_id: int, npc_id: str):

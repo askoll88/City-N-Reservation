@@ -429,6 +429,7 @@ def handle_npc_selection(player, vk, user_id: int, text: str):
         'местный житель': 'местный житель',
         'наставник': 'наставник',
         'медик': 'медик',
+        'дозиметрист': 'дозиметрист',
     }
     
     npc_id = npc_map.get(text)
