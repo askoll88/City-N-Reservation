@@ -504,7 +504,7 @@ def _handle_shop_redirect(player, vk, user_id: int, npc_id: str, next_stage: str
     if next_stage == "shop_menu":
         vk.messages.send(
             user_id=user_id,
-            message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+            message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n💰 Продать — скупка трофеев\n\nЦены — как есть, торга не будет.»",
             keyboard=create_kpp_shop_keyboard().get_keyboard(),
             random_id=0
         )

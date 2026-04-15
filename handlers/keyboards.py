@@ -233,6 +233,8 @@ def create_kpp_shop_keyboard():
     keyboard.add_button("Оружие", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("Броня", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
+    keyboard.add_button("Продать", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 

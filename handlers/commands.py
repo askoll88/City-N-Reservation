@@ -432,11 +432,11 @@ def handle_kpp_shop_commands(player, vk, user_id: int, text: str):
     if not is_at_kpp and player.current_location_id != 'кпп':
         return False
     
-    if text in ['купить', 'оружие', 'броня']:
+    if text in ['купить', 'оружие', 'броня', 'продать']:
         if text == 'купить':
             vk.messages.send(
                 user_id=user_id,
-                message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n💰 Продать — скупка трофеев\n\nЦены — как есть, торга не будет.»",
                 keyboard=create_kpp_shop_keyboard().get_keyboard(),
                 random_id=0
             )
@@ -446,6 +446,14 @@ def handle_kpp_shop_commands(player, vk, user_id: int, text: str):
             return True
         elif text == 'броня':
             show_soldier_armor(player, vk, user_id)
+            return True
+        elif text == 'продать':
+            show_weapons(player, vk, user_id)
+            vk.messages.send(
+                user_id=user_id,
+                message="💰 Продажа военному: напиши `продать <название>` или `продать <номер>`.",
+                random_id=0
+            )
             return True
     
     return False
@@ -533,14 +541,24 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
     npc_id = dialog_info.get("npc")
     stage = dialog_info.get("stage", "")
 
-    # В торговых стадиях Барыги отдаём команды в main.py,
-    # иначе "купить/продать" перехватываются диалогом.
-    if npc_id == "барыга" and stage in {"buy_artifacts", "sell_artifacts"}:
-        market_passthrough = (
+    # В торговых стадиях NPC отдаём команды покупки/продажи в общий обработчик предметов,
+    # иначе они перехватываются диалогом и не выполняются.
+    shop_stages = {
+        "shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_food",
+        "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts"
+    }
+    if stage in shop_stages:
+        shop_passthrough = (
             text.startswith("купить ")
             or text.startswith("продать ")
-            or text in {"рынок игроков", "рынок", "рынок показать", "мои лоты", "мои сделки"}
+            or text.isdigit()
         )
+        if shop_passthrough:
+            return False
+
+    # Отдельно оставляем passthrough для команд P2P рынка у Барыги.
+    if npc_id == "барыга" and stage in {"buy_artifacts", "sell_artifacts"}:
+        market_passthrough = text in {"рынок игроков", "рынок", "рынок показать", "мои лоты", "мои сделки"}
         if market_passthrough:
             return False
 
@@ -549,20 +567,21 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         handle_npc_back(player, vk, user_id)
         return True
 
-    if text == 'назад' and stage not in ("shop_weapons", "shop_armor", "shop_meds", "shop_food", "buy_artifacts", "sell_artifacts"):
+    if text == 'назад' and stage not in ("shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_food", "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts"):
         handle_npc_back(player, vk, user_id)
         return True
     
     # Обработка меню магазина у военного
-    if npc_id == "военный" and text in ["купить", "оружие", "броня"]:
+    if npc_id == "военный" and text in ["купить", "оружие", "броня", "продать"]:
         from state_manager import set_dialog_state
         from handlers.keyboards import create_kpp_shop_keyboard
+        from handlers.inventory import show_weapons
         
         if text == "купить":
             set_dialog_state(user_id, npc_id, "shop_menu")
             vk.messages.send(
                 user_id=user_id,
-                message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n\nЦены — как есть, торга не будет.»",
+                message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n💰 Продать — скупка трофеев\n\nЦены — как есть, торга не будет.»",
                 keyboard=create_kpp_shop_keyboard().get_keyboard(),
                 random_id=0
             )
@@ -574,6 +593,15 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         elif text == "броня":
             set_dialog_state(user_id, npc_id, "shop_armor")
             show_soldier_armor(player, vk, user_id)
+            return True
+        elif text == "продать":
+            set_dialog_state(user_id, npc_id, "sell_items")
+            show_weapons(player, vk, user_id)
+            vk.messages.send(
+                user_id=user_id,
+                message="💰 Продажа военному: напиши `продать <название>` или `продать <номер>`.",
+                random_id=0
+            )
             return True
     
     # Обработка меню магазина у учёного
