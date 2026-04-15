@@ -590,10 +590,10 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
     _handle_research_event(temp_player, vk, user_id, event, time_sec)
 
     # === Уникальные механики локаций ===
-    _check_location_unique_mechanics(location_id, event, vk, user_id)
+    _check_location_unique_mechanics(temp_player, location_id, event, vk, user_id)
 
 
-def _check_location_unique_mechanics(location_id: str, event_id: str, vk, user_id: int):
+def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk, user_id: int):
     """Проверить и применить уникальные механики локаций после исследования"""
     from location_mechanics import (
         check_ambush, check_zone_mutation, check_mutant_hunt,
@@ -619,6 +619,12 @@ def _check_location_unique_mechanics(location_id: str, event_id: str, vk, user_i
         combat_data = _combat_state_ref.get(user_id)
         if combat_data:
             combat_data["ambush"] = True  # Флаг для удвоенного лута
+        else:
+            # Если базовый исход исследования был не "enemy", засада всё равно должна запустить бой.
+            _spawn_enemy(player, vk, user_id, enemy_type="military", allow_elite=False)
+            combat_data = _combat_state_ref.get(user_id)
+            if combat_data:
+                combat_data["ambush"] = True
 
     # === НИИ: МУТАЦИЯ ЗОНЫ ===
     mutation = check_zone_mutation(location_id)
