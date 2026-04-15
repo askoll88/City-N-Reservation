@@ -112,12 +112,134 @@ RESEARCH_ENERGY_COST = {
     15: 3
 }
 
+# Базовые уровни зон для мягкого скейлинга врагов
+ZONE_LEVELS = {
+    "дорога_военная_часть": 8,
+    "дорога_нии": 12,
+    "дорога_зараженный_лес": 16,
+}
+
+# Роли врагов: делают поведение боев менее однообразным
+ENEMY_ROLE_PROFILES = {
+    "bruiser": {
+        "label": "Танк",
+        "hp_mult": 1.25,
+        "dmg_mult": 0.90,
+        "speed_mod": -2,
+    },
+    "assassin": {
+        "label": "Хищник",
+        "hp_mult": 0.90,
+        "dmg_mult": 1.15,
+        "speed_mod": 2,
+        "evade_chance": 18,  # шанс уклонения от атаки игрока
+    },
+    "controller": {
+        "label": "Контролёр",
+        "hp_mult": 1.00,
+        "dmg_mult": 1.05,
+        "speed_mod": 1,
+        "drain_chance": 35,  # шанс высосать энергию при попадании
+        "drain_min": 6,
+        "drain_max": 12,
+    },
+}
+
 
 def _get_main_imports():
     """Ленивый импорт для избежания циклической зависимости"""
     import main
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
     return _combat_state, main.create_location_keyboard, VkKeyboard, VkKeyboardColor
+
+
+def _clamp(value: int, min_val: int, max_val: int) -> int:
+    return max(min_val, min(max_val, value))
+
+
+def _get_zone_level(location_id: str) -> int:
+    return ZONE_LEVELS.get(location_id, 10)
+
+
+def _scale_enemy_for_player(player, base_enemy: dict, location_id: str) -> dict:
+    """Собрать боевой профиль врага с мягким скейлингом от уровня игрока и роли."""
+    player_level = max(1, int(getattr(player, "level", 1) or 1))
+    zone_level = _get_zone_level(location_id)
+
+    # Мягкий скейлинг (не 1:1): зона остается важной, но контент не "умирает".
+    delta = _clamp(int(round((player_level - zone_level) * 0.35)), -2, 4)
+    enemy_level = max(1, zone_level + random.randint(-1, 1) + delta)
+
+    hp_mult = 1.0 + 0.08 * (enemy_level - 1)
+    dmg_mult = 1.0 + 0.06 * (enemy_level - 1)
+
+    role_key = random.choices(
+        population=list(ENEMY_ROLE_PROFILES.keys()),
+        weights=[35, 35, 30],
+        k=1,
+    )[0]
+    role = ENEMY_ROLE_PROFILES[role_key]
+    hp_mult *= role.get("hp_mult", 1.0)
+    dmg_mult *= role.get("dmg_mult", 1.0)
+
+    # Элитные версии дают всплеск сложности и награды
+    elite_chance = min(0.20, 0.04 + player_level * 0.004)
+    is_elite = enemy_level >= zone_level and random.random() < elite_chance
+    if is_elite:
+        hp_mult *= 1.20
+        dmg_mult *= 1.15
+
+    scaled_hp = max(20, int(base_enemy["hp"] * hp_mult))
+    scaled_dmg = max(5, int(base_enemy["damage"] * dmg_mult))
+    enemy_speed = max(3, int(10 + enemy_level // 5 + role.get("speed_mod", 0)))
+
+    reward_mult = 1.0 + max(0.0, (enemy_level - zone_level) * 0.06)
+    if is_elite:
+        reward_mult += 0.25
+
+    enemy_name = base_enemy["name"]
+    if is_elite:
+        enemy_name = f"⭐ Элитный {enemy_name}"
+
+    return {
+        "enemy_name": enemy_name,
+        "enemy_description": base_enemy["description"],
+        "enemy_hp": scaled_hp,
+        "enemy_max_hp": scaled_hp,
+        "enemy_damage": scaled_dmg,
+        "enemy_level": enemy_level,
+        "enemy_role": role_key,
+        "enemy_role_label": role["label"],
+        "enemy_speed": enemy_speed,
+        "enemy_evade_chance": int(role.get("evade_chance", 0)),
+        "enemy_drain_chance": int(role.get("drain_chance", 0)),
+        "enemy_drain_min": int(role.get("drain_min", 0)),
+        "enemy_drain_max": int(role.get("drain_max", 0)),
+        "enemy_is_elite": bool(is_elite),
+        "reward_mult": round(reward_mult, 2),
+    }
+
+
+def _roll_initiative(player, enemy_speed: int) -> dict:
+    """Бросок инициативы d20 + модификаторы."""
+    player_perception = int(getattr(player, "perception", 0) or 0)
+    player_luck = int(getattr(player, "luck", 0) or 0)
+
+    player_roll = random.randint(1, 20)
+    enemy_roll = random.randint(1, 20)
+
+    player_total = player_roll + player_perception // 2 + player_luck // 3
+    enemy_total = enemy_roll + enemy_speed
+
+    player_first = player_total >= enemy_total
+
+    return {
+        "player_roll": player_roll,
+        "enemy_roll": enemy_roll,
+        "player_total": player_total,
+        "enemy_total": enemy_total,
+        "player_first": player_first,
+    }
 
 
 def _create_hp_bar(current: int, max_val: int, bar_length: int = 10) -> str:
@@ -1077,25 +1199,65 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None):
 
     if not enemy:
         return
-    
+
+    scaled_enemy = _scale_enemy_for_player(player, enemy, player.current_location_id)
+    initiative = _roll_initiative(player, scaled_enemy["enemy_speed"])
+
     # Сохраняем состояние боя
     _combat_state[user_id] = {
-        'enemy_name': enemy['name'],
-        'enemy_hp': enemy['hp'],
-        'enemy_max_hp': enemy['hp'],
-        'enemy_damage': enemy['damage'],
-        'enemy_description': enemy['description'],
-        'location_id': player.current_location_id
+        'enemy_name': scaled_enemy['enemy_name'],
+        'enemy_hp': scaled_enemy['enemy_hp'],
+        'enemy_max_hp': scaled_enemy['enemy_max_hp'],
+        'enemy_damage': scaled_enemy['enemy_damage'],
+        'enemy_description': scaled_enemy['enemy_description'],
+        'enemy_level': scaled_enemy['enemy_level'],
+        'enemy_role': scaled_enemy['enemy_role'],
+        'enemy_role_label': scaled_enemy['enemy_role_label'],
+        'enemy_speed': scaled_enemy['enemy_speed'],
+        'enemy_evade_chance': scaled_enemy['enemy_evade_chance'],
+        'enemy_drain_chance': scaled_enemy['enemy_drain_chance'],
+        'enemy_drain_min': scaled_enemy['enemy_drain_min'],
+        'enemy_drain_max': scaled_enemy['enemy_drain_max'],
+        'enemy_is_elite': scaled_enemy['enemy_is_elite'],
+        'reward_mult': scaled_enemy['reward_mult'],
+        'initiative_player': initiative['player_total'],
+        'initiative_enemy': initiative['enemy_total'],
+        'turn': 'player',
+        'location_id': player.current_location_id,
     }
 
     message = (
         f"ОПАСНОСТЬ!\n\n"
-        f"Во время исследования ты заметил {enemy['name']}!\n\n"
-        f"{enemy['description']}\n\n"
-        f"HP: {enemy['hp']} | Урон: {enemy['damage']}\n\n"
-        f"Что будешь делать?"
+        f"Во время исследования ты заметил {scaled_enemy['enemy_name']}!\n\n"
+        f"{scaled_enemy['enemy_description']}\n\n"
+        f"Уровень врага: {scaled_enemy['enemy_level']} | Роль: {scaled_enemy['enemy_role_label']}\n"
+        f"HP: {scaled_enemy['enemy_hp']} | Урон: {scaled_enemy['enemy_damage']}\n\n"
+        f"🎲 Инициатива:\n"
+        f"Ты: d20({initiative['player_roll']}) → {initiative['player_total']}\n"
+        f"Враг: d20({initiative['enemy_roll']}) → {initiative['enemy_total']}\n"
     )
-    
+
+    if not initiative["player_first"]:
+        enemy_damage = _combat_state[user_id]['enemy_damage']
+        total_defense = player.total_defense
+        is_dodged = random.randint(1, 100) <= player.dodge_chance
+        if is_dodged:
+            message += "\n⚡ Враг начал первым, но ты уклонился от стартового удара!\n"
+        else:
+            final_damage = max(1, enemy_damage - total_defense)
+            # Открывающий удар не убивает мгновенно: оставляем минимум 1 HP.
+            player.health = max(1, player.health - final_damage)
+            database.update_user_stats(user_id, health=player.health)
+            message += (
+                "\n⚡ Враг выиграл инициативу и атакует первым!\n"
+                f"Получен урон: {final_damage} (защита: {total_defense})\n"
+                f"Текущее HP: {player.health}/{player.max_health}\n"
+            )
+    else:
+        message += "\n✅ Ты выиграл инициативу и действуешь первым!\n"
+
+    message += "\nЧто будешь делать?"
+
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
     keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
@@ -1415,6 +1577,11 @@ def use_skill(player, vk, user_id: int, skill_name: str):
         if combat['enemy_hp'] > 0:
             # Враг атакует
             enemy_damage = combat['enemy_damage']
+            if combat.get("enemy_role") == "bruiser":
+                hp_ratio = combat['enemy_hp'] / max(1, combat['enemy_max_hp'])
+                if hp_ratio <= 0.40:
+                    enemy_damage = int(enemy_damage * 1.15)
+                    result_msg += "\n😡 Танк в ярости: урон врага усилен!"
             active_effects = get_active_effects(user_id)
 
             is_dodged = random.randint(1, 100) <= player.dodge_chance
@@ -1434,6 +1601,17 @@ def use_skill(player, vk, user_id: int, skill_name: str):
                 final_damage = max(1, enemy_damage - total_defense)
                 player.health -= final_damage
                 result_msg += f"\n{combat['enemy_name']} атакует!\nПолучен урон: {final_damage}"
+
+                # Роль "Контролёр": дренаж энергии при попадании.
+                if combat.get("enemy_role") == "controller":
+                    drain_chance = int(combat.get("enemy_drain_chance", 0))
+                    if drain_chance > 0 and random.randint(1, 100) <= drain_chance:
+                        drain_min = int(combat.get("enemy_drain_min", 6))
+                        drain_max = int(combat.get("enemy_drain_max", 12))
+                        energy_drain = min(player.energy, random.randint(drain_min, drain_max))
+                        if energy_drain > 0:
+                            player.energy -= energy_drain
+                            result_msg += f"\n🧠 Контролёр высасывает энергию: -{energy_drain}⚡"
 
                 # Проверка на смерть
                 if player.health <= 0:
@@ -1455,7 +1633,7 @@ def use_skill(player, vk, user_id: int, skill_name: str):
             return
 
         # Обновляем HP в БД
-        database.update_user_stats(user_id, health=player.health)
+        database.update_user_stats(user_id, health=player.health, energy=player.energy)
 
         # Прогресс-бары
         enemy_hp_bar = _create_hp_bar(combat['enemy_hp'], combat['enemy_max_hp'])
@@ -1749,7 +1927,14 @@ def handle_combat_attack(player, vk, user_id: int):
     is_crit = random.randint(1, 100) <= player.crit_chance
     if is_crit:
         total_damage = int(total_damage * 1.5)
-    
+
+    # Роль "Хищник": враг может уклониться от атаки.
+    enemy_evaded = False
+    evade_chance = int(combat.get("enemy_evade_chance", 0))
+    if evade_chance > 0 and random.randint(1, 100) <= evade_chance:
+        enemy_evaded = True
+        total_damage = 0
+
     combat['enemy_hp'] -= total_damage
     
     # Проверка кровотечения при атаке ножом
@@ -1781,10 +1966,14 @@ def handle_combat_attack(player, vk, user_id: int):
     message = f"⚔️ТЫ АТАКУЕШЬ {combat['enemy_name'].upper()}\n\n"
     message += f"🎯 Шанс крита: {crit_chance}% | 💨 Уклонение: {dodge_chance}%\n"
     message += f"🛡️ Твоя защита: {total_defense}\n"
+    if combat.get("enemy_level"):
+        message += f"👹 Враг L{combat['enemy_level']} ({combat.get('enemy_role_label', 'Неизвестно')})\n"
 
-    if is_crit:
+    if enemy_evaded:
+        message += "\n💨 Враг резко сместился и уклонился от удара!\n"
+    elif is_crit:
         message += f"\n🔥КРИТИЧЕСКИЙ УДАР! x1.5\n"
-    message += f"Нанесён урон:{total_damage}\n"
+    message += f"Нанесён урон: {total_damage}\n"
     message += f"({(' | '.join(damage_details))})\n"
 
     # Сообщение о кровотечении
@@ -1801,6 +1990,11 @@ def handle_combat_attack(player, vk, user_id: int):
         keyboard = create_location_keyboard(player.current_location_id)
     else:
         enemy_damage = combat['enemy_damage']
+        if combat.get("enemy_role") == "bruiser":
+            hp_ratio = combat['enemy_hp'] / max(1, combat['enemy_max_hp'])
+            if hp_ratio <= 0.40:
+                enemy_damage = int(enemy_damage * 1.15)
+                message += "\n😡 Танк в ярости: урон врага усилен!\n"
         
         # === Проверяем perfect_dodge (навык Уклонение) ===
         if "perfect_dodge" in active_effects:
@@ -1838,6 +2032,17 @@ def handle_combat_attack(player, vk, user_id: int):
                 message += f"\n⚔️{combat['enemy_name']} АТАКУЕТ!\n"
                 message += f"Урон врага: {enemy_damage} → Получено:{final_damage} (защита: {total_defense})\n"
 
+                # Роль "Контролёр": дренаж энергии при попадании.
+                if combat.get("enemy_role") == "controller":
+                    drain_chance = int(combat.get("enemy_drain_chance", 0))
+                    if drain_chance > 0 and random.randint(1, 100) <= drain_chance:
+                        drain_min = int(combat.get("enemy_drain_min", 6))
+                        drain_max = int(combat.get("enemy_drain_max", 12))
+                        energy_drain = min(player.energy, random.randint(drain_min, drain_max))
+                        if energy_drain > 0:
+                            player.energy -= energy_drain
+                            message += f"🧠 Контролёр высасывает энергию: -{energy_drain}⚡\n"
+
             # Проверка на смерть
             if player.health <= 0:
                 player.health = 0
@@ -1846,7 +2051,7 @@ def handle_combat_attack(player, vk, user_id: int):
                 _handle_death(player, vk, user_id)
                 return
 
-            database.update_user_stats(user_id, health=player.health)
+            database.update_user_stats(user_id, health=player.health, energy=player.energy)
 
         # Показываем состояние кровотечения
         if combat.get('bleed_turns', 0) > 0:
@@ -1950,10 +2155,11 @@ def _handle_victory(player, combat, user_id: int) -> str:
     from handlers.quests import track_quest_kill, track_quest_shells
 
     del _combat_state[user_id]
-    
-    experience = random.randint(10, 30)
-    money = random.randint(5, 25)
-    shells_drop = random.randint(1, 3)  # 1-3 гильзы с врага
+
+    reward_mult = max(1.0, float(combat.get("reward_mult", 1.0)))
+    experience = max(5, int(random.randint(10, 30) * reward_mult))
+    money = max(3, int(random.randint(5, 25) * reward_mult))
+    shells_drop = max(1, int(round(random.randint(1, 3) * min(2.0, 0.8 + reward_mult * 0.4))))
 
     player.experience += experience
     player.money += money
@@ -1984,6 +2190,8 @@ def _handle_victory(player, combat, user_id: int) -> str:
         f"Опыт: +{experience}\n"
         f"Гильзы: {current_shells}/{capacity}\n"
     )
+    if reward_mult > 1.0:
+        message += f"⚖️ Множитель сложности: x{reward_mult:.2f}\n"
 
     if not success:
         message += f"⚠️ Мешочек переполнен! {msg}\n"
