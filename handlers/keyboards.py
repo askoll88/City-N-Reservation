@@ -149,7 +149,6 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_button("Другое", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
         keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
-        keyboard.add_button("Статус", color=VkKeyboardColor.SECONDARY)
 
     # --- Fallback ---
     else:
@@ -177,7 +176,6 @@ def create_inventory_keyboard():
     keyboard.add_button("Другое", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
-    keyboard.add_button("Статус", color=VkKeyboardColor.SECONDARY)
     return keyboard
 
 

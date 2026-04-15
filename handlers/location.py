@@ -219,7 +219,7 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
 def _arrive_to_location(player, vk, user_id: int, location_id: str, from_location: str):
     """Финализировать переход и показать локацию."""
     from handlers.quests import track_quest_explore, track_quest_visit
-    from state_manager import clear_travel_state
+    from state_manager import clear_travel_state, set_ui_screen
 
     clear_travel_state(user_id)
 
@@ -229,6 +229,7 @@ def _arrive_to_location(player, vk, user_id: int, location_id: str, from_locatio
 
     player.current_location_id = location_id
     database.update_user_location(user_id, location_id)
+    set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
 
     track_quest_visit(user_id, location_id)
     if location_id in RESEARCH_LOCATIONS:
@@ -481,7 +482,7 @@ def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
 def go_to_location(player, location_id: str, vk, user_id: int):
     """Запустить переход в локацию через коридор перемещения."""
     from handlers.keyboards import create_travel_keyboard
-    from state_manager import has_travel_state, set_travel_state
+    from state_manager import has_travel_state, set_travel_state, set_ui_screen
     from main import create_location_keyboard
 
     if has_travel_state(user_id):
@@ -498,6 +499,7 @@ def go_to_location(player, location_id: str, vk, user_id: int):
         from_location = player.previous_location
 
     if location_id == from_location:
+        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
         vk.messages.send(
             user_id=user_id,
             message="Ты уже находишься в этой локации.",
@@ -507,6 +509,7 @@ def go_to_location(player, location_id: str, vk, user_id: int):
         return
 
     if _is_location_locked(user_id, location_id):
+        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
         vk.messages.send(
             user_id=user_id,
             message=(
@@ -562,7 +565,7 @@ def go_to_location(player, location_id: str, vk, user_id: int):
 
 def go_to_inventory(player, vk, user_id: int):
     """Открыть инвентарь - показать все категории"""
-    from main import create_inventory_keyboard
+    from state_manager import get_ui_current_screen, set_ui_screen
     from handlers.inventory import show_all
 
     # Сохраняем текущую локацию как предыдущую (для возврата из инвентаря)
@@ -572,41 +575,68 @@ def go_to_inventory(player, vk, user_id: int):
 
     player.current_location_id = "инвентарь"
     database.update_user_location(user_id, "инвентарь")
+    current_ui = get_ui_current_screen(user_id)
+    push_current = current_ui.get("name") != "inventory"
+    set_ui_screen(user_id, {"name": "inventory"}, push_current=push_current)
     
     # Показываем весь инвентарь по категориям
     show_all(player, vk, user_id)
 
 
 def go_back(player, vk, user_id: int):
-    """Вернуться назад (в предыдущую локацию)"""
+    """Вернуться к предыдущему UI-экрану."""
     from main import create_location_keyboard
-    
-    # Используем предыдущую локацию или текущую
-    target_location = player.previous_location or player.current_location_id
+    from handlers.inventory import show_all
+    from handlers.keyboards import create_character_keyboard
+    from state_manager import pop_ui_screen, set_ui_screen
 
-    # Если мы в специальных локациях - возвращаем в кпп
-    if player.current_location_id in ["город", "кпп", "инвентарь"]:
-        target_location = "кпп"
+    prev_screen = pop_ui_screen(user_id)
+    if prev_screen:
+        name = prev_screen.get("name")
+        if name == "character":
+            vk.messages.send(
+                user_id=user_id,
+                message="👤 ПЕРСОНАЖ\nВыбери раздел:",
+                keyboard=create_character_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+        if name == "inventory":
+            if player.current_location_id != "инвентарь":
+                player.previous_location = player.current_location_id
+                database.update_user_stats(user_id, previous_location=player.current_location_id)
+            player.current_location_id = "инвентарь"
+            database.update_user_location(user_id, "инвентарь")
+            show_all(player, vk, user_id)
+            return
+        # location/fallback
+        if player.current_location_id == "инвентарь":
+            target_location = player.previous_location or "кпп"
+            player.current_location_id = target_location
+            database.update_user_location(user_id, target_location)
+        vk.messages.send(
+            user_id=user_id,
+            message=f"📍 {player.location.name}\n\n{player.location.description}",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0
+        )
+        return
 
-    if target_location != player.current_location_id:
+    # Если стек пуст — безопасный fallback в локационный экран
+    set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
+    if player.current_location_id == "инвентарь":
+        target_location = player.previous_location or "кпп"
         player.current_location_id = target_location
         database.update_user_location(user_id, target_location)
-
-        loc = player.location
-        vk.messages.send(
-            user_id=user_id,
-            message=f"Ты вернулся в {loc.name}\n\n{loc.description}",
-            keyboard=create_location_keyboard(target_location).get_keyboard(),
-            random_id=0
-        )
-    else:
-        # Если локация та же - просто показываем клавиатуру
-        vk.messages.send(
-            user_id=user_id,
-            message="Ты остаёшься на месте.",
-            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
-            random_id=0
-        )
+    elif player.previous_location and player.previous_location != player.current_location_id:
+        player.current_location_id = player.previous_location
+        database.update_user_location(user_id, player.previous_location)
+    vk.messages.send(
+        user_id=user_id,
+        message=f"📍 {player.location.name}\n\n{player.location.description}",
+        keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+        random_id=0
+    )
 
 
 def handle_sleep(player, vk, user_id: int):
@@ -723,6 +753,7 @@ def get_status(player, vk, user_id: int):
 def show_welcome(vk, user_id: int):
     """Показать приветственное сообщение"""
     from handlers.keyboards import create_main_keyboard, create_location_keyboard
+    from state_manager import set_ui_screen
     from handlers.commands import get_welcome_message
     from locations import get_location
     import database
@@ -744,6 +775,7 @@ def show_welcome(vk, user_id: int):
             keyboard=create_location_keyboard("город", player_level).get_keyboard(),
             random_id=0
         )
+        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
     else:
         # Новый игрок - показываем приветствие
         vk.messages.send(
@@ -752,3 +784,4 @@ def show_welcome(vk, user_id: int):
             keyboard=create_main_keyboard().get_keyboard(),
             random_id=0
         )
+        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)

@@ -64,10 +64,12 @@ from state_manager import (
     is_in_anomaly,
     has_pending_purchase,
     has_travel_state, get_all_travel_states,
+    get_ui_current_screen, set_ui_screen,
 )
 from handlers.keyboards import (
     create_main_keyboard,
     create_location_keyboard,
+    create_character_keyboard,
     create_inventory_keyboard,
     create_shop_keyboard,
     create_kpp_shop_keyboard,
@@ -165,7 +167,72 @@ def handle_message(event, vk):
     if text in ['/start', '/help', 'начать', 'старт']:
         handle_start_command(vk, user_id)
         return
-    
+
+    # === Приоритет 4.5: Экран персонажа ===
+    if text in ['персонаж', 'перс', 'меню персонажа']:
+        if player.current_location_id == "инвентарь":
+            vk.messages.send(
+                user_id=user_id,
+                message="Сначала выйди из инвентаря кнопкой 'Назад'.",
+                keyboard=create_inventory_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+        current_ui = get_ui_current_screen(user_id)
+        push_current = current_ui.get("name") != "character"
+        set_ui_screen(user_id, {"name": "character"}, push_current=push_current)
+        vk.messages.send(
+            user_id=user_id,
+            message="👤 ПЕРСОНАЖ\nВыбери раздел:",
+            keyboard=create_character_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    ui_screen = get_ui_current_screen(user_id).get("name", "location")
+
+    # В экране "Персонаж" разрешаем только разделы персонажа и "Назад"
+    if ui_screen == "character":
+        if text in ['назад', '⬅️ назад', 'back', 'выйти']:
+            go_back(player, vk, user_id)
+            return
+        if text in ['/status', 'статус']:
+            vk.messages.send(
+                user_id=user_id,
+                message=player.get_status(),
+                keyboard=create_character_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+        if 'инвентарь' in text or 'инвентар' in text:
+            handle_inventory_command(player, vk, user_id)
+            return
+        from handlers.commands import handle_quests_commands
+        if handle_quests_commands(player, vk, user_id, text):
+            return
+        vk.messages.send(
+            user_id=user_id,
+            message="В меню 'Персонаж' доступны: Статус, Инвентарь, Задания и Назад.",
+            keyboard=create_character_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    if ui_screen == "inventory":
+        blocked_in_inventory = {
+            'город', 'в город', 'кпп', 'в кпп', 'больница',
+            'убежище', 'черный рынок', 'рынок', 'поговорить',
+            'торговля', 'торг', 'магазин', 'лечиться', 'лечение',
+        }
+        if text in blocked_in_inventory or text.startswith('дорога '):
+            vk.messages.send(
+                user_id=user_id,
+                message="Нельзя прыгать в другие разделы из инвентаря. Сначала нажми 'Назад'.",
+                keyboard=create_inventory_keyboard().get_keyboard(),
+                random_id=0
+            )
+            return
+
     # === Приоритет 5: КПП магазин (без диалога) ===
     if not in_dialog and handle_kpp_shop_commands(player, vk, user_id, text):
         return
@@ -179,7 +246,12 @@ def handle_message(event, vk):
 
     # Статус
     if text == '/status' or text == 'статус':
-        handle_status_command(player, vk, user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message="Открой раздел 'Персонаж' и выбери 'Статус'.",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0
+        )
         return
     
     # Класс персонажа
@@ -190,25 +262,18 @@ def handle_message(event, vk):
 
     # Инвентарь
     if 'инвентарь' in text or 'инвентар' in text:
-        handle_inventory_command(player, vk, user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message="Открой раздел 'Персонаж' и выбери 'Инвентарь'.",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0
+        )
         return
     
     # Назад (возврат в предыдущую локацию) — НО не из инвентаря (там свой обработчик)
     if text in ['назад', '⬅️ назад', 'назад в город', 'назад⬅️', 'back']:
-        if player.current_location_id == 'инвентарь':
-            pass  # Пусть _handle_item_commands обработает
-        else:
-            prev_loc = player.previous_location
-            if prev_loc and prev_loc not in ['город', 'кпп', 'инвентарь']:
-                go_to_location(player, prev_loc, vk, user_id)
-                return
-            elif prev_loc == 'кпп':
-                go_to_location(player, 'кпп', vk, user_id)
-                return
-            else:
-                # Возврат в город по умолчанию
-                go_to_location(player, 'город', vk, user_id)
-                return
+        go_back(player, vk, user_id)
+        return
 
     # Действия в локации (лечение)
     if handle_location_actions(player, vk, user_id, text):
@@ -240,6 +305,15 @@ def handle_message(event, vk):
 
     # Ежедневные задания
     from handlers.commands import handle_quests_commands
+    quest_words = ("задания", "ежедневные задания", "квесты", "daily", "/daily", "задания показать", "квесты показать")
+    if text in quest_words:
+        vk.messages.send(
+            user_id=user_id,
+            message="Открой раздел 'Персонаж' и выбери 'Задания'.",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0
+        )
+        return
     if handle_quests_commands(player, vk, user_id, text):
         return
 
@@ -286,13 +360,7 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
     # Инвентарь - цифры
     if player.current_location_id == "инвентарь":
         if text == 'назад':
-            prev_loc = player.previous_location
-            # Возвращаемся в предыдущую локацию, если она есть и это не инвентарь
-            if prev_loc and prev_loc != "инвентарь":
-                go_to_location(player, prev_loc, vk, user_id)
-            else:
-                # Если previous_location не установлен, возвращаемся на КПП
-                go_to_location(player, 'кпп', vk, user_id)
+            go_back(player, vk, user_id)
             return True
 
         # Категории инвентаря в режиме инвентаря

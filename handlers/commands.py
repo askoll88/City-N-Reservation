@@ -87,57 +87,74 @@ def handle_inventory_command(player, vk, user_id: int):
 
 def handle_navigation(player, vk, user_id: int, text: str):
     """Обработка навигационных команд"""
-    # Город
+    current = player.current_location_id
+    requested = None
+
     if text in ['город', 'в город']:
-        go_to_location(player, 'город', vk, user_id)
-        return True
-    
-    # КПП
-    if text in ['кпп', 'в кпп']:
-        go_to_location(player, 'кпп', vk, user_id)
-        return True
-    
-    # Больница
-    if 'больница' in text:
-        go_to_location(player, 'больница', vk, user_id)
-        return True
-    
-    # Черный рынок
-    if 'черный рынок' in text or text == 'рынок':
-        if player.level < 25:
-            vk.messages.send(
-                user_id=user_id,
-                message=f"🚫Доступ запрещён!\n\nЧёрный рынок открыт только для сталкеров 25+ уровня.\n\nТвоё текущее положение: {player.level} уровень\n\nПодними уровень, чтобы получить доступ.",
-                random_id=0
-            )
-            return True
-        go_to_location(player, 'черный рынок', vk, user_id)
-        return True
-    
-    # Убежище
-    if 'убежище' in text:
-        go_to_location(player, 'убежище', vk, user_id)
-        return True
-    
-    # Дороги
-    if 'военная' in text or ('дорога' in text and 'воен' in text):
-        go_to_location(player, 'дорога_военная_часть', vk, user_id)
-        return True
-    
-    if 'нии' in text or 'на нии' in text:
-        go_to_location(player, 'дорога_нии', vk, user_id)
-        return True
-    
-    if 'лес' in text or 'заражен' in text:
-        go_to_location(player, 'дорога_зараженный_лес', vk, user_id)
-        return True
-    
-    # Назад
+        requested = 'город'
+    elif text in ['кпп', 'в кпп']:
+        requested = 'кпп'
+    elif 'больница' in text:
+        requested = 'больница'
+    elif 'черный рынок' in text or text == 'рынок':
+        requested = 'черный рынок'
+    elif 'убежище' in text:
+        requested = 'убежище'
+    elif 'военная' in text or ('дорога' in text and 'воен' in text):
+        requested = 'дорога_военная_часть'
+    elif 'нии' in text or 'на нии' in text:
+        requested = 'дорога_нии'
+    elif 'лес' in text or 'заражен' in text:
+        requested = 'дорога_зараженный_лес'
+
     if text in ['назад', 'выйти', 'выйти из']:
         go_back(player, vk, user_id)
         return True
-    
-    return False
+
+    if not requested:
+        return False
+
+    if requested == 'черный рынок' and player.level < 25:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"🚫Доступ запрещён!\n\nЧёрный рынок открыт только для сталкеров 25+ уровня.\n\nТвоё текущее положение: {player.level} уровень\n\nПодними уровень, чтобы получить доступ.",
+            random_id=0
+        )
+        return True
+
+    allowed_transitions = {
+        'город': {'кпп', 'больница', 'убежище', 'черный рынок'},
+        'кпп': {'город', 'дорога_военная_часть', 'дорога_нии', 'дорога_зараженный_лес'},
+        'убежище': {'город'},
+        'больница': {'город'},
+        'черный рынок': {'город'},
+        'дорога_военная_часть': {'кпп'},
+        'дорога_нии': {'кпп'},
+        'дорога_зараженный_лес': {'кпп'},
+    }
+
+    # Из инвентаря прямые переходы запрещены, нужен "Назад"
+    if current == 'инвентарь':
+        vk.messages.send(
+            user_id=user_id,
+            message="Сначала выйди из инвентаря кнопкой 'Назад'.",
+            keyboard=create_location_keyboard(current).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    allowed = allowed_transitions.get(current, set())
+    if requested not in allowed:
+        vk.messages.send(
+            user_id=user_id,
+            message="Переход недоступен с текущего экрана. Используй кнопки текущей локации.",
+            keyboard=create_location_keyboard(current, player.level).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    go_to_location(player, requested, vk, user_id)
+    return True
 
 
 def handle_location_actions(player, vk, user_id: int, text: str):
