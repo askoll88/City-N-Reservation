@@ -53,7 +53,7 @@ from handlers.commands import (
     get_welcome_message,
 )
 
-from handlers.location import go_to_location, handle_travel_commands, travel_tick
+from handlers.location import go_to_location, go_back, handle_travel_commands, travel_tick
 from handlers.admin import handle_admin_commands
 from state_manager import (
     is_in_combat, is_in_dialog,
