@@ -2741,7 +2741,7 @@ def handle_combat_flee(player, vk, user_id: int):
                 f"{ui.section('Состояние')}\n"
                 f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)"
             ),
-            keyboard=create_combat_keyboard().get_keyboard(),
+            keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
             random_id=0
         )
 

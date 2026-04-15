@@ -14,10 +14,10 @@ from handlers.location import (
 from handlers.combat import (
     handle_explore, handle_combat_attack, handle_combat_flee,
     is_researching, get_research_status, cancel_research,
-    show_skills_in_combat, use_skill
+    show_skills_in_combat, use_skill, create_combat_keyboard as create_dynamic_combat_keyboard
 )
 from handlers.keyboards import (
-    create_location_keyboard, create_combat_keyboard,
+    create_location_keyboard,
     create_npc_select_keyboard
 )
 from handlers.npc import (
@@ -28,7 +28,7 @@ from handlers.inventory import (
     show_soldier_weapons, show_soldier_armor, show_scientist_shop
 )
 from handlers.keyboards import (
-    create_location_keyboard, create_combat_keyboard,
+    create_location_keyboard,
     create_npc_select_keyboard, create_kpp_shop_keyboard,
     create_scientist_shop_keyboard
 )
@@ -226,7 +226,7 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
         vk.messages.send(
             user_id=user_id,
             message="⚔️ Возвращаемся в бой!",
-            keyboard=create_combat_keyboard().get_keyboard(),
+            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
             random_id=0
         )
         return True
@@ -241,7 +241,7 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
         vk.messages.send(
             user_id=user_id,
             message="⚔️ Пока идёт бой, нельзя менять экран или локацию.\nДоступно: Атаковать, Навыки, Инвентарь, Убежать.",
-            keyboard=create_combat_keyboard().get_keyboard(),
+            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
             random_id=0
         )
         return True
@@ -250,7 +250,7 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
     vk.messages.send(
         user_id=user_id,
         message="⚔️ Ты в бою.\nДоступно: Атаковать, Навыки, Инвентарь, Убежать.",
-        keyboard=create_combat_keyboard().get_keyboard(),
+        keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
         random_id=0
     )
     return True
@@ -265,7 +265,7 @@ def _show_combat_inventory(player, vk, user_id: int):
         vk.messages.send(
             user_id=user_id,
             message="🎒 В боевом кармане пусто.\nНет расходников для использования.",
-            keyboard=create_combat_keyboard().get_keyboard(),
+            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
             random_id=0
         )
         return
@@ -278,7 +278,7 @@ def _show_combat_inventory(player, vk, user_id: int):
     vk.messages.send(
         user_id=user_id,
         message=msg,
-        keyboard=create_combat_keyboard().get_keyboard(),
+        keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
         random_id=0
     )
 
@@ -293,7 +293,7 @@ def _use_combat_item_by_index(player, vk, user_id: int, idx: int) -> bool:
         vk.messages.send(
             user_id=user_id,
             message="Нет предмета с таким номером в боевом инвентаре.",
-            keyboard=create_combat_keyboard().get_keyboard(),
+            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
             random_id=0
         )
         return True
@@ -314,7 +314,7 @@ def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
             vk.messages.send(
                 user_id=user_id,
                 message="Нет предмета с таким номером в боевом инвентаре.",
-                keyboard=create_combat_keyboard().get_keyboard(),
+                keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
                 random_id=0
             )
             return True
@@ -326,7 +326,7 @@ def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
         vk.messages.send(
             user_id=user_id,
             message="В бою можно использовать только расходники из раздела 'Другое'.",
-            keyboard=create_combat_keyboard().get_keyboard(),
+            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
             random_id=0
         )
         return True
@@ -335,7 +335,7 @@ def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
     vk.messages.send(
         user_id=user_id,
         message=msg,
-        keyboard=create_combat_keyboard().get_keyboard(),
+        keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
         random_id=0
     )
     return True

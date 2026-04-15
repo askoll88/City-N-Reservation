@@ -10,6 +10,18 @@ from typing import Optional
 # Кэш классов в памяти
 _classes_cache = None
 
+_CLASS_ID_ALIASES = {
+    "пулеметчик": "пулемётчик",
+    "shotgun": "дробовик",
+    "sniper": "снайпер",
+    "assault": "автоматчик",
+    "rifleman": "автоматчик",
+    "pistol": "пистолетчик",
+    "mg": "пулемётчик",
+    "fighter": "боец",
+    "melee": "боец",
+}
+
 
 # Fallback-набор классов, если БД не содержит таблиц/функций классов.
 _DEFAULT_CLASSES = {
@@ -146,6 +158,22 @@ def _load_default_classes() -> dict:
     return json.loads(json.dumps(_DEFAULT_CLASSES))
 
 
+def normalize_class_id(class_id: Optional[str]) -> Optional[str]:
+    """Нормализовать class_id (legacy/алиасы/варианты написания)."""
+    if not class_id:
+        return None
+    norm = str(class_id).strip().lower()
+    if not norm:
+        return None
+    if norm in _CLASS_ID_ALIASES:
+        return _CLASS_ID_ALIASES[norm]
+    if "ё" not in norm and "е" in norm:
+        yo_variant = norm.replace("е", "ё")
+        if yo_variant in _DEFAULT_CLASSES:
+            return yo_variant
+    return norm
+
+
 def _load_classes_from_db():
     """Загрузить классы из БД"""
     global _classes_cache
@@ -196,7 +224,26 @@ def _load_classes_from_db():
                 })
 
             required_weapons_raw = class_data.get('required_weapons')
-            required_weapons = json.loads(required_weapons_raw) if required_weapons_raw else []
+            if isinstance(required_weapons_raw, str):
+                try:
+                    required_weapons = json.loads(required_weapons_raw) if required_weapons_raw else []
+                except Exception:
+                    required_weapons = [w.strip() for w in required_weapons_raw.split(",") if w.strip()]
+            elif isinstance(required_weapons_raw, list):
+                required_weapons = required_weapons_raw
+            else:
+                required_weapons = []
+
+            weapon_keywords_raw = class_data.get('weapon_keywords', [])
+            if isinstance(weapon_keywords_raw, str):
+                try:
+                    weapon_keywords = json.loads(weapon_keywords_raw) if weapon_keywords_raw else []
+                except Exception:
+                    weapon_keywords = [w.strip() for w in weapon_keywords_raw.split(",") if w.strip()]
+            elif isinstance(weapon_keywords_raw, list):
+                weapon_keywords = weapon_keywords_raw
+            else:
+                weapon_keywords = []
 
             # Сохраняем класс
             _classes_cache[class_id] = {
@@ -204,7 +251,7 @@ def _load_classes_from_db():
                 "name": class_data.get('name', class_id),
                 "description": class_data.get('description', ''),
                 "weapon_type": class_data.get('weapon_type', ''),
-                "weapon_keywords": class_data.get('weapon_keywords', []),
+                "weapon_keywords": weapon_keywords,
                 "required_weapons": required_weapons,
                 "active_skills": formatted_active,
                 "passive_skills": formatted_passive
@@ -261,6 +308,9 @@ class PlayerClass:
 
 def get_class(class_id: str) -> Optional[PlayerClass]:
     """Получить класс по ID"""
+    class_id = normalize_class_id(class_id)
+    if not class_id:
+        return None
     classes = _get_classes_dict()
     if class_id not in classes:
         return None
@@ -344,6 +394,7 @@ def format_class_info(class_id: str, player_level: int = None) -> str:
 
 def get_passive_bonuses(class_id: str, player_level: int) -> dict:
     """Получить бонусы пассивных навыков для указанного уровня игрока"""
+    class_id = normalize_class_id(class_id)
     player_class = get_class(class_id)
     if not player_class:
         return {}
