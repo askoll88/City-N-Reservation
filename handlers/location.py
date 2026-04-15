@@ -164,15 +164,43 @@ def _is_location_locked(user_id: int, location_id: str) -> bool:
     if location_id != "убежище":
         return False
 
-    conn = database.get_connection()
-    cursor = conn.cursor()
     try:
-        cursor.execute("SELECT newbie_kit_received FROM users WHERE vk_id = %s", (user_id,))
-        row = cursor.fetchone()
-        return bool(row and row["newbie_kit_received"] == 1)
-    finally:
-        cursor.close()
-        database.release_connection(conn)
+        with database.db_cursor() as (cursor, _):
+            cursor.execute("SELECT newbie_kit_received FROM users WHERE vk_id = %s", (user_id,))
+            row = cursor.fetchone()
+            return bool(row and row["newbie_kit_received"] == 1)
+    except Exception:
+        logger.exception("Ошибка проверки блокировки локации: user_id=%s location=%s", user_id, location_id)
+        # Fail-open: лучше не блокировать игрока из-за временной ошибки БД.
+        return False
+
+
+def _validate_travel_state(travel: dict | None) -> tuple[bool, str]:
+    """Быстрая валидация структуры travel-state перед тиками/командами."""
+    if not isinstance(travel, dict):
+        return False, "state_not_dict"
+    for key in ("from_location", "to_location", "start_time", "duration"):
+        if key not in travel:
+            return False, f"missing_{key}"
+
+    from_location = str(travel.get("from_location") or "")
+    to_location = str(travel.get("to_location") or "")
+    if not from_location or not to_location:
+        return False, "empty_route"
+
+    try:
+        duration = int(travel.get("duration", 0) or 0)
+    except (TypeError, ValueError):
+        return False, "bad_duration"
+    if duration <= 0:
+        return False, "non_positive_duration"
+
+    try:
+        float(travel.get("start_time", 0) or 0)
+    except (TypeError, ValueError):
+        return False, "bad_start_time"
+
+    return True, "ok"
 
 
 def _send_location_overview(player, vk, user_id: int, location_id: str):
@@ -324,6 +352,17 @@ def travel_tick(player, vk, user_id: int, silent: bool = True) -> bool:
     travel = get_travel_data(user_id)
     if not travel:
         return False
+    valid, reason = _validate_travel_state(travel)
+    if not valid:
+        logger.warning("Сброс повреждённого travel_state user_id=%s reason=%s data=%r", user_id, reason, travel)
+        clear_travel_state(user_id)
+        if not silent:
+            vk.messages.send(
+                user_id=user_id,
+                message="⚠️ Переход сброшен из-за некорректного состояния. Запусти путь заново.",
+                random_id=0,
+            )
+        return False
 
     now_ts = time.time()
 
@@ -392,7 +431,7 @@ def travel_tick(player, vk, user_id: int, silent: bool = True) -> bool:
 
 def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
     """Команды внутри коридора перехода."""
-    from state_manager import has_travel_state, get_travel_data, update_travel_data, clear_travel_state
+    from state_manager import has_travel_state, get_travel_data, update_travel_data, clear_travel_state, set_ui_screen
     from handlers.keyboards import create_travel_keyboard
     from main import create_location_keyboard
 
@@ -402,15 +441,31 @@ def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
     travel = get_travel_data(user_id)
     if not travel:
         return False
+    valid, reason = _validate_travel_state(travel)
+    if not valid:
+        logger.warning("Команда в повреждённом travel_state user_id=%s reason=%s data=%r", user_id, reason, travel)
+        clear_travel_state(user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message="⚠️ Переход сброшен из-за некорректного состояния. Запусти путь заново.",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0,
+        )
+        return True
 
     text_lower = (text or "").strip().lower()
 
     if text_lower in ("отмена пути", "прервать путь", "отмена", "вернуться"):
+        from_location = str(travel.get("from_location") or player.current_location_id)
         clear_travel_state(user_id)
+        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
+        if player.current_location_id != from_location:
+            player.current_location_id = from_location
+            database.update_user_location(user_id, from_location)
         vk.messages.send(
             user_id=user_id,
             message="↩️ Ты отменил переход и вернулся на исходную позицию.",
-            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            keyboard=create_location_keyboard(from_location, player.level).get_keyboard(),
             random_id=0,
         )
         return True

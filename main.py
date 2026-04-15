@@ -64,7 +64,7 @@ from state_manager import (
     is_in_anomaly,
     has_pending_purchase,
     has_pending_loot_choice, get_pending_loot_choice, clear_pending_loot_choice,
-    has_travel_state, get_all_travel_states,
+    has_travel_state, get_all_travel_states, clear_travel_state,
     get_ui_current_screen, set_ui_screen,
 )
 from handlers.keyboards import (
@@ -869,6 +869,7 @@ def main():
     def _travel_scheduler():
         """Фоновый поток тиков коридора перемещения."""
         import time
+        fail_counts: dict[int, int] = {}
         while True:
             time.sleep(2)
             states = get_all_travel_states()
@@ -881,8 +882,26 @@ def main():
                 try:
                     player = get_player(uid)
                     travel_tick(player, vk, uid, silent=True)
+                    fail_counts.pop(uid, None)
                 except Exception as e:
-                    logger.error("Ошибка в travel_tick(user_id=%s): %s", uid, e, exc_info=True)
+                    fail_counts[uid] = fail_counts.get(uid, 0) + 1
+                    logger.error(
+                        "Ошибка в travel_tick(user_id=%s), попытка %d: %s",
+                        uid, fail_counts[uid], e, exc_info=True
+                    )
+                    # Если один и тот же переход подряд падает, чтобы не зациклиться в сломанном состоянии
+                    # и не спамить лог каждые 2 секунды — сбрасываем коридор.
+                    if fail_counts[uid] >= 3:
+                        clear_travel_state(uid)
+                        fail_counts.pop(uid, None)
+                        try:
+                            vk.messages.send(
+                                user_id=uid,
+                                message="⚠️ Переход прерван из-за временной ошибки. Запусти перемещение повторно.",
+                                random_id=0,
+                            )
+                        except Exception:
+                            pass
                 finally:
                     lock.release()
 

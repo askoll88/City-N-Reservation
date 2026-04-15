@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import psycopg2
-from psycopg2 import pool, OperationalError, DatabaseError
+from psycopg2 import pool, OperationalError, DatabaseError, InterfaceError
 from psycopg2.extras import RealDictCursor
 
 import config
@@ -51,11 +51,46 @@ def get_connection_pool():
 
 
 def get_connection():
-    return get_connection_pool().getconn()
+    """
+    Получить живое соединение из пула.
+    Иногда пул может вернуть уже закрытое соединение (например после сетевого разрыва),
+    в таком случае выкидываем его и пробуем взять следующее.
+    """
+    conn_pool = get_connection_pool()
+    attempts = max(2, int(getattr(config, "DB_MAX_RETRIES", 3) or 3))
+    last_exc = None
+    for _ in range(attempts):
+        conn = conn_pool.getconn()
+        try:
+            if getattr(conn, "closed", 1):
+                conn_pool.putconn(conn, close=True)
+                continue
+            return conn
+        except Exception as e:
+            last_exc = e
+            try:
+                conn_pool.putconn(conn, close=True)
+            except Exception:
+                pass
+    if last_exc:
+        raise last_exc
+    raise OperationalError("Не удалось получить живое соединение из пула")
 
 
-def release_connection(conn):
-    get_connection_pool().putconn(conn)
+def release_connection(conn, close: bool = False):
+    """
+    Вернуть соединение в пул.
+    Если соединение закрыто/битое — удаляем из пула (close=True).
+    """
+    try:
+        if conn is None:
+            return
+        if getattr(conn, "closed", 1):
+            close = True
+        get_connection_pool().putconn(conn, close=close)
+    except Exception:
+        # Не мешаем бизнес-логике, если пул уже в неконсистентном состоянии.
+        logger.exception("Не удалось вернуть соединение в пул (close=%s)", close)
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +101,7 @@ def release_connection(conn):
 @contextmanager
 def db_cursor():
     conn = get_connection()
+    close_conn = False
     try:
         with conn.cursor() as cursor:
             # Ensure DB session uses UTC so NOW() returns UTC.
@@ -73,11 +109,20 @@ def db_cursor():
             cursor.execute("SET timezone = 'UTC'")
             yield cursor, conn
             conn.commit()
-    except Exception:
-        conn.rollback()
+    except Exception as e:
+        if isinstance(e, (OperationalError, InterfaceError)):
+            close_conn = True
+        # Важно: rollback на уже закрытом conn вызывает InterfaceError и маскирует исходную ошибку.
+        if conn is not None and not getattr(conn, "closed", 1):
+            try:
+                conn.rollback()
+            except Exception:
+                close_conn = True
+        else:
+            close_conn = True
         raise
     finally:
-        release_connection(conn)
+        release_connection(conn, close=close_conn)
 
 
 # ---------------------------------------------------------------------------
