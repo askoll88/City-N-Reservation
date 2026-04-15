@@ -188,6 +188,23 @@ def create_combat_keyboard():
 
 
 # ============================================================
+# Переход (Travel Corridor)
+# ============================================================
+
+def create_travel_keyboard():
+    """Клавиатура коридора перехода между локациями."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Идти", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("Осмотреться", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("Ускориться", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Отмена пути", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    _add_meta_row(keyboard)
+    return keyboard
+
+
+# ============================================================
 # Магазины
 # ============================================================
 

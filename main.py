@@ -53,7 +53,7 @@ from handlers.commands import (
     get_welcome_message,
 )
 
-from handlers.location import go_to_location
+from handlers.location import go_to_location, handle_travel_commands, travel_tick
 from handlers.admin import handle_admin_commands
 from state_manager import (
     is_in_combat, is_in_dialog,
@@ -63,6 +63,7 @@ from state_manager import (
     is_researching, cancel_research, get_research_status,
     is_in_anomaly,
     has_pending_purchase,
+    has_travel_state, get_all_travel_states,
 )
 from handlers.keyboards import (
     create_main_keyboard,
@@ -153,6 +154,11 @@ def handle_message(event, vk):
     if has_pending_event(user_id):
         from handlers.events import handle_event_response
         if handle_event_response(player, vk, user_id, text):
+            return
+
+    # === Приоритет 3.7: Коридор перемещения ===
+    if has_travel_state(user_id):
+        if handle_travel_commands(player, vk, user_id, text):
             return
 
     # === Приоритет 4: Команда /start ===
@@ -695,6 +701,33 @@ def main():
             daemon=True,
         ).start()
         logger.info("Планировщик выбросов запущен")
+
+    def _travel_scheduler():
+        """Фоновый поток тиков коридора перемещения."""
+        import time
+        while True:
+            time.sleep(2)
+            states = get_all_travel_states()
+            if not states:
+                continue
+            for uid, _ in states:
+                lock = _get_user_lock(uid)
+                if not lock.acquire(blocking=False):
+                    continue
+                try:
+                    player = get_player(uid)
+                    travel_tick(player, vk, uid, silent=True)
+                except Exception as e:
+                    logger.error("Ошибка в travel_tick(user_id=%s): %s", uid, e, exc_info=True)
+                finally:
+                    lock.release()
+
+    threading.Thread(
+        target=_travel_scheduler,
+        name="travel-scheduler",
+        daemon=True,
+    ).start()
+    logger.info("Планировщик переходов запущен")
 
     processed_events = set()
     MAX_PROCESSED = 1000

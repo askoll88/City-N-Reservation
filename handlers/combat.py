@@ -499,51 +499,12 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
     # Выбираем событие (с модификаторами локации)
     event = _select_research_event_by_chance(find_chance, chance_mult, danger_mult, location_id)
 
-    # Создаём временный объект игрока для обработки
-    class TempPlayer:
-        def __init__(self):
-            # Получаем данные игрока для расчёта max_weight
-            user_data = database.get_user_by_vk(user_id)
-            strength = user_data.get('strength', 1) if user_data else 1
-            base_max_weight = 20 + strength * 2
-
-            # Проверяем экипированный рюкзак
-            equipped_backpack = user_data.get('equipped_backpack') if user_data else None
-            if equipped_backpack:
-                backpack_item = database.get_item_by_name(equipped_backpack)
-                if backpack_item:
-                    base_max_weight += backpack_item.get('backpack_bonus', 0)
-
-            # Получаем данные детектора
-            equipped_device = user_data.get('equipped_device') if user_data else None
-
-            self.current_location_id = location_id
-            self.find_chance = find_chance
-            self.rare_find_chance = rare_find_chance
-            self.energy = remaining_energy
-            self.equipped_device = equipped_device  # Добавляем детектор
-            self.health = 100  # Для обработки урона
-            self.radiation = 0
-            self.money = 0
-            self.vk_id = user_id
-            self.max_weight = base_max_weight
-
-            class TempInventory:
-                def reload(self): pass
-
-                @property
-                def total_weight(self) -> float:
-                    """Общий вес инвентаря"""
-                    items = database.get_user_inventory(user_id)
-                    total = 0.0
-                    for item in items:
-                        weight = item.get('weight', 1.0)
-                        quantity = item.get('quantity', 1)
-                        total += weight * quantity
-                    return round(total, 1)
-            self.inventory = TempInventory()
-
-    temp_player = TempPlayer()
+    # Используем полноценного Player, чтобы боевая система получала все атрибуты
+    # (total_defense, dodge_chance, max_health, инициатива и т.д.).
+    from player import Player
+    temp_player = Player(user_id)
+    temp_player.current_location_id = location_id
+    temp_player.energy = remaining_energy
 
     # Обрабатываем событие
     _handle_research_event(temp_player, vk, user_id, event, time_sec)
@@ -1239,19 +1200,22 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None):
 
     if not initiative["player_first"]:
         enemy_damage = _combat_state[user_id]['enemy_damage']
-        total_defense = player.total_defense
-        is_dodged = random.randint(1, 100) <= player.dodge_chance
+        total_defense = int(getattr(player, "total_defense", 0) or 0)
+        dodge_chance = int(getattr(player, "dodge_chance", 0) or 0)
+        current_hp = int(getattr(player, "health", 100) or 100)
+        max_hp = int(getattr(player, "max_health", max(current_hp, 1)) or max(current_hp, 1))
+        is_dodged = random.randint(1, 100) <= dodge_chance
         if is_dodged:
             message += "\n⚡ Враг начал первым, но ты уклонился от стартового удара!\n"
         else:
             final_damage = max(1, enemy_damage - total_defense)
             # Открывающий удар не убивает мгновенно: оставляем минимум 1 HP.
-            player.health = max(1, player.health - final_damage)
+            player.health = max(1, current_hp - final_damage)
             database.update_user_stats(user_id, health=player.health)
             message += (
                 "\n⚡ Враг выиграл инициативу и атакует первым!\n"
                 f"Получен урон: {final_damage} (защита: {total_defense})\n"
-                f"Текущее HP: {player.health}/{player.max_health}\n"
+                f"Текущее HP: {player.health}/{max_hp}\n"
             )
     else:
         message += "\n✅ Ты выиграл инициативу и действуешь первым!\n"

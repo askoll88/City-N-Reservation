@@ -71,6 +71,7 @@ _dialog_state = LockedDict()  # {user_id: {"npc": str, "stage": str}}
 _research_state = LockedDict()  # {user_id: research_data}
 _anomaly_state = LockedDict()  # {user_id: anomaly_data}
 _pending_purchase_state = LockedDict()  # {user_id: purchase_data}
+_travel_state = LockedDict()  # {user_id: travel_data}
 
 # Кэш игроков
 _players_cache = {}
@@ -320,6 +321,47 @@ def get_pending_purchase(user_id: int) -> dict | None:
 def clear_pending_purchase(user_id: int):
     """Очистить состояние ожидающей покупки"""
     _pending_purchase_state.pop(user_id, None)
+
+
+# === Работа с состоянием перемещения (travel corridor) ===
+
+def has_travel_state(user_id: int) -> bool:
+    """Проверить, находится ли игрок в коридоре перехода."""
+    return user_id in _travel_state
+
+
+def set_travel_state(user_id: int, data: dict):
+    """Установить состояние перемещения."""
+    _travel_state[user_id] = {
+        **data,
+        "created_at": time.time(),
+    }
+
+
+def get_travel_data(user_id: int) -> dict | None:
+    """Получить данные перемещения."""
+    return _travel_state.get(user_id)
+
+
+def update_travel_data(user_id: int, patch: dict) -> dict | None:
+    """Атомарно обновить состояние перемещения и вернуть новое значение."""
+    def updater(current):
+        if not current:
+            return None
+        current.update(patch)
+        return current
+    _travel_state.update(user_id, updater)
+    return _travel_state.get(user_id)
+
+
+def clear_travel_state(user_id: int):
+    """Очистить состояние перемещения."""
+    _travel_state.pop(user_id, None)
+
+
+def get_all_travel_states() -> list[tuple[int, dict]]:
+    """Снимок всех активных перемещений."""
+    return _travel_state.items()
 
 
 # === Состояние просмотра рынка (пагинация, фильтры, сортировка) ===
