@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 import database
+import ui
 from constants import InventorySection
 
 
@@ -1079,8 +1080,8 @@ def show_soldier_weapons(player, vk, user_id: int):
             )
             return
 
-        msg = "🎖️ВОЕННЫЙ СКЛАД — ОРУЖИЕ\n\n"
-        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        msg = f"{ui.title('Военный склад: оружие')}\n"
+        msg += f"💰 Баланс: {player.money} руб.\n\n"
         event_text = shop.get("event_text")
         if event_text:
             msg += f"📣 {event_text}\n\n"
@@ -1175,8 +1176,8 @@ def show_soldier_armor(player, vk, user_id: int):
             )
             return
 
-        msg = "🎖️ВОЕННЫЙ СКЛАД — БРОНЯ\n\n"
-        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        msg = f"{ui.title('Военный склад: броня')}\n"
+        msg += f"💰 Баланс: {player.money} руб.\n\n"
         event_text = shop.get("event_text")
         if event_text:
             msg += f"📣 {event_text}\n\n"
@@ -1294,8 +1295,8 @@ def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
             )
             return
 
-        msg = f"🔬ЛАБОРАТОРИЯ — {title}\n\n"
-        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        msg = f"{ui.title(f'Лаборатория: {title.lower()}')}\n"
+        msg += f"💰 Баланс: {player.money} руб.\n\n"
         event_text = shop.get("event_text")
         if event_text:
             msg += f"📣 {event_text}\n\n"
@@ -1396,8 +1397,8 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
             'period_key': shop.get("period_key"),
         })
 
-        msg = f"🔮АРТЕФАКТЫ — {title}\n\n"
-        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        msg = f"{ui.title(f'Артефакты: {title.lower()}')}\n"
+        msg += f"💰 Баланс: {player.money} руб.\n\n"
         event_text = shop.get("event_text")
         if event_text:
             msg += f"📣 {event_text}\n\n"
@@ -1687,17 +1688,6 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
                 message=f"🎒Не хватает места!\n\n"
                         f"Текущий вес: {current_weight:.1f} / {max_weight} кг\n"
                         f"Вес артефакта: {weight} кг",
-                random_id=0
-            )
-            return True
-
-        # Проверяем слоты для артефактов
-        if len(player.equipped_artifacts) >= player.max_artifact_slots:
-            vk.messages.send(
-                user_id=user_id,
-                message=f"🔮Нет слотов для артефактов!\n\n"
-                        f"У тебя {player.max_artifact_slots} слотов.\n"
-                        f"Освободи слот: 'снять артефакт'",
                 random_id=0
             )
             return True

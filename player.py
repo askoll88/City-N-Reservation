@@ -4,6 +4,7 @@
 import database
 import logging
 from locations import get_location, Location
+import ui
 
 logger = logging.getLogger(__name__)
 
@@ -407,48 +408,11 @@ class Player:
         current_weight = self.inventory.total_weight
         weight_status = "✅ В норме" if current_weight <= self.max_weight else "❌ ПЕРЕГРУЗ"
 
-        # ═══════════════════════════════════════════════════
-        # ПРОГРЕСС-БАРЫ
-        # ═══════════════════════════════════════════════════
-        def create_bar(current: int, max_val: int, length: int = 10) -> str:
-            """Создать прогресс-бар"""
-            percent = current / max_val
-            filled = int(percent * length)
-            if percent >= 0.7:
-                fill_char = "🟩"
-            elif percent >= 0.3:
-                fill_char = "🟨"
-            else:
-                fill_char = "🟥"
-            empty_char = "⬛"
-            return fill_char * filled + empty_char * (length - filled)
-
-        def create_rad_bar(current: int, max_val: int = 100, length: int = 10) -> str:
-            """Прогресс-бар радиации (инвертированный)"""
-            percent = current / max_val
-            filled = int(percent * length)
-            if percent <= 0.3:
-                fill_char = "🟩"
-            elif percent <= 0.7:
-                fill_char = "🟨"
-            else:
-                fill_char = "🟥"
-            empty_char = "⬛"
-            return fill_char * filled + empty_char * (length - filled)
-
-        def create_exp_bar(current: int, max_val: int, length: int = 10) -> str:
-            """Прогресс-бар опыта (синий)"""
-            percent = current / max_val
-            filled = int(percent * length)
-            fill_char = "🔹"
-            empty_char = "⬛"
-            return fill_char * filled + empty_char * (length - filled)
-
         # Прогресс-бары
-        hp_bar = create_bar(self.health, self.max_health)
-        energy_bar = create_bar(self.energy, 100)
-        rad_bar = create_rad_bar(self.radiation)
-        exp_bar = create_exp_bar(self.experience, exp_needed)
+        hp_line = ui.meter_line("HP", self.health, self.max_health, width=14)
+        energy_line = ui.meter_line("Энергия", self.energy, 100, width=14)
+        radiation_line = ui.meter_line("Радиация", self.radiation, 100, width=14)
+        exp_line = ui.meter_line("Опыт", self.experience, exp_needed, width=14)
 
         # ═══════════════════════════════════════════════════
         # СНАРЯЖЕНИЕ
@@ -520,32 +484,26 @@ class Player:
 
         # --- Верхний блок: основное ---
         lines = []
-        lines.append(f"📊 СТАТУС ПЕРСОНАЖА")
+        lines.append(ui.title("Статус персонажа"))
         lines.append(f"📍 {loc_name}")
         lines.append(f"🎯 Ур. {self.level}  |  {class_info}")
         lines.append("")
 
         # --- Жизненные показатели ---
-        hp_pct = int(self.health / self.max_health * 100)
-        en_pct = self.energy
-        rad_pct = self.radiation
-        lines.append(f"❤️ HP {self.health}/{self.max_health} ({hp_pct}%)")
-        lines.append(f"   {hp_bar}")
-        lines.append(f"⚡ Энергия {self.energy}/100")
-        lines.append(f"   {energy_bar}")
-        lines.append(f"☢️ Радиация {self.radiation}%")
-        lines.append(f"   {rad_bar}")
+        lines.append(ui.section("Показатели"))
+        lines.append(f"❤️ {hp_line}")
+        lines.append(f"⚡ {energy_line}")
+        lines.append(f"☢️ {radiation_line}")
         lines.append("")
 
         # --- Опыт и деньги ---
-        exp_pct = int(self.experience / exp_needed * 100) if exp_needed > 0 else 0
-        lines.append(f"⭐ Опыт {self.experience}/{exp_needed} ({exp_pct}%)")
-        lines.append(f"   {exp_bar}")
+        lines.append(ui.section("Прогресс"))
+        lines.append(f"⭐ {exp_line}")
         lines.append(f"💰 {self.money:,} ₽")
         lines.append("")
 
         # --- Снаряжение ---
-        lines.append(f"🎒 СНАРЯЖЕНИЕ")
+        lines.append(ui.section("Снаряжение"))
         lines.append(f"🔫 {self.equipped_weapon or '—'}  |  ⚔️ Атака: {total_attack}")
 
         if armor_slots:
@@ -565,7 +523,7 @@ class Player:
         lines.append("")
 
         # --- Характеристики ---
-        lines.append(f"💪 ХАРАКТЕРИСТИКИ")
+        lines.append(ui.section("Характеристики"))
         lines.append(f"⚔️ Сила: {self.strength}  |  🏃 Выносливость: {self.stamina}")
         lines.append(f"👁️ Восприятие: {self.perception}  |  🍀 Удача: {self.luck}")
         lines.append(f"🧬 Прокачка HP: {self.hp_upgrade_level}/{self.hp_upgrade_max_level} (+{self.hp_upgrade_bonus} HP)")
@@ -576,7 +534,7 @@ class Player:
         lines.append("")
 
         # --- Груз ---
-        lines.append(f"📦 ГРУЗ")
+        lines.append(ui.section("Груз"))
         lines.append(f"⚖️ {current_weight:.1f} / {self.max_weight} кг  {weight_status}")
         lines.append(f"🎯 Гильзы: {shells_current} / {shells_capacity}  ({shells_bag})")
 

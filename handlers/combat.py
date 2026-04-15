@@ -7,6 +7,7 @@ import threading
 import config
 import database
 import enemies
+import ui
 from constants import RESEARCH_LOCATIONS
 from state_manager import _combat_state, set_combat_state, is_in_combat, get_combat_data
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
@@ -352,20 +353,25 @@ def _roll_initiative(player, enemy_speed: int) -> dict:
 
 def _create_hp_bar(current: int, max_val: int, bar_length: int = 10) -> str:
     """Создать прогресс-бар HP"""
-    filled = int((current / max_val) * bar_length)
-    if current <= 0:
-        filled = 0
+    return ui.bar(current, max_val, width=bar_length, fill="#", empty="-")
 
-    # Цвет зависит от процента HP
-    percent = (current / max_val) * 100
-    if percent >= 70:
-        color = "[+]"
-    elif percent >= 30:
-        color = "[~]"
-    else:
-        color = "[-]"
 
-    return color * filled + "[ ]" * (bar_length - filled)
+def _format_combat_hud(combat: dict, player) -> str:
+    enemy_bar = _create_hp_bar(combat['enemy_hp'], combat['enemy_max_hp'], bar_length=14)
+    player_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
+    enemy_pct = ui.pct(combat['enemy_hp'], combat['enemy_max_hp'])
+    player_pct = ui.pct(player.health, player.max_health)
+
+    lines = [
+        ui.section("Статус боя"),
+        f"🎯 Враг: {combat['enemy_name']}",
+        f"   HP      {enemy_bar} {combat['enemy_hp']}/{combat['enemy_max_hp']} ({enemy_pct}%)",
+        f"🧍 Ты",
+        f"   HP      {player_bar} {player.health}/{player.max_health} ({player_pct}%)",
+        f"   Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100",
+        f"   Защита  {player.total_defense}",
+    ]
+    return "\n".join(lines)
 
 
 def _handle_death(player, vk, user_id: int):
@@ -394,15 +400,15 @@ def _handle_death(player, vk, user_id: int):
     )
 
     message = (
-        f"ТЫ ПОГИБ!\n\n"
+        f"{ui.title('Ты погиб')}\n"
         f"Твоё тело нашли другие сталкеры и принесли в безопасное место.\n\n"
-        f"Потери:\n"
-        f"- Потеряно денег: {lost_money} руб.\n"
-        f"- Потеряно опыта: {lost_exp}\n\n"
-        f"Текущее состояние:\n"
-        f"HP: {player.health}/{player.max_health}\n"
-        f"Энергия: {player.energy}/100\n"
-        f"Радиация: 0"
+        f"{ui.section('Потери')}\n"
+        f"• Деньги: -{lost_money} руб.\n"
+        f"• Опыт: -{lost_exp}\n\n"
+        f"{ui.section('Текущее состояние')}\n"
+        f"HP      {ui.bar(player.health, player.max_health, width=14)} {player.health}/{player.max_health}\n"
+        f"Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100\n"
+        f"Радиация 0"
     )
 
     vk.messages.send(
@@ -453,9 +459,9 @@ def show_explore_menu(player, vk, user_id: int):
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
 
     message = (
-        f"ИССЛЕДОВАНИЕ ЛОКАЦИИ\n\n"
+        f"{ui.title('Исследование локации')}\n"
         f"Нажми 'Исследовать' — время будет выбрано случайно.\n\n"
-        f"Возможные варианты:\n"
+        f"{ui.section('Режимы')}\n"
         f"5 сек — быстрый поиск (1 энергия)\n"
         f"10 сек — обычный поиск (2 энергии)\n"
         f"15 сек — тщательный поиск (3 энергии)\n\n"
@@ -2387,23 +2393,7 @@ def handle_combat_attack(player, vk, user_id: int):
         if combat.get('bleed_turns', 0) > 0:
             message += f"\n🩸 Кровотечение врага: {combat['bleed_turns']} ходов"
 
-        # Прогресс-бары HP + энергия
-        enemy_hp_bar = _create_hp_bar(combat['enemy_hp'], combat['enemy_max_hp'])
-        player_hp_bar = _create_hp_bar(player.health, player.max_health)
-
-        message += (
-            f"\n\n╔════════════════════════════════╗\n"
-            f"║СТАТУС БОЯ\n"
-            f"╠════════════════════════════════╣\n"
-            f"║ {combat['enemy_name']}\n"
-            f"║ HP {enemy_hp_bar} {combat['enemy_hp']}/{combat['enemy_max_hp']}\n"
-            f"╠════════════════════════════════╣\n"
-            f"║ТЫ\n"
-            f"║ ❤️ HP {player_hp_bar} {player.health}/{player.max_health}\n"
-            f"║ ⚡ Энергия: {player.energy}/100\n"
-            f"║ 🛡️ Защита: {player.total_defense}\n"
-            f"╚════════════════════════════════╝"
-        )
+        message += f"\n\n{_format_combat_hud(combat, player)}"
 
         # Уменьшаем кулдауны после хода
         _decrease_cooldowns(user_id)
@@ -2447,10 +2437,15 @@ def handle_combat_flee(player, vk, user_id: int):
     
     if random.randint(1, 100) <= 50:
         del _combat_state[user_id]
-        player_hp_bar = _create_hp_bar(player.health, player.max_health)
+        player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
         vk.messages.send(
             user_id=user_id,
-            message=f"Тебе удалось сбежать!\n\nТы\nHP {player_hp_bar} {player.health}/{player.max_health}",
+            message=(
+                "Удалось оторваться от противника.\n\n"
+                f"{ui.section('Состояние')}\n"
+                f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)\n"
+                f"Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100"
+            ),
             keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
             random_id=0
         )
@@ -2470,11 +2465,17 @@ def handle_combat_flee(player, vk, user_id: int):
 
         database.update_user_stats(user_id, health=player.health)
         
-        player_hp_bar = _create_hp_bar(player.health, player.max_health)
+        player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
 
         vk.messages.send(
             user_id=user_id,
-            message=f"Не удалось сбежать!\n\n{combat['enemy_name']} атакует!\nПолучен урон: {final_damage} (защита: {total_defense})\n\nТы\nHP {player_hp_bar} {player.health}/{player.max_health}",
+            message=(
+                "Сбежать не получилось.\n\n"
+                f"{combat['enemy_name']} атакует!\n"
+                f"Урон: {final_damage} (защита: {total_defense})\n\n"
+                f"{ui.section('Состояние')}\n"
+                f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)"
+            ),
             keyboard=create_combat_keyboard().get_keyboard(),
             random_id=0
         )
@@ -2511,14 +2512,15 @@ def _handle_victory(player, combat, user_id: int) -> str:
     
     level_up = player._check_level_up()
     
-    player_hp_bar = _create_hp_bar(player.health, player.max_health)
+    player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
 
     message = (
-        f"ПОБЕДА!\n\n"
-        f"Ты победил {combat['enemy_name']}!\n\n"
-        f"Награда: {money} руб.\n"
-        f"Опыт: +{experience}\n"
-        f"Гильзы: {current_shells}/{capacity}\n"
+        f"{ui.title('Победа')}\n"
+        f"Ты победил {combat['enemy_name']}.\n\n"
+        f"{ui.section('Награда')}\n"
+        f"💰 Деньги: +{money} руб.\n"
+        f"⭐ Опыт: +{experience}\n"
+        f"🎯 Гильзы: {current_shells}/{capacity}\n"
     )
     if reward_mult > 1.0:
         message += f"⚖️ Множитель сложности: x{reward_mult:.2f}\n"
@@ -2526,7 +2528,11 @@ def _handle_victory(player, combat, user_id: int) -> str:
     if not success:
         message += f"⚠️ Мешочек переполнен! {msg}\n"
 
-    message += f"\nТы\nHP {player_hp_bar} {player.health}/{player.max_health}\n"
+    message += (
+        f"\n{ui.section('Состояние')}\n"
+        f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)\n"
+        f"Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100\n"
+    )
 
     if level_up:
         message += f"\n{level_up}"

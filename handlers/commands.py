@@ -624,6 +624,21 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
             set_dialog_state(user_id, npc_id, "shop_food")
             show_scientist_shop(player, vk, user_id, category='food')
             return True
+
+    # Обработка магазина у Барыги на КПП
+    if npc_id == "барыга":
+        from state_manager import set_dialog_state
+        from handlers.inventory import show_artifact_shop, show_sell_artifacts
+
+        if text in ["купить", "купить артефакты", "артефакты"]:
+            set_dialog_state(user_id, npc_id, "buy_artifacts")
+            show_artifact_shop(player, vk, user_id, rarity=None)
+            return True
+
+        if text in ["продать", "продать артефакты", "продажа артефактов"]:
+            set_dialog_state(user_id, npc_id, "sell_artifacts")
+            show_sell_artifacts(player, vk, user_id)
+            return True
     
     # Обработка выбора вопроса диалога
     from npcs import get_npc
