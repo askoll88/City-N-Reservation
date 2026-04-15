@@ -621,19 +621,36 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
     from handlers.inventory import _get_shop_items_by_number, get_shop_cache_data, handle_buy_item
 
     dialog_info = get_dialog_info(user_id)
-    if not dialog_info:
-        # Проверяем кэш магазина артефактов
-        shop_data = get_shop_cache_data(user_id)
-        if 'artifacts' in shop_data:
-            return _handle_buy_artifact_by_number(player, vk, user_id, item_num)
-        return False
-
-    stage = dialog_info.get("stage", "")
-
     try:
         num = int(item_num)
     except ValueError:
         return False
+
+    if not dialog_info:
+        # Вне диалога покупка по номеру должна работать для всех витрин.
+        shop_data = get_shop_cache_data(user_id)
+
+        item_name = _get_shop_items_by_number(user_id, 'weapons', num)
+        if item_name:
+            handle_buy_item(player, item_name, vk, user_id)
+            return True
+
+        item_name = _get_shop_items_by_number(user_id, 'armor', num)
+        if item_name:
+            handle_buy_item(player, item_name, vk, user_id)
+            return True
+
+        item_name = _get_shop_items_by_number(user_id, 'scientist', num)
+        if item_name:
+            handle_buy_item(player, item_name, vk, user_id)
+            return True
+
+        if 'artifacts' in shop_data:
+            return _handle_buy_artifact_by_number(player, vk, user_id, item_num)
+
+        return False
+
+    stage = dialog_info.get("stage", "")
 
     if stage == "shop_weapons":
         item_name = _get_shop_items_by_number(user_id, 'weapons', num)
