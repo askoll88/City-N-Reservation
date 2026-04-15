@@ -305,27 +305,8 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     """Клавиатура с пагинацией и сортировкой для рынка."""
     keyboard = VkKeyboard(one_time=False)
 
-    # Ряд пагинации
-    if pages > 1:
-        # Показываем до 5 кнопок страниц
-        start_page = max(1, page - 2)
-        end_page = min(pages, start_page + 4)
-        if end_page - start_page < 4:
-            start_page = max(1, end_page - 4)
-
-        # Безопасно раскладываем номера страниц: не больше 3 кнопок в ряду.
-        buttons_in_row = 0
-        for p in range(start_page, end_page + 1):
-            color = VkKeyboardColor.PRIMARY if p == page else VkKeyboardColor.SECONDARY
-            keyboard.add_button(f"📄 {p}", color=color)
-            buttons_in_row += 1
-            if p < end_page and buttons_in_row >= 3:
-                keyboard.add_line()
-                buttons_in_row = 0
-
-        keyboard.add_line()
-
-    # Ряд навигации
+    # Ряд навигации (только назад/вперёд, без номеров страниц).
+    # Это гарантирует отсутствие ошибки VK 911 по переполнению строки.
     if page > 1:
         keyboard.add_button("◀️ Назад", color=VkKeyboardColor.SECONDARY)
     if page < pages:
@@ -368,19 +349,10 @@ def create_my_listings_keyboard(page: int, pages: int):
     keyboard = VkKeyboard(one_time=False)
 
     if pages > 1:
-        start_page = max(1, page - 2)
-        end_page = min(pages, start_page + 4)
-        if end_page - start_page < 4:
-            start_page = max(1, end_page - 4)
-
-        buttons_in_row = 0
-        for p in range(start_page, end_page + 1):
-            color = VkKeyboardColor.PRIMARY if p == page else VkKeyboardColor.SECONDARY
-            keyboard.add_button(f"📄 {p}", color=color)
-            buttons_in_row += 1
-            if p < end_page and buttons_in_row >= 3:
-                keyboard.add_line()
-                buttons_in_row = 0
+        if page > 1:
+            keyboard.add_button("◀️ Назад", color=VkKeyboardColor.SECONDARY)
+        if page < pages:
+            keyboard.add_button("▶️ Вперёд", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
 
     keyboard.add_button("📋 Активные", color=VkKeyboardColor.PRIMARY)

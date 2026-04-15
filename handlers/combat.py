@@ -275,17 +275,53 @@ def _get_zone_level(location_id: str) -> int:
     return ZONE_LEVELS.get(location_id, 10)
 
 
+def _filter_enemies_by_type(enemy_list: list[dict], enemy_type: str) -> list[dict]:
+    """Отфильтровать список врагов по типу."""
+    if not enemy_type:
+        return list(enemy_list)
+
+    et = enemy_type.lower().strip()
+    if et == "mutant":
+        return [
+            e for e in enemy_list
+            if any(k in e.get("name", "").lower() for k in ("мутант", "химера", "волк", "аномал", "зомби", "биолог"))
+        ]
+    if et == "bandit":
+        return [e for e in enemy_list if "бандит" in e.get("name", "").lower()]
+    if et == "military":
+        return [e for e in enemy_list if "военн" in e.get("name", "").lower() or "солдат" in e.get("name", "").lower()]
+    return list(enemy_list)
+
+
+def _get_enemy_by_type_for_location(location_id: str, enemy_type: str):
+    """Взять врага нужного типа в рамках текущей локации (без перескока в чужие биомы)."""
+    loc_enemies = list(enemies.ENEMIES.get(location_id, []))
+    if not loc_enemies:
+        return None
+
+    filtered = _filter_enemies_by_type(loc_enemies, enemy_type)
+    if not filtered:
+        return None
+    return random.choice(filtered)
+
+
 def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_elite: bool = True) -> dict:
-    """Собрать боевой профиль врага с мягким скейлингом от уровня игрока и роли."""
+    """Собрать боевой профиль врага со стабильным скейлингом по уровню игрока."""
     player_level = max(1, int(getattr(player, "level", 1) or 1))
     zone_level = _get_zone_level(location_id)
 
-    # Мягкий скейлинг (не 1:1): зона остается важной, но контент не "умирает".
-    delta = _clamp(int(round((player_level - zone_level) * 0.35)), -2, 4)
-    enemy_level = max(1, zone_level + random.randint(-1, 1) + delta)
+    # Раньше уровень был зажат до zone+4, из-за чего на хай-левеле враги "застревали" около 20.
+    # Новый подход: смесь уровня зоны и игрока + шум, с мягкими ограничениями.
+    desired_level = int(round(zone_level * 0.35 + player_level * 0.75))
+    spread = 1 + min(4, player_level // 20)  # 1..5
+    enemy_level = desired_level + random.randint(-spread, spread)
+    min_enemy_level = max(1, int(player_level * 0.55) - 2)
+    max_enemy_level = max(zone_level + 6, int(player_level * 1.15) + 4)
+    enemy_level = _clamp(enemy_level, min_enemy_level, max_enemy_level)
 
-    hp_mult = 1.0 + 0.08 * (enemy_level - 1)
-    dmg_mult = 1.0 + 0.06 * (enemy_level - 1)
+    # Плавный рост статов без резких скачков.
+    hp_mult = 1.0 + 0.035 * max(0, enemy_level - 1)
+    dmg_mult = 1.0 + 0.028 * max(0, enemy_level - 1)
 
     role_key = random.choices(
         population=list(ENEMY_ROLE_PROFILES.keys()),
@@ -298,7 +334,7 @@ def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_el
 
     # Элитные версии дают всплеск сложности и награды.
     # allow_elite=False используется для режимов, где элитки нужно ограничить (например travel).
-    elite_chance = min(0.20, 0.04 + player_level * 0.004)
+    elite_chance = 0.0 if player_level < 12 else min(0.18, 0.02 + (player_level - 10) * 0.0025)
     is_elite = allow_elite and enemy_level >= zone_level and random.random() < elite_chance
     if is_elite:
         hp_mult *= 1.20
@@ -306,6 +342,12 @@ def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_el
 
     scaled_hp = max(20, int(base_enemy["hp"] * hp_mult))
     scaled_dmg = max(5, int(base_enemy["damage"] * dmg_mult))
+
+    # Защита ранней игры от "ваншот"-баланса.
+    if player_level <= 10:
+        scaled_hp = min(scaled_hp, 45 + player_level * 10)
+        scaled_dmg = min(scaled_dmg, 12 + player_level * 3)
+
     enemy_speed = max(3, int(10 + enemy_level // 5 + role.get("speed_mod", 0)))
 
     reward_mult = 1.0 + max(0.0, (enemy_level - zone_level) * 0.06)
@@ -1524,7 +1566,10 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
 
     # Если указан тип врага - используем его, иначе - случайный для локации
     if enemy_type:
-        enemy = enemies.get_enemy_by_type(enemy_type)
+        # В приоритете враг нужного типа в ТЕКУЩЕЙ локации.
+        enemy = _get_enemy_by_type_for_location(player.current_location_id, enemy_type)
+        if not enemy:
+            enemy = enemies.get_enemy_by_type(enemy_type)
     else:
         enemy = enemies.get_enemy_for_location(player.current_location_id)
         # Бонус aftermath: повышенный шанс встречи с редким/сильным мутантом.
