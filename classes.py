@@ -117,8 +117,17 @@ def get_all_classes() -> dict:
 
 def get_class_by_weapon(weapon_name: str) -> Optional[str]:
     """Определить класс по оружию"""
-    import database
-    return database.get_weapon_class(weapon_name)
+    if not weapon_name:
+        return None
+
+    classes = _get_classes_dict()
+
+    for class_id, data in classes.items():
+        required_weapons = data.get("required_weapons", [])
+        if weapon_name in required_weapons:
+            return class_id
+
+    return None
 
 
 def get_available_classes(equipped_weapon: str = None) -> list[str]:
