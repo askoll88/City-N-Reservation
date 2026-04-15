@@ -422,10 +422,27 @@ def _format_combat_hud(combat: dict, player) -> str:
     return "\n".join(lines)
 
 
-def _handle_death(player, vk, user_id: int):
-    """Обработка смерти персонажа в бою"""
+def _handle_death(player, vk, user_id: int, cause: str = None, killer_name: str = None, final_damage: int = None):
+    """Обработка смерти персонажа в бою с экраном поражения."""
     _, create_location_keyboard, _, _ = _get_main_imports()
     from state_manager import clear_travel_state
+
+    # 1) Экран поражения (до применения штрафов/респавна)
+    cause_text = cause or "полученные раны"
+    killer_text = f"{killer_name}" if killer_name else "неизвестная угроза"
+    damage_text = f"\n💥 Последний урон: {int(final_damage)}" if final_damage is not None else ""
+    defeat_message = (
+        f"{ui.title('Поражение')}\n"
+        f"☠️ Тебя добивает: {killer_text}\n"
+        f"📌 Причина: {cause_text}"
+        f"{damage_text}\n\n"
+        "Сознание меркнет..."
+    )
+    vk.messages.send(
+        user_id=user_id,
+        message=defeat_message,
+        random_id=0
+    )
 
     # Штрафы при смерти
     lost_money = player.money // 2
@@ -455,6 +472,8 @@ def _handle_death(player, vk, user_id: int):
     message = (
         f"{ui.title('Ты погиб')}\n"
         f"Твоё тело нашли другие сталкеры и принесли в безопасное место.\n\n"
+        f"{ui.section('Причина')}\n"
+        f"• {cause_text}\n\n"
         f"{ui.section('Потери')}\n"
         f"• Деньги: -{lost_money} руб.\n"
         f"• Опыт: -{lost_exp}\n\n"
@@ -2008,7 +2027,14 @@ def use_skill(player, vk, user_id: int, skill_name: str):
                     player.health = 0
                     database.update_user_stats(user_id, health=0)
                     del _combat_state[user_id]
-                    _handle_death(player, vk, user_id)
+                    _handle_death(
+                        player,
+                        vk,
+                        user_id,
+                        cause=f"Смертельный удар в бою ({combat.get('enemy_name', 'враг')})",
+                        killer_name=combat.get('enemy_name'),
+                        final_damage=final_damage,
+                    )
                     return
 
         # Проверяем победу
@@ -2456,7 +2482,14 @@ def handle_combat_attack(player, vk, user_id: int):
                 player.health = 0
                 database.update_user_stats(user_id, health=0)
                 del _combat_state[user_id]
-                _handle_death(player, vk, user_id)
+                _handle_death(
+                    player,
+                    vk,
+                    user_id,
+                    cause=f"Смертельный контрудар ({combat.get('enemy_name', 'враг')})",
+                    killer_name=combat.get('enemy_name'),
+                    final_damage=final_damage,
+                )
                 return
 
             database.update_user_stats(user_id, health=player.health, energy=player.energy)
@@ -2532,7 +2565,14 @@ def handle_combat_flee(player, vk, user_id: int):
             player.health = 0
             database.update_user_stats(user_id, health=0)
             del _combat_state[user_id]
-            _handle_death(player, vk, user_id)
+            _handle_death(
+                player,
+                vk,
+                user_id,
+                cause=f"Погиб при попытке отступления ({combat.get('enemy_name', 'враг')})",
+                killer_name=combat.get('enemy_name'),
+                final_damage=final_damage,
+            )
             return
 
         database.update_user_stats(user_id, health=player.health)
