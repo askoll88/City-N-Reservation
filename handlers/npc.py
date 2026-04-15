@@ -199,8 +199,12 @@ def _fmt_clock_msk(dt_utc_naive: datetime | None) -> str:
 
 def _fmt_delta_short(seconds: int) -> str:
     seconds = max(0, int(seconds))
+    hours = seconds // 3600
     minutes = seconds // 60
     sec = seconds % 60
+    if hours > 0:
+        rem_minutes = (seconds % 3600) // 60
+        return f"{hours}:{rem_minutes:02d}:{sec:02d}"
     return f"{minutes}:{sec:02d}"
 
 
