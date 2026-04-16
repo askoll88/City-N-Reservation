@@ -2168,10 +2168,11 @@ def use_skill(player, vk, user_id: int, skill_name: str):
         if combat['enemy_hp'] <= 0:
             database.update_user_stats(user_id, energy=player.energy)
             result_msg += _handle_victory(player, combat, user_id)
+            from handlers.keyboards import create_resume_keyboard
             vk.messages.send(
                 user_id=user_id,
                 message=result_msg,
-                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
                 random_id=0
             )
             return
@@ -2574,7 +2575,8 @@ def handle_combat_attack(player, vk, user_id: int):
     if combat['enemy_hp'] <= 0:
         database.update_user_stats(user_id, energy=player.energy)
         message += _handle_victory(player, combat, user_id)
-        keyboard = create_location_keyboard(player.current_location_id)
+        from handlers.keyboards import create_resume_keyboard
+        keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id)
     else:
         enemy_damage = combat['enemy_damage']
         if combat.get("enemy_role") == "bruiser":
@@ -2695,6 +2697,7 @@ def handle_combat_flee(player, vk, user_id: int):
     
     if random.randint(1, 100) <= 50:
         del _combat_state[user_id]
+        from handlers.keyboards import create_resume_keyboard
         player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
         vk.messages.send(
             user_id=user_id,
@@ -2704,7 +2707,7 @@ def handle_combat_flee(player, vk, user_id: int):
                 f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)\n"
                 f"Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100"
             ),
-            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
             random_id=0
         )
     else:

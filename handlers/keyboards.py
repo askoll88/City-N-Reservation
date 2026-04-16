@@ -208,6 +208,21 @@ def create_travel_keyboard():
     return keyboard
 
 
+def create_resume_keyboard(location_id: str, player_level: int = None, user_id: int = None):
+    """
+    Вернуть клавиатуру текущего контекста.
+    Если игрок всё ещё в коридоре перехода, нужно продолжать показывать travel UI.
+    """
+    if user_id is not None:
+        try:
+            from state_manager import has_travel_state
+            if has_travel_state(user_id):
+                return create_travel_keyboard()
+        except Exception:
+            pass
+    return create_location_keyboard(location_id, player_level)
+
+
 # ============================================================
 # Магазины
 # ============================================================

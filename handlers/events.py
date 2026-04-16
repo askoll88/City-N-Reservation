@@ -6,7 +6,7 @@ import database
 from random_events import apply_event_choice, format_event_message
 from state_manager import get_pending_event, set_pending_event, clear_pending_event
 from state_manager import get_emission_pending, clear_emission_pending
-from handlers.keyboards import create_random_event_keyboard, create_location_keyboard
+from handlers.keyboards import create_random_event_keyboard, create_resume_keyboard
 from emission import handle_emission_warning_response
 
 
@@ -29,7 +29,7 @@ def handle_event_response(player, vk, user_id: int, text: str) -> bool:
         vk.messages.send(
             user_id=user_id,
             message="Ты решил не рисковать. Зона подождёт.",
-            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
             random_id=0,
         )
         return True
@@ -74,7 +74,7 @@ def handle_event_response(player, vk, user_id: int, text: str) -> bool:
             vk.messages.send(
                 user_id=user_id,
                 message="Событие повреждено и было сброшено. Продолжай путь.",
-                keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+                keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
                 random_id=0,
             )
             return True
@@ -156,7 +156,7 @@ def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: i
     vk.messages.send(
         user_id=user_id,
         message=result["message"],
-        keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+        keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
         random_id=0,
     )
     return True

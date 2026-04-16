@@ -72,6 +72,7 @@ from state_manager import (
 from handlers.keyboards import (
     create_main_keyboard,
     create_location_keyboard,
+    create_resume_keyboard,
     create_character_keyboard,
     create_inventory_keyboard,
     create_shop_keyboard,
@@ -596,7 +597,7 @@ def _handle_pending_loot_choice(player, vk, user_id: int, text: str) -> bool:
         vk.messages.send(
             user_id=user_id,
             message="Выбор устарел. Продолжай исследование.",
-            keyboard=create_location_keyboard(location_id).get_keyboard(),
+            keyboard=create_resume_keyboard(location_id, player.level, user_id).get_keyboard(),
             random_id=0
         )
         return True
@@ -610,7 +611,7 @@ def _handle_pending_loot_choice(player, vk, user_id: int, text: str) -> bool:
         vk.messages.send(
             user_id=user_id,
             message=f"✅ {item_name} добавлен в инвентарь.{remain_part}",
-            keyboard=create_location_keyboard(location_id).get_keyboard(),
+            keyboard=create_resume_keyboard(location_id, player.level, user_id).get_keyboard(),
             random_id=0
         )
         return True
@@ -619,7 +620,7 @@ def _handle_pending_loot_choice(player, vk, user_id: int, text: str) -> bool:
     vk.messages.send(
         user_id=user_id,
         message=f"🗑️ Ты выбросил {item_name}.{remain_part}",
-        keyboard=create_location_keyboard(location_id).get_keyboard(),
+        keyboard=create_resume_keyboard(location_id, player.level, user_id).get_keyboard(),
         random_id=0
     )
     return True
