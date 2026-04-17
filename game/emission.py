@@ -510,6 +510,43 @@ def handle_emission_warning_response(player, vk, user_id: int, text: str) -> boo
         return True
 
 
+def handle_emission_impact_actions(player, vk, user_id: int, text: str) -> bool:
+    """
+    Обработать кнопки impact даже если emission_pending уже очищен.
+    Нужен для сообщений "Выброс усиливается", которые приходят без pending-состояния.
+    """
+    text_lower = (text or "").strip().lower()
+    if not text_lower:
+        return False
+
+    impact_tokens = ("пропустить", "skip", "бежать", "укрытие", "леч", "инвентар")
+    if not any(token in text_lower for token in impact_tokens):
+        return False
+
+    emission = database.get_active_emission()
+    if not emission or emission.get("status") != EMISSION_PHASE_IMPACT:
+        return False
+
+    impact_time = emission.get("impact_time")
+    end_time = emission.get("end_time")
+    if not impact_time or not end_time:
+        return False
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if now < impact_time or now > end_time:
+        return False
+
+    location = _resolve_emission_location(user_id, getattr(player, "current_location_id", None))
+    if location in SAFE_LOCATIONS:
+        return False
+
+    event = {
+        "phase": "impact",
+        "emission_id": int(emission.get("id") or 0),
+    }
+    return _handle_impact_choice(player, vk, user_id, event, text)
+
+
 def _handle_warning_choice(player, vk, user_id: int, event: dict, text: str) -> bool:
     """Обработать выбор на фазе предупреждения"""
     text_lower = text.strip().lower()

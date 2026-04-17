@@ -268,13 +268,11 @@ def create_scientist_shop_keyboard():
 def create_blackmarket_keyboard():
     """Магазин на Чёрном рынке"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Артефакты", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Продать артефакты", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Купить", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Продать", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("Оружие", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Броня", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_line()
-    keyboard.add_button("Рюкзаки", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Рынок игроков", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Мои лоты", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard

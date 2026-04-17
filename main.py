@@ -142,6 +142,14 @@ def handle_message(event, vk):
         if handle_combat_commands(player, vk, user_id, text, original_text):
             return
 
+    # === Приоритет 1.5: Кнопки выброса (impact) даже без pending ===
+    try:
+        from game.emission import handle_emission_impact_actions
+        if handle_emission_impact_actions(player, vk, user_id, text):
+            return
+    except Exception:
+        logger.exception("Ошибка роутинга impact-кнопок (user_id=%s)", user_id)
+
     # === Приоритет 2: Аномалия ===
     if handle_anomaly_commands(player, vk, user_id, text):
         return

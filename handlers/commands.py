@@ -630,9 +630,17 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
             return False
 
     # Отдельно оставляем passthrough для команд P2P рынка у Барыги.
-    if npc_id == "барыга" and stage in {"buy_artifacts", "sell_artifacts"}:
+    if npc_id == "барыга":
         market_passthrough = text in {"рынок игроков", "рынок", "рынок показать", "мои лоты", "мои сделки"}
         if market_passthrough:
+            if player.current_location_id != "черный рынок":
+                vk.messages.send(
+                    user_id=user_id,
+                    message="📈 P2P рынок доступен только на локации «Черный рынок».",
+                    keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                    random_id=0
+                )
+                return True
             return False
 
     # Обработка "Назад" из диалога — но НЕ из магазина (там свой обработчик)
