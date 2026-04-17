@@ -2167,7 +2167,7 @@ def use_skill(player, vk, user_id: int, skill_name: str):
         # Проверяем победу
         if combat['enemy_hp'] <= 0:
             database.update_user_stats(user_id, energy=player.energy)
-            result_msg += _handle_victory(player, combat, user_id)
+            result_msg += _handle_victory(player, combat, user_id, vk=vk)
             from handlers.keyboards import create_resume_keyboard
             vk.messages.send(
                 user_id=user_id,
@@ -2574,7 +2574,7 @@ def handle_combat_attack(player, vk, user_id: int):
 
     if combat['enemy_hp'] <= 0:
         database.update_user_stats(user_id, energy=player.energy)
-        message += _handle_victory(player, combat, user_id)
+        message += _handle_victory(player, combat, user_id, vk=vk)
         from handlers.keyboards import create_resume_keyboard
         keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id)
     else:
@@ -2748,7 +2748,7 @@ def handle_combat_flee(player, vk, user_id: int):
             random_id=0
         )
 
-def _handle_victory(player, combat, user_id: int) -> str:
+def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     """Обработка победы над врагом"""
     _combat_state, _, _, _ = _get_main_imports()
     from handlers.quests import track_quest_kill, track_quest_shells
