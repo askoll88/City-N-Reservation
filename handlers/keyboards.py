@@ -620,11 +620,12 @@ def create_emission_warning_keyboard():
     return keyboard
 
 
-def create_emission_impact_keyboard(location: str):
+def create_emission_impact_keyboard(location: str, can_flee: bool = True):
     """Клавиатура во время удара выброса"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("🏃 Бежать в укрытие", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_line()
+    if can_flee:
+        keyboard.add_button("🏃 Бежать в укрытие", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_line()
     keyboard.add_button("🩺 Лечиться", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("📦 Инвентарь", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()

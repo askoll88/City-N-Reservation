@@ -587,7 +587,7 @@ def _handle_impact_choice(player, vk, user_id: int, event: dict, text: str) -> b
                     "☢️ Слишком поздно.\n"
                     "Ты выбрал риск и путь в безопасные зоны уже закрыт до конца выброса."
                 ),
-                keyboard=create_emission_impact_keyboard(player.current_location_id).get_keyboard(),
+                keyboard=_create_dynamic_impact_keyboard(user_id, player.current_location_id).get_keyboard(),
                 random_id=0,
             )
             return True
@@ -604,7 +604,7 @@ def _handle_impact_choice(player, vk, user_id: int, event: dict, text: str) -> b
                 "🩺 Ты пытаешься лечиться...\n\n"
                 "Выброс мешает — напиши 'больница' или используй аптечку."
             ),
-            keyboard=create_emission_impact_keyboard(player.current_location_id).get_keyboard(),
+            keyboard=_create_dynamic_impact_keyboard(user_id, player.current_location_id).get_keyboard(),
             random_id=0,
         )
         return True
@@ -618,7 +618,7 @@ def _handle_impact_choice(player, vk, user_id: int, event: dict, text: str) -> b
     vk.messages.send(
         user_id=user_id,
         message="Во время выброса доступны: 'Бежать в укрытие', 'Лечиться' или 'Инвентарь'.",
-        keyboard=create_emission_impact_keyboard(player.current_location_id).get_keyboard(),
+        keyboard=_create_dynamic_impact_keyboard(user_id, player.current_location_id).get_keyboard(),
         random_id=0,
     )
     return True
@@ -769,6 +769,12 @@ def _flee_to_safe_location(player, vk, user_id: int) -> bool:
         random_id=0,
     )
     return True
+
+
+def _create_dynamic_impact_keyboard(user_id: int, location: str):
+    """Клавиатура impact с учётом текущей возможности побега в safe."""
+    blocked, _ = is_emission_safe_entry_blocked_for_user(user_id)
+    return create_emission_impact_keyboard(location, can_flee=not blocked)
 
 
 # =========================================================================
@@ -946,7 +952,7 @@ def _apply_emission_impact(vk, emission_id: int):
                 location=location,
                 user_id=vk_id,
                 message=impact_event["text"],
-                keyboard=create_emission_impact_keyboard(location).get_keyboard(),
+                keyboard=_create_dynamic_impact_keyboard(vk_id, location).get_keyboard(),
                 random_id=0,
             )
         except Exception as e:
@@ -1067,7 +1073,7 @@ def _apply_impact_radiation_accumulation(vk, emission: dict):
                         f"💔 Урон от токсичности: -{overload} HP (осталось {new_health})\n\n"
                         f"Спастись поможет антирад. {escape_hint}"
                     ),
-                    keyboard=create_emission_impact_keyboard(location).get_keyboard(),
+                    keyboard=_create_dynamic_impact_keyboard(vk_id, location).get_keyboard(),
                     random_id=0,
                 )
         except Exception as e:
