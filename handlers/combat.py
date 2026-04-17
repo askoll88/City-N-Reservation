@@ -224,6 +224,7 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
         get_radiation_mult,
     )
     from game.emission import is_emission_aftermath_active, get_emission_artifact_bonus
+    from game.limited_events import get_active_limited_event, get_limited_event_modifiers
 
     mod = get_location_modifier(location_id) or {}
     loc_name = mod.get("name", location_id)
@@ -275,6 +276,20 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
         rare_enemy_bonus = int(round(float(config.EMISSION_BONUS_RARE_ENEMY_CHANCE) * 100))
         lines.append(f"• После выброса: 💎 +{artifact_bonus}% к шансу артефакта")
         lines.append(f"• После выброса: ☣️ шанс редкого врага {rare_enemy_bonus}%")
+
+    limited = get_active_limited_event()
+    if limited:
+        mods = get_limited_event_modifiers()
+        find_bonus = int(round((mods.get("research_find_mult", 1.0) - 1.0) * 100))
+        danger_bonus = int(round((mods.get("research_danger_mult", 1.0) - 1.0) * 100))
+        art_bonus = int(round((mods.get("artifact_event_mult", 1.0) - 1.0) * 100))
+        enemy_bonus = int(round((mods.get("enemy_event_mult", 1.0) - 1.0) * 100))
+        mins_left = max(0, int(limited.get("seconds_left", 0)) // 60)
+        lines.append(f"• Глобальный ивент: {limited.get('name')} (ещё ~{mins_left} мин)")
+        lines.append(
+            f"• Глобальный ивент: 🔍 {find_bonus:+d}% | ⚠️ {danger_bonus:+d}% | "
+            f"💎 {art_bonus:+d}% | 👾 {enemy_bonus:+d}%"
+        )
 
     return loc_name, "\n".join(lines)
 
@@ -791,6 +806,7 @@ def _select_research_event_by_chance(
 ):
     """Выбрать событие исследования на основе шансов и модификаторов локации"""
     from game.location_mechanics import get_event_weights, get_find_chance_mult, get_danger_mult
+    from game.limited_events import get_limited_event_modifiers
 
     no_anomaly_streak = 0
     if user_id is not None:
@@ -803,9 +819,14 @@ def _select_research_event_by_chance(
     loc_find_mult = get_find_chance_mult(location_id) if location_id else 1.0
     loc_danger_mult = get_danger_mult(location_id) if location_id else 1.0
     loc_event_weights = get_event_weights(location_id) if location_id else {}
+    limited_mods = get_limited_event_modifiers()
+    limited_find_mult = float(limited_mods.get("research_find_mult", 1.0) or 1.0)
+    limited_danger_mult = float(limited_mods.get("research_danger_mult", 1.0) or 1.0)
+    limited_artifact_mult = float(limited_mods.get("artifact_event_mult", 1.0) or 1.0)
+    limited_enemy_mult = float(limited_mods.get("enemy_event_mult", 1.0) or 1.0)
 
     # Базовый шанс найти что-то (с модификатором локации)
-    base_find_chance = min(95, find_chance * chance_mult * 1.5 * loc_find_mult)  # max 95%
+    base_find_chance = min(95, find_chance * chance_mult * 1.5 * loc_find_mult * limited_find_mult)  # max 95%
 
     # Проверяем, нашли ли что-то
     if random.randint(1, 100) > base_find_chance:
@@ -824,7 +845,7 @@ def _select_research_event_by_chance(
         base_chance = event_data["chance"]
 
         if event_data.get("danger", 0) > 0:
-            weight = base_chance * danger_mult * loc_danger_mult
+            weight = base_chance * danger_mult * loc_danger_mult * limited_danger_mult
         else:
             weight = base_chance * chance_mult
 
@@ -838,6 +859,12 @@ def _select_research_event_by_chance(
             event_type = event_data.get("type")
             if event_type and event_type in loc_event_weights:
                 weight *= loc_event_weights[event_type]
+
+        event_type = str(event_data.get("type") or "")
+        if event_type in {"enemy"}:
+            weight *= limited_enemy_mult
+        if event_type in {"artifact", "artifact_cluster"}:
+            weight *= limited_artifact_mult
 
         weights.append(weight)
         event_ids.append(event_id)
@@ -1693,6 +1720,7 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
     """Спавн врага"""
     _combat_state, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
     from game.emission import is_emission_rare_enemy_bonus
+    from game.limited_events import get_limited_event_modifiers, get_active_limited_event
 
     # Если указан тип врага - используем его, иначе - случайный для локации
     if enemy_type:
@@ -1717,6 +1745,13 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
         player.current_location_id,
         allow_elite=allow_elite,
     )
+    limited_mods = get_limited_event_modifiers()
+    enemy_stat_mult = max(0.7, float(limited_mods.get("enemy_stat_mult", 1.0) or 1.0))
+    if abs(enemy_stat_mult - 1.0) > 0.01:
+        scaled_enemy["enemy_hp"] = max(10, int(scaled_enemy["enemy_hp"] * enemy_stat_mult))
+        scaled_enemy["enemy_max_hp"] = scaled_enemy["enemy_hp"]
+        scaled_enemy["enemy_damage"] = max(1, int(scaled_enemy["enemy_damage"] * enemy_stat_mult))
+
     initiative = _roll_initiative(player, scaled_enemy["enemy_speed"])
 
     # Сохраняем состояние боя
@@ -1774,6 +1809,11 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
             )
     else:
         message += "\n✅ Ты выиграл инициативу и действуешь первым!\n"
+
+    active_limited = get_active_limited_event()
+    if active_limited and abs(enemy_stat_mult - 1.0) > 0.01:
+        pct = int(round((enemy_stat_mult - 1.0) * 100))
+        message += f"\n🌐 Ивент «{active_limited.get('name')}»: параметры врага {pct:+d}%\n"
 
     message += "\nЧто будешь делать?"
 
@@ -2752,10 +2792,14 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     """Обработка победы над врагом"""
     _combat_state, _, _, _ = _get_main_imports()
     from handlers.quests import track_quest_kill, track_quest_shells
+    from game.limited_events import get_limited_event_modifiers, get_active_limited_event
 
     del _combat_state[user_id]
 
     reward_mult = max(1.0, float(combat.get("reward_mult", 1.0)))
+    limited_mods = get_limited_event_modifiers()
+    event_reward_mult = max(0.5, float(limited_mods.get("combat_reward_mult", 1.0) or 1.0))
+    reward_mult *= event_reward_mult
     experience = max(5, int(random.randint(10, 30) * reward_mult))
     money = max(3, int(random.randint(5, 25) * reward_mult))
     shells_drop = max(1, int(round(random.randint(1, 3) * min(2.0, 0.8 + reward_mult * 0.4))))
@@ -2792,6 +2836,9 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     )
     if reward_mult > 1.0:
         message += f"⚖️ Множитель сложности: x{reward_mult:.2f}\n"
+    active_limited = get_active_limited_event()
+    if active_limited and abs(event_reward_mult - 1.0) > 0.01:
+        message += f"🌐 Ивент «{active_limited.get('name')}»: награда x{event_reward_mult:.2f}\n"
 
     if not success:
         message += f"⚠️ Мешочек переполнен! {msg}\n"

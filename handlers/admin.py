@@ -3,6 +3,7 @@
 """
 import re
 import time
+from datetime import datetime, timedelta, timezone
 
 from infra import database
 from handlers.keyboards import (
@@ -15,6 +16,9 @@ from handlers.keyboards import (
     create_admin_help_keyboard,
 )
 from infra import database
+
+
+MSK_TZ = timezone(timedelta(hours=3))
 
 
 def _set_admin_menu(user_id: int, category: str):
@@ -44,6 +48,12 @@ def _send(vk, user_id: int, message: str, keyboard=None):
         keyboard=keyboard.get_keyboard(),
         random_id=0,
     )
+
+
+def _fmt_ts_msk(ts: int) -> str:
+    if not ts:
+        return "--:--:--"
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc).astimezone(MSK_TZ).strftime("%H:%M:%S")
 
 
 def _show_main_menu(vk, user_id: int):
@@ -85,6 +95,10 @@ def _show_category(vk, user_id: int, category: str):
                 "• `админ снять лот <id>`\n"
                 "• `админ квесты <vk_id>`\n"
                 "• `админ рандом <vk_id>`\n"
+                "• `админ ивент статус`\n"
+                "• `админ ивент список`\n"
+                "• `админ ивент старт <event_id>`\n"
+                "• `админ ивент стоп`\n"
                 "• `админ кулдаун <vk_id> снять|инфо`\n"
                 "• `админ инвентарь <vk_id>`\n"
                 "• `админ локация <vk_id> <локация>`\n"
@@ -112,6 +126,8 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                             "☢️ запустить выброс", "⛔ отменить выброс", "📊 статус выброса",
                             "🎁 выдать предмет", "🗑️ удалить предмет", "📝 set поле (статы)",
                             "🎲 рандом ивент игроку", "📋 квесты игрока",
+                            "🌐 ивент статус", "🚀 старт ивента", "🛑 стоп ивента",
+                            "⚡ резонанс", "☠️ хищники", "🎒 мародёры",
                             "⏰ кулдаун инфо", "⏰ кулдаун снять", "👥 онлайн",
                             "📋 активные лоты", "🗂️ все лоты",
                             "✅ маркет on", "⛔ маркет off", "✖️ снять лот",
@@ -212,6 +228,67 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         _send(vk, user_id, "Введи:\n`админ рандом <vk_id>`", create_admin_events_keyboard()); return True
     if text == "📋 квесты игрока":
         _send(vk, user_id, "Введи:\n`админ квесты <vk_id>`", create_admin_events_keyboard()); return True
+    if text == "🌐 ивент статус":
+        from game.limited_events import get_limited_events_admin_status
+        st = get_limited_events_admin_status()
+        active_id = st.get("active_event_id")
+        if active_id:
+            msg = (
+                "🌐 ОГРАНИЧЕННЫЕ ИВЕНТЫ\n\n"
+                f"Активный: {active_id}\n"
+                f"Старт: {_fmt_ts_msk(st.get('active_start_ts', 0))} МСК\n"
+                f"Конец: {_fmt_ts_msk(st.get('active_end_ts', 0))} МСК\n"
+                f"Осталось: {int(st.get('active_seconds_left', 0)) // 60} мин\n\n"
+                f"Следующий: {st.get('next_event_id') or '-'}\n"
+                f"Старт следующего: {_fmt_ts_msk(st.get('next_start_ts', 0))} МСК\n"
+                f"Анонс отправлен: {'да' if st.get('announce_sent') else 'нет'}"
+            )
+        else:
+            msg = (
+                "🌐 ОГРАНИЧЕННЫЕ ИВЕНТЫ\n\n"
+                "Активного ивента нет.\n\n"
+                f"Следующий: {st.get('next_event_id') or '-'}\n"
+                f"Старт: {_fmt_ts_msk(st.get('next_start_ts', 0))} МСК\n"
+                f"До старта: {int(st.get('next_seconds_left', 0)) // 60} мин\n"
+                f"Анонс отправлен: {'да' if st.get('announce_sent') else 'нет'}"
+            )
+        _send(vk, user_id, msg, create_admin_events_keyboard()); return True
+    if text == "🚀 старт ивента":
+        from game.limited_events import get_limited_events_catalog
+        catalog = get_limited_events_catalog()
+        lines = ["Введи:\n`админ ивент старт <event_id>`\n\nДоступные event_id:"]
+        for row in catalog:
+            lines.append(f"• {row['id']} — {row['name']} ({row['duration_minutes']} мин)")
+        _send(vk, user_id, "\n".join(lines), create_admin_events_keyboard()); return True
+    if text in {"⚡ резонанс", "☠️ хищники", "🎒 мародёры"}:
+        from game.limited_events import force_start_limited_event
+        quick_map = {
+            "⚡ резонанс": "anomaly_surge",
+            "☠️ хищники": "predator_night",
+            "🎒 мародёры": "scavenger_window",
+        }
+        event_id = quick_map.get(text)
+        result = force_start_limited_event(event_id, vk=vk)
+        if result.get("success"):
+            _send(
+                vk,
+                user_id,
+                (
+                    f"✅ Ивент запущен: {result.get('event_id')} ({result.get('event_name')})\n"
+                    f"Длительность: {result.get('duration_minutes')} мин"
+                ),
+                create_admin_events_keyboard(),
+            )
+        else:
+            _send(vk, user_id, f"❌ {result.get('message', 'Не удалось запустить ивент.')}", create_admin_events_keyboard())
+        return True
+    if text == "🛑 стоп ивента":
+        from game.limited_events import force_stop_limited_event
+        result = force_stop_limited_event(vk=vk)
+        _send(vk, user_id, result.get("message") or (
+            f"✅ Ивент остановлен: {result.get('event_id')} ({result.get('event_name')})."
+            if result.get("success") else "ℹ️ Активного ивента нет."
+        ), create_admin_events_keyboard()); return True
     if text == "⏰ кулдаун инфо":
         _send(vk, user_id, "Введи:\n`админ кулдаун <vk_id> инфо`", create_admin_events_keyboard()); return True
     if text == "⏰ кулдаун снять":
@@ -377,6 +454,76 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             _send(vk, user_id, f"✅ Ивент отправлен vk:{target} | Тип: {event.get('type', '?')}")
         except Exception as e:
             _send(vk, user_id, f"❌ Ошибка: {e}")
+        return True
+
+    m = re.match(r"^админ\s+ивент\s+статус$", text)
+    if m:
+        from game.limited_events import get_limited_events_admin_status
+        st = get_limited_events_admin_status()
+        active_id = st.get("active_event_id")
+        if active_id:
+            msg = (
+                "🌐 ОГРАНИЧЕННЫЕ ИВЕНТЫ\n\n"
+                f"Активный: {active_id}\n"
+                f"Старт: {_fmt_ts_msk(st.get('active_start_ts', 0))} МСК\n"
+                f"Конец: {_fmt_ts_msk(st.get('active_end_ts', 0))} МСК\n"
+                f"Осталось: {int(st.get('active_seconds_left', 0)) // 60} мин\n\n"
+                f"Следующий: {st.get('next_event_id') or '-'}\n"
+                f"Старт следующего: {_fmt_ts_msk(st.get('next_start_ts', 0))} МСК\n"
+                f"Анонс отправлен: {'да' if st.get('announce_sent') else 'нет'}"
+            )
+        else:
+            msg = (
+                "🌐 ОГРАНИЧЕННЫЕ ИВЕНТЫ\n\n"
+                "Активного ивента нет.\n\n"
+                f"Следующий: {st.get('next_event_id') or '-'}\n"
+                f"Старт: {_fmt_ts_msk(st.get('next_start_ts', 0))} МСК\n"
+                f"До старта: {int(st.get('next_seconds_left', 0)) // 60} мин\n"
+                f"Анонс отправлен: {'да' if st.get('announce_sent') else 'нет'}"
+            )
+        _send(vk, user_id, msg, create_admin_events_keyboard()); return True
+
+    m = re.match(r"^админ\s+ивент\s+список$", text)
+    if m:
+        from game.limited_events import get_limited_events_catalog
+        catalog = get_limited_events_catalog()
+        lines = ["🌐 ДОСТУПНЫЕ LIMITED EVENT ID\n"]
+        for row in catalog:
+            lines.append(f"• {row['id']} — {row['name']} ({row['duration_minutes']} мин)")
+        _send(vk, user_id, "\n".join(lines), create_admin_events_keyboard()); return True
+
+    m = re.match(r"^админ\s+ивент\s+старт\s+([a-z0-9_\\-]+)$", text)
+    if m:
+        event_id = m.group(1).strip().lower()
+        from game.limited_events import force_start_limited_event
+        result = force_start_limited_event(event_id, vk=vk)
+        if result.get("success"):
+            _send(
+                vk,
+                user_id,
+                (
+                    f"✅ Ивент запущен: {result.get('event_id')} ({result.get('event_name')})\n"
+                    f"Длительность: {result.get('duration_minutes')} мин"
+                ),
+                create_admin_events_keyboard(),
+            )
+        else:
+            _send(vk, user_id, f"❌ {result.get('message', 'Не удалось запустить ивент.')}", create_admin_events_keyboard())
+        return True
+
+    m = re.match(r"^админ\s+ивент\s+стоп$", text)
+    if m:
+        from game.limited_events import force_stop_limited_event
+        result = force_stop_limited_event(vk=vk)
+        if result.get("success"):
+            _send(
+                vk,
+                user_id,
+                f"✅ Ивент остановлен: {result.get('event_id')} ({result.get('event_name')}).",
+                create_admin_events_keyboard(),
+            )
+        else:
+            _send(vk, user_id, f"ℹ️ {result.get('message', 'Активного ивента нет.')}", create_admin_events_keyboard())
         return True
 
     m = re.match(r"^админ\s+кулдаун\s+(\d+)\s+(снять|инфо)$", text)

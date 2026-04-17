@@ -103,6 +103,12 @@ EMISSION_ITEM_LOSS_MAX = int(os.getenv('EMISSION_ITEM_LOSS_MAX', '2'))          
 EMISSION_BONUS_ARTIFACT_CHANCE = float(os.getenv('EMISSION_BONUS_ARTIFACT_CHANCE', '0.50'))  # +50% шанс артефактов
 EMISSION_BONUS_RARE_ENEMY_CHANCE = float(os.getenv('EMISSION_BONUS_RARE_ENEMY_CHANCE', '0.20'))  # шанс редкого врага
 
+# === Ограниченные глобальные ивенты ===
+LIMITED_EVENTS_ENABLED = os.getenv('LIMITED_EVENTS_ENABLED', 'true').lower() == 'true'
+LIMITED_EVENT_MIN_INTERVAL_MINUTES = int(os.getenv('LIMITED_EVENT_MIN_INTERVAL_MINUTES', '300'))
+LIMITED_EVENT_MAX_INTERVAL_MINUTES = int(os.getenv('LIMITED_EVENT_MAX_INTERVAL_MINUTES', '540'))
+LIMITED_EVENT_ANNOUNCE_MINUTES = int(os.getenv('LIMITED_EVENT_ANNOUNCE_MINUTES', '15'))
+
 # "Тихие часы" — когда выброс НЕ запускается (по UTC)
 # По умолчанию: 02:00–07:00 UTC (ночное время, когда большинство спит)
 EMISSION_QUIET_HOUR_START = int(os.getenv('EMISSION_QUIET_HOUR_START', '2'))

@@ -29,6 +29,7 @@ GROUP_ID = config.GROUP_ID
 
 # === Выброс (Emission) ===
 from game.emission import emission_tick, schedule_next_emission
+from game.limited_events import limited_events_tick
 
 # === Импорт обработчиков ===
 from handlers.commands import (
@@ -917,6 +918,30 @@ def main():
             daemon=True,
         ).start()
         logger.info("Планировщик выбросов запущен")
+
+    def _limited_events_scheduler():
+        """Фоновый поток ограниченных ивентов (анонс/старт/завершение)."""
+        import time
+        if not config.LIMITED_EVENTS_ENABLED:
+            return
+        last_tick = time.time()
+        while True:
+            time.sleep(10)
+            now = time.time()
+            if now - last_tick >= 60:
+                last_tick = now
+                try:
+                    limited_events_tick(vk)
+                except Exception as e:
+                    logger.error("Ошибка в limited_events_tick: %s", e, exc_info=True)
+
+    if config.LIMITED_EVENTS_ENABLED:
+        threading.Thread(
+            target=_limited_events_scheduler,
+            name="limited-events-scheduler",
+            daemon=True,
+        ).start()
+        logger.info("Планировщик ограниченных ивентов запущен")
 
     def _travel_scheduler():
         """Фоновый поток тиков коридора перемещения."""

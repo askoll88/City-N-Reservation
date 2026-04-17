@@ -515,7 +515,7 @@ def handle_trade_commands(player, vk, user_id: int, text: str):
     if location_id == 'кпп':
         vk.messages.send(
             user_id=user_id,
-            message="🕴️ Торговля на КПП доступна только у Барыги. Нажми «Поговорить» → «Барыга».",
+            message="🕴️ Барыга переехал на Черный рынок. Торговля доступна там.",
             random_id=0
         )
         return True
@@ -550,7 +550,7 @@ def handle_kpp_shop_commands(player, vk, user_id: int, text: str):
     if text in ['купить', 'оружие', 'броня', 'продать']:
         vk.messages.send(
             user_id=user_id,
-            message="🕴️ На КПП торговля только у Барыги. Открой диалог с ним через «Поговорить».",
+            message="🕴️ На КПП торговли больше нет. Ищи Барыгу на Черном рынке.",
             random_id=0
         )
         return True
@@ -738,10 +738,10 @@ def handle_buy_sell_commands(player, vk, user_id: int, text: str, in_dialog: boo
         return False
 
     if text == 'купить':
-        if player.current_location_id not in ('кпп', 'черный рынок'):
+        if player.current_location_id != 'черный рынок':
             vk.messages.send(
                 user_id=user_id,
-                message="🕴️ Купить можно только у Барыги (КПП/Чёрный рынок).",
+                message="🕴️ Купить можно только у Барыги на Черном рынке.",
                 random_id=0
             )
             return True
@@ -753,10 +753,10 @@ def handle_buy_sell_commands(player, vk, user_id: int, text: str, in_dialog: boo
         return True
 
     if text == 'продать':
-        if player.current_location_id not in ('кпп', 'черный рынок'):
+        if player.current_location_id != 'черный рынок':
             vk.messages.send(
                 user_id=user_id,
-                message="🕴️ Продать можно только Барыге (КПП/Чёрный рынок).",
+                message="🕴️ Продать можно только Барыге на Черном рынке.",
                 random_id=0
             )
             return True
