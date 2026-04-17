@@ -417,10 +417,17 @@ def create_npc_select_keyboard(location_id: str):
         "дозиметрист": "Дозиметрист",
     }
 
-    for npc in npcs:
+    split_index = None
+    if location_id == "убежище" and len(npcs) > 1:
+        # В убежище раскладываем NPC на два ряда, чтобы интерфейс был чище.
+        split_index = (len(npcs) + 1) // 2
+
+    for idx, npc in enumerate(npcs, start=1):
         npc_id = npc.id
         button_text = npc_button_map.get(npc_id, npc.name)
         keyboard.add_button(button_text, color=VkKeyboardColor.PRIMARY)
+        if split_index and idx == split_index and idx < len(npcs):
+            keyboard.add_line()
 
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
