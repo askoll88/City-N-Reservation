@@ -6,6 +6,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import traceback
 
 import vk_api
@@ -69,6 +70,7 @@ from infra.state_manager import (
     has_travel_state, get_all_travel_states, clear_travel_state,
     get_ui_current_screen, set_ui_screen,
     ensure_runtime_state_loaded, hydrate_travel_states_from_runtime,
+    cleanup_inactive_states,
 )
 from handlers.keyboards import (
     create_main_keyboard,
@@ -85,6 +87,27 @@ from handlers.keyboards import (
 
 _user_locks = {}
 _user_locks_guard = threading.Lock()
+_state_cleanup_lock = threading.Lock()
+_last_state_cleanup_ts = 0.0
+_STATE_CLEANUP_INTERVAL_SEC = 60
+
+
+def _maybe_cleanup_inactive_states():
+    """Периодическая очистка runtime-состояний с троттлингом."""
+    global _last_state_cleanup_ts
+
+    now = time.monotonic()
+    if (now - _last_state_cleanup_ts) < _STATE_CLEANUP_INTERVAL_SEC:
+        return
+
+    with _state_cleanup_lock:
+        now = time.monotonic()
+        if (now - _last_state_cleanup_ts) < _STATE_CLEANUP_INTERVAL_SEC:
+            return
+        removed = cleanup_inactive_states(max_idle_seconds=300)
+        _last_state_cleanup_ts = now
+        if removed:
+            logger.debug("cleanup_inactive_states: removed=%s", removed)
 
 
 def _get_user_lock(user_id: int) -> threading.Lock:
@@ -170,12 +193,10 @@ def handle_message(event, vk):
         if _handle_pending_loot_choice(player, vk, user_id, text):
             return
 
-    # === Приоритет 3.6: Случайное событие (если есть pending event) ===
-    from infra.state_manager import has_pending_event, get_pending_event, clear_pending_event
-    if has_pending_event(user_id):
-        from handlers.events import handle_event_response
-        if handle_event_response(player, vk, user_id, text):
-            return
+    # === Приоритет 3.6: Случайное событие / предупреждение выброса ===
+    from handlers.events import handle_event_response
+    if handle_event_response(player, vk, user_id, text):
+        return
 
     # === Приоритет 3.65: Подтверждение выхода из safe во время impact ===
     if has_pending_emission_risk_exit(user_id):
@@ -340,11 +361,6 @@ def handle_message(event, vk):
         )
         return
     if handle_quests_commands(player, vk, user_id, text):
-        return
-
-    # Обработка ответа на выброс (impact phase — бежать в укрытие)
-    from handlers.events import handle_event_response
-    if handle_event_response(player, vk, user_id, text):
         return
 
     # === Работа с предметами (через player) ===
@@ -787,6 +803,7 @@ def _handle_message_error(event, vk, error: Exception):
 
 
 def _process_message_event(event, vk):
+    _maybe_cleanup_inactive_states()
     user_id = event.obj.message.get('from_id', 0)
     if not user_id:
         return
@@ -800,6 +817,7 @@ def _process_message_event(event, vk):
 
 
 def _process_callback_event(event, vk):
+    _maybe_cleanup_inactive_states()
     user_id = getattr(event.obj, "user_id", 0)
     lock = _get_user_lock(user_id) if user_id else None
 

@@ -1939,6 +1939,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
     choice = event["choices"][choice_index]
     effect = choice.get("effect", {})
+    player_id = _resolve_player_id(player)
 
     # Квестовая цепочка
     _check_quest_progression(event, user_id)
@@ -1954,9 +1955,9 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         if "shells" in effect:
             shell_gain = int(effect["shells"])
             player.shells = getattr(player, 'shells', 0) + shell_gain
-            if shell_gain > 0:
+            if shell_gain > 0 and player_id is not None:
                 from handlers.quests import track_quest_shells
-                track_quest_shells(player.vk_id, count=shell_gain)
+                track_quest_shells(player_id, count=shell_gain)
         return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # Риск - получение урона
@@ -2032,16 +2033,28 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
 # --- Вспомогательные функции для apply_event_choice ---
 
+def _resolve_player_id(player) -> int | None:
+    """Получить VK ID игрока из актуального или legacy-атрибута."""
+    uid = getattr(player, "user_id", None)
+    if uid is None:
+        uid = getattr(player, "vk_id", None)
+    try:
+        return int(uid) if uid is not None else None
+    except (TypeError, ValueError):
+        return None
+
 def _apply_random_loot(player):
     from infra import database
+    player_id = _resolve_player_id(player)
     money_reward = random.randint(50, 300)
     player.money += money_reward
     item_text = "ничего"
     if random.randint(1, 100) <= 40:
         common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
         item_name, qty = random.choice(common_items)
-        database.add_item_to_inventory(player.vk_id, item_name, qty)
-        item_text = f"{item_name} x{qty}"
+        if player_id is not None:
+            database.add_item_to_inventory(player_id, item_name, qty)
+            item_text = f"{item_name} x{qty}"
     return {
         "money_reward": money_reward,
         "item_text": item_text,
@@ -2051,30 +2064,32 @@ def _apply_random_loot(player):
 
 
 def _apply_random_artifact(player):
-    from anomalies import get_artifact_from_anomaly
+    from game.anomalies import get_artifact_from_anomaly
     from infra import database
+    player_id = _resolve_player_id(player)
     anomaly_type = random.choice(["жарка", "электра", "воронка", "туман", "магнит"])
     artifact = get_artifact_from_anomaly(anomaly_type)
-    if artifact:
-        database.add_item_to_inventory(player.vk_id, artifact, 1)
+    if artifact and player_id is not None:
+        database.add_item_to_inventory(player_id, artifact, 1)
         from handlers.quests import track_quest_artifact
-        track_quest_artifact(player.vk_id)
+        track_quest_artifact(player_id)
         return f"Ты нашёл {artifact}!"
     return "Артефакт рассыпался в руках..."
 
 
 def _apply_artifact_chance(player, effect=None):
-    from anomalies import get_random_anomaly, get_artifact_from_anomaly
+    from game.anomalies import get_random_anomaly, get_artifact_from_anomaly
     from infra import database
     from game.emission import get_emission_artifact_bonus
+    player_id = _resolve_player_id(player)
     anomaly = get_random_anomaly()
     artifact = get_artifact_from_anomaly(anomaly["type"])
     success_chance = min(95, int(30 * get_emission_artifact_bonus()))
     if random.randint(1, 100) <= success_chance:
-        if artifact:
-            database.add_item_to_inventory(player.vk_id, artifact, 1)
+        if artifact and player_id is not None:
+            database.add_item_to_inventory(player_id, artifact, 1)
             from handlers.quests import track_quest_artifact
-            track_quest_artifact(player.vk_id)
+            track_quest_artifact(player_id)
         msg_tpl = effect.get("message_ok", f"Ты нашёл {artifact or 'артефакт'}!") if effect else f"Ты нашёл {artifact or 'артефакт'}!"
         return _render_event_message(msg_tpl, {"artifact": artifact or "артефакт"})
     else:
@@ -2124,6 +2139,7 @@ def _render_event_message(template: str, ctx: dict) -> str:
 
 
 def _apply_need_item(player, effect):
+    player_id = _resolve_player_id(player)
     item_name = effect["need_item"]
     player.inventory.reload()
     has_item = any(
@@ -2131,9 +2147,9 @@ def _apply_need_item(player, effect):
         for cat in [player.inventory.other, player.inventory.artifacts]
         for item in cat
     )
-    if has_item:
+    if has_item and player_id is not None:
         from infra import database
-        database.remove_item_from_inventory(player.vk_id, item_name, 1)
+        database.remove_item_from_inventory(player_id, item_name, 1)
         player.experience += effect.get("xp", 0)
         return effect.get("message", f"Ты использовал {item_name}.")
     else:

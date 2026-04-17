@@ -217,6 +217,7 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
 
     location_info = ""
     from game.location_mechanics import get_location_modifier, get_zone_mutation_state
+    from game.limited_events import get_active_limited_event, get_limited_event_modifiers
     mod = get_location_modifier(location_id)
     if mod:
         parts = []
@@ -233,8 +234,22 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
         if mutation_state.get("active"):
             parts.append(f"🌀 **МУТАЦИЯ ЗОНЫ!** Находки +{int(mutation_state['bonus_find'] * 100)}%")
 
+        limited = get_active_limited_event()
+        if limited:
+            mods = get_limited_event_modifiers()
+            find_bonus = int(round((float(mods.get("research_find_mult", 1.0) or 1.0) - 1.0) * 100))
+            danger_bonus = int(round((float(mods.get("research_danger_mult", 1.0) or 1.0) - 1.0) * 100))
+            art_bonus = int(round((float(mods.get("artifact_event_mult", 1.0) or 1.0) - 1.0) * 100))
+            enemy_bonus = int(round((float(mods.get("enemy_event_mult", 1.0) or 1.0) - 1.0) * 100))
+            mins_left = max(0, int(limited.get("seconds_left", 0) or 0) // 60)
+            parts.append(f"🌐 Ивент: {limited.get('name', 'Событие Зоны')} (ещё ~{mins_left} мин)")
+            parts.append(
+                f"🔍 Ивент {find_bonus:+d}% | ⚠️ Ивент {danger_bonus:+d}% | "
+                f"💎 Ивент {art_bonus:+d}% | 👾 Ивент {enemy_bonus:+d}%"
+            )
+
         if parts:
-            location_info = f"\n\n📊 **Параметры зоны:**\n" + "\n".join(f"• {p}" for p in parts)
+            location_info = f"\n\n📊 **Активные модификаторы:**\n" + "\n".join(f"• {p}" for p in parts)
 
     vk.messages.send(
         user_id=user_id,
