@@ -354,6 +354,7 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         handle_buy_artifact_slot,
         handle_inspect_item,
         handle_unequip_backpack, handle_drop_item, handle_drop_item_by_index,
+        handle_sell_item_by_number,
         show_weapons, show_armor, show_backpacks,
         show_artifacts, show_other, show_resources_shop,
         show_all, show_equipped_artifacts,
@@ -431,10 +432,15 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
 
     # Купить предмет — только на КПП или Черном рынке
     if text.startswith('купить '):
-        if player.current_location_id not in ('кпп', 'черный рынок'):
+        dialog_info = get_dialog_info(user_id) or {}
+        trader_context = (
+            player.current_location_id == 'черный рынок'
+            or dialog_info.get("npc") == "барыга"
+        )
+        if not trader_context:
             vk.messages.send(
                 user_id=user_id,
-                message="⛠ Купить предметы можно только на КПП или Чёрном рынке.",
+                message="🕴️ Купить можно только у Барыги.",
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )
@@ -451,12 +457,15 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
             if _handle_shop_buy_by_number(player, vk, user_id, item_name):
                 return True
 
-        # Покупка артефактов на Черном рынке по названию
+        # Покупка по названию из текущей витрины Барыги.
         from handlers.inventory import get_shop_cache_data
         shop_data = get_shop_cache_data(user_id)
-        if 'artifacts' in shop_data:
-            from handlers.inventory import handle_buy_artifact
-            handle_buy_artifact(player, item_name, vk, user_id)
+        if 'trader_all' not in shop_data and 'artifacts' not in shop_data:
+            vk.messages.send(
+                user_id=user_id,
+                message="❌ Сначала открой витрину Барыги, затем покупай.",
+                random_id=0
+            )
             return True
 
         handle_buy_item(player, item_name, vk, user_id)
@@ -464,10 +473,15 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
 
     # Продать предмет — только на КПП или Черном рынке
     if text.startswith('продать '):
-        if player.current_location_id not in ('кпп', 'черный рынок'):
+        dialog_info = get_dialog_info(user_id) or {}
+        trader_context = (
+            player.current_location_id == 'черный рынок'
+            or dialog_info.get("npc") == "барыга"
+        )
+        if not trader_context:
             vk.messages.send(
                 user_id=user_id,
-                message="⛠ Продать предметы можно только на КПП или Чёрном рынке.",
+                message="🕴️ Продать можно только Барыге.",
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )
@@ -478,6 +492,10 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         # Продажа артефактов по номеру
         from handlers.inventory import get_shop_cache_data
         shop_data = get_shop_cache_data(user_id)
+        if 'sell_all' in shop_data and item_name.isdigit():
+            if handle_sell_item_by_number(player, vk, user_id, item_name):
+                return True
+
         if 'sell_artifacts' in shop_data and item_name.isdigit():
             from handlers.inventory import handle_sell_artifact_by_number
             if handle_sell_artifact_by_number(player, vk, user_id, item_name):
@@ -640,6 +658,11 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
         # Вне диалога покупка по номеру должна работать для всех витрин.
         shop_data = get_shop_cache_data(user_id)
 
+        item_name = _get_shop_items_by_number(user_id, 'trader_all', num)
+        if item_name:
+            handle_buy_item(player, item_name, vk, user_id)
+            return True
+
         item_name = _get_shop_items_by_number(user_id, 'weapons', num)
         if item_name:
             handle_buy_item(player, item_name, vk, user_id)
@@ -672,6 +695,14 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
             return True
     elif stage == "shop_armor":
         item_name = _get_shop_items_by_number(user_id, 'armor', num)
+        if item_name:
+            handle_buy_item(player, item_name, vk, user_id)
+            return True
+        else:
+            vk.messages.send(user_id=user_id, message="Нет предмета с таким номером.", random_id=0)
+            return True
+    elif stage in {"buy_all", "buy_artifacts"}:
+        item_name = _get_shop_items_by_number(user_id, 'trader_all', num)
         if item_name:
             handle_buy_item(player, item_name, vk, user_id)
             return True

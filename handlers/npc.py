@@ -23,6 +23,8 @@ from handlers.inventory import (
     show_scientist_shop,
     show_artifacts,
     show_weapons,
+    show_trader_shop_all,
+    show_trader_sell_all,
     clear_shop_cache
 )
 
@@ -88,7 +90,7 @@ def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None
         return
 
     # Обработка перехода в магазин
-    if next_stage in ["shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_artifacts", "sell_items", "sell_gear", "buy_artifacts"]:
+    if next_stage in ["shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_artifacts", "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts"]:
         _handle_shop_redirect(player, vk, user_id, npc_id, next_stage)
         return
 
@@ -725,38 +727,26 @@ def _handle_shop_redirect(player, vk, user_id: int, npc_id: str, next_stage: str
     """Перенаправление в магазин"""
     from infra.state_manager import set_dialog_state
 
+    if npc_id != "барыга":
+        vk.messages.send(
+            user_id=user_id,
+            message="🕴️ Торговля доступна только у Барыги.\nУ остальных NPC купля/продажа отключена.",
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
     set_dialog_state(user_id, npc_id, next_stage)
 
     if next_stage == "shop_menu":
-        vk.messages.send(
-            user_id=user_id,
-            message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n💰 Продать — скупка трофеев\n\nЦены — как есть, торга не будет.»",
-            keyboard=create_kpp_shop_keyboard().get_keyboard(),
-            random_id=0
-        )
-    elif next_stage == "shop_weapons":
-        show_soldier_weapons(player, vk, user_id)
-    elif next_stage == "shop_armor":
-        show_soldier_armor(player, vk, user_id)
-    elif next_stage == "shop_meds":
-        show_scientist_shop(player, vk, user_id, category='meds')
-    elif next_stage == "shop_food":
-        show_scientist_shop(player, vk, user_id, category='food')
-    elif next_stage == "shop_artifacts":
-        show_artifacts(player, vk, user_id)
-    elif next_stage in ["sell_items", "sell_gear"]:
-        show_weapons(player, vk, user_id)
-    elif next_stage == "buy_artifacts":
-        # Магазин артефактов у Барыги
-        from handlers.inventory import show_artifact_shop
-
-        set_dialog_state(user_id, npc_id, "buy_artifacts")
-        show_artifact_shop(player, vk, user_id)
-    elif next_stage == "sell_artifacts":
-        # Продажа артефактов Барыге
-        from handlers.inventory import show_sell_artifacts
-        set_dialog_state(user_id, npc_id, "sell_artifacts")
-        show_sell_artifacts(player, vk, user_id)
+        set_dialog_state(user_id, npc_id, "buy_all")
+        show_trader_shop_all(player, vk, user_id)
+    elif next_stage in ["shop_weapons", "shop_armor", "shop_meds", "shop_food", "shop_artifacts", "buy_artifacts"]:
+        set_dialog_state(user_id, npc_id, "buy_all")
+        show_trader_shop_all(player, vk, user_id)
+    elif next_stage in ["sell_items", "sell_gear", "sell_artifacts"]:
+        set_dialog_state(user_id, npc_id, "sell_all")
+        show_trader_sell_all(player, vk, user_id)
 
 
 def handle_npc_choice(player, vk, user_id: int, npc_id: str):

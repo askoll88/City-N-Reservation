@@ -1596,6 +1596,157 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
         )
 
 
+def show_trader_shop_all(player, vk, user_id: int):
+    """Единая витрина Барыги: все категории товаров."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        clear_shop_cache(user_id)
+        shop = database.get_npc_shop_assortment(
+            database.NPC_MERCHANT_TRADER,
+            category=None,
+            limit=14,
+        )
+        items = shop.get("items", [])
+        set_shop_cache_data(user_id, {
+            'merchant': database.NPC_MERCHANT_TRADER,
+            'trader_all': items,
+            'period_key': shop.get("period_key"),
+        })
+
+        if not items:
+            vk.messages.send(
+                user_id=user_id,
+                message="🕴️ Барыга:\n\n«Пусто на витрине. Приходи позже, сталкер.»",
+                random_id=0
+            )
+            return
+
+        cat_emoji = {
+            'weapons': '🔫',
+            'rare_weapons': '🔫',
+            'armor': '🛡️',
+            'backpacks': '🎒',
+            'artifacts': '💎',
+            'meds': '💊',
+            'food': '🍖',
+        }
+
+        msg = f"{ui.title('Лавка Барыги: все товары')}\n"
+        msg += f"💰 Баланс: {player.money} руб.\n\n"
+        event_text = shop.get("event_text")
+        if event_text:
+            msg += f"📣 {event_text}\n\n"
+
+        for idx, item in enumerate(items, 1):
+            icon = cat_emoji.get(str(item.get("category") or "").lower(), "📦")
+            name = item.get('name', 'Предмет')
+            price = int(item.get('price', 0) or 0)
+            base_price = int(item.get('base_price', price) or price)
+            stock_left = int(item.get('stock_left', 0) or 0)
+            attack = int(item.get('attack', 0) or 0)
+            defense = int(item.get('defense', 0) or 0)
+            weight = item.get('weight', 0.1)
+            desc = str(item.get('description', '') or '')[:42]
+            is_featured = bool(item.get('is_featured', False))
+            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
+
+            stat_parts = []
+            if attack > 0:
+                stat_parts.append(f"урон {attack}")
+            if defense > 0:
+                stat_parts.append(f"защита {defense}")
+            stat_line = " | ".join(stat_parts) if stat_parts else "универсал"
+
+            msg += f"{idx}. {icon} {name}{featured}\n"
+            msg += f"   📊 {stat_line} | Вес: {weight}кг\n"
+            msg += f"   📝 {desc}\n"
+            if is_featured and base_price != price:
+                msg += f"   💵 Цена: {price} руб. (было {base_price})\n"
+            else:
+                msg += f"   💵 Цена: {price} руб.\n"
+            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
+
+        msg += "Напиши 'купить <номер>' или 'купить <название>'"
+
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            random_id=0
+        )
+    except Exception as e:
+        logger.error(f"[TRADER_SHOP_ALL] Ошибка: {e}")
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при загрузке витрины Барыги: {e}",
+            random_id=0
+        )
+
+
+def show_trader_sell_all(player, vk, user_id: int):
+    """Единая скупка Барыги: продажа любых предметов из инвентаря."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        player.inventory.reload()
+        sellables = (
+            (player.inventory.weapons or []) +
+            (player.inventory.armor or []) +
+            (player.inventory.backpacks or []) +
+            (player.inventory.artifacts or []) +
+            (player.inventory.other or [])
+        )
+        sellables = [i for i in sellables if int(i.get('quantity', 0) or 0) > 0]
+
+        if not sellables:
+            vk.messages.send(
+                user_id=user_id,
+                message="💰 Скупка Барыги\n\nНечего продавать.",
+                random_id=0
+            )
+            return
+
+        set_shop_cache_data(user_id, {
+            'merchant': database.NPC_MERCHANT_TRADER,
+            'sell_all': sellables,
+        })
+
+        msg = "💰 СКУПКА БАРЫГИ (ВСЕ ПРЕДМЕТЫ)\n\n"
+        msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        event_text = database.get_shop_event_text(database.NPC_MERCHANT_TRADER)
+        if event_text:
+            msg += f"📣 {event_text}\n\n"
+
+        for idx, item in enumerate(sellables, 1):
+            name = item['name']
+            qty = int(item.get('quantity', 1) or 1)
+            preview = database.get_npc_sell_price_preview(
+                name,
+                merchant_id=database.NPC_MERCHANT_TRADER,
+                sell_bonus_pct=player.sell_bonus,
+            )
+            price = int((preview or {}).get("sell_price", 0) or 0)
+            msg += f"{idx}. {name} x{qty}\n"
+            msg += f"   💵 Продам за: ~{price} руб./шт\n\n"
+
+        msg += "Напиши 'продать <номер>' или 'продать <название>'"
+
+        vk.messages.send(
+            user_id=user_id,
+            message=msg,
+            random_id=0
+        )
+    except Exception as e:
+        logger.error(f"[TRADER_SELL_ALL] Ошибка: {e}")
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Ошибка при открытии скупки Барыги: {e}",
+            random_id=0
+        )
+
+
 def show_sell_artifacts(player, vk, user_id: int):
     """Показать артефакты игрока для продажи"""
     import logging
@@ -1694,6 +1845,31 @@ def handle_sell_artifact_by_number(player, vk, user_id: int, item_num: str) -> b
     except Exception as e:
         logger.error(f"[SELL_ARTIFACT_BY_NUMBER] Ошибка: {e}")
         return False
+
+
+def handle_sell_item_by_number(player, vk, user_id: int, item_num: str) -> bool:
+    """Продать предмет из единой скупки Барыги по номеру."""
+    try:
+        idx = int(item_num) - 1
+    except ValueError:
+        return False
+
+    shop_data = get_shop_cache_data(user_id)
+    sell_all = shop_data.get('sell_all', [])
+    if not sell_all:
+        return False
+
+    if idx < 0 or idx >= len(sell_all):
+        vk.messages.send(user_id=user_id, message="Нет предмета с таким номером.", random_id=0)
+        return True
+
+    item_name = str(sell_all[idx].get('name') or "").strip()
+    if not item_name:
+        return True
+
+    handle_sell_item(player, item_name, vk, user_id)
+    show_trader_sell_all(player, vk, user_id)
+    return True
 
 
 def handle_sell_artifact(player, artifact_name: str, vk, user_id: int) -> bool:

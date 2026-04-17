@@ -30,6 +30,7 @@ from handlers.inventory import (
 from handlers.keyboards import (
     create_location_keyboard,
     create_npc_select_keyboard, create_kpp_shop_keyboard,
+    create_npc_dialog_keyboard,
     create_scientist_shop_keyboard
 )
 from models.npcs import get_npc_by_location
@@ -514,7 +515,7 @@ def handle_trade_commands(player, vk, user_id: int, text: str):
     if location_id == 'кпп':
         vk.messages.send(
             user_id=user_id,
-            message="👤Военный:\n\n«Я тут не для торговли, сталкер. Военный склад охраняю. Но... если очень нужно, могу кое-что продать из трофеев. За особую цену.»",
+            message="🕴️ Торговля на КПП доступна только у Барыги. Нажми «Поговорить» → «Барыга».",
             random_id=0
         )
         return True
@@ -524,14 +525,9 @@ def handle_trade_commands(player, vk, user_id: int, text: str):
         vk.messages.send(
             user_id=user_id,
             message=(
-                "👤Торговец:\n\n«Рад тебя видеть, сталкер! Вот, выбирай:\n\n"
-                "🔮 Артефакты — редкие аномальные образования\n"
-                "🔫 Оружие\n"
-                "🛡️ Броня\n"
-                "🎒 Рюкзаки\n"
-                "💰 Продать артефакты — избавься от лишнего\n"
-                "📈 Рынок игроков — торговля между сталкерами через эскроу\n\n"
-                "Чтобы зайти в P2P: нажми «Рынок игроков» или напиши «рынок игроков».»"
+                "🕴️Барыга:\n\n«Купля и продажа только через меня.\n"
+                "Покажу общую витрину и скуплю любые предметы.\n\n"
+                "📈 Рынок игроков — отдельно, через P2P.»"
             ),
             keyboard=create_blackmarket_keyboard().get_keyboard(),
             random_id=0
@@ -552,28 +548,12 @@ def handle_kpp_shop_commands(player, vk, user_id: int, text: str):
         return False
     
     if text in ['купить', 'оружие', 'броня', 'продать']:
-        if text == 'купить':
-            vk.messages.send(
-                user_id=user_id,
-                message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n💰 Продать — скупка трофеев\n\nЦены — как есть, торга не будет.»",
-                keyboard=create_kpp_shop_keyboard().get_keyboard(),
-                random_id=0
-            )
-            return True
-        elif text == 'оружие':
-            show_soldier_weapons(player, vk, user_id)
-            return True
-        elif text == 'броня':
-            show_soldier_armor(player, vk, user_id)
-            return True
-        elif text == 'продать':
-            show_weapons(player, vk, user_id)
-            vk.messages.send(
-                user_id=user_id,
-                message="💰 Продажа военному: напиши `продать <название>` или `продать <номер>`.",
-                random_id=0
-            )
-            return True
+        vk.messages.send(
+            user_id=user_id,
+            message="🕴️ На КПП торговля только у Барыги. Открой диалог с ним через «Поговорить».",
+            random_id=0
+        )
+        return True
     
     return False
 
@@ -583,7 +563,7 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
     if player.current_location_id != 'черный рынок':
         return False
 
-    from handlers.inventory import show_artifact_shop, show_sell_artifacts, show_soldier_weapons, show_soldier_armor
+    from handlers.inventory import show_trader_shop_all, show_trader_sell_all
     from handlers.keyboards import create_blackmarket_keyboard
     from handlers.market import (
         show_market_menu,
@@ -609,40 +589,13 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
         show_market_menu(player, vk, user_id)
         return True
 
-    # Артефакты - меню
-    if text in ['артефакты', 'артефакт', 'артефакты купить', 'купить артефакты']:
-        show_artifact_shop(player, vk, user_id, rarity=None)
+    # Единая торговля у Барыги
+    if text in ['купить', 'артефакты', 'артефакт', 'артефакты купить', 'купить артефакты', 'оружие', 'броня']:
+        show_trader_shop_all(player, vk, user_id)
         return True
 
-    # Артефакты по редкости
-    if text in ['обычные', 'обычные артефакты']:
-        show_artifact_shop(player, vk, user_id, rarity='common')
-        return True
-
-    if text in ['редкие', 'редкие артефакты']:
-        show_artifact_shop(player, vk, user_id, rarity='rare')
-        return True
-
-    if text in ['уникальные', 'уникальные артефакты']:
-        show_artifact_shop(player, vk, user_id, rarity='unique')
-        return True
-
-    if text in ['легендарные', 'легендарные артефакты']:
-        show_artifact_shop(player, vk, user_id, rarity='legendary')
-        return True
-
-    # Продажа артефактов
-    if text in ['продать артефакты', 'продать артефакт', 'продажа артефактов']:
-        show_sell_artifacts(player, vk, user_id)
-        return True
-
-    # Оружие и броня
-    if text == 'оружие':
-        show_soldier_weapons(player, vk, user_id)
-        return True
-
-    if text == 'броня':
-        show_soldier_armor(player, vk, user_id)
+    if text in ['продать', 'продать артефакты', 'продать артефакт', 'продажа артефактов']:
+        show_trader_sell_all(player, vk, user_id)
         return True
 
     return False
@@ -664,7 +617,8 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
     # иначе они перехватываются диалогом и не выполняются.
     shop_stages = {
         "shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_food",
-        "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts"
+        "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts",
+        "buy_all", "sell_all",
     }
     if stage in shop_stages:
         shop_passthrough = (
@@ -690,70 +644,28 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         handle_npc_back(player, vk, user_id)
         return True
     
-    # Обработка меню магазина у военного
-    if npc_id == "военный" and text in ["купить", "оружие", "броня", "продать"]:
-        from infra.state_manager import set_dialog_state
-        from handlers.keyboards import create_kpp_shop_keyboard
-        from handlers.inventory import show_weapons
-        
-        if text == "купить":
-            set_dialog_state(user_id, npc_id, "shop_menu")
-            vk.messages.send(
-                user_id=user_id,
-                message="🎖️Военный:\n\n«Выбирай, сталкер:\n\n🔫 Оружие — от пистолетов до автоматов\n🛡️ Броня — жилеты и шлемы\n💰 Продать — скупка трофеев\n\nЦены — как есть, торга не будет.»",
-                keyboard=create_kpp_shop_keyboard().get_keyboard(),
-                random_id=0
-            )
-            return True
-        elif text == "оружие":
-            set_dialog_state(user_id, npc_id, "shop_weapons")
-            show_soldier_weapons(player, vk, user_id)
-            return True
-        elif text == "броня":
-            set_dialog_state(user_id, npc_id, "shop_armor")
-            show_soldier_armor(player, vk, user_id)
-            return True
-        elif text == "продать":
-            set_dialog_state(user_id, npc_id, "sell_items")
-            show_weapons(player, vk, user_id)
-            vk.messages.send(
-                user_id=user_id,
-                message="💰 Продажа военному: напиши `продать <название>` или `продать <номер>`.",
-                random_id=0
-            )
-            return True
-    
-    # Обработка меню магазина у учёного
-    if npc_id == "ученый" and text in ["купить", "лекарства", "энергетики"]:
-        from infra.state_manager import set_dialog_state
-        from handlers.keyboards import create_scientist_shop_keyboard
-        
-        if text == "купить":
-            set_dialog_state(user_id, npc_id, "shop_menu")
-            show_scientist_shop(player, vk, user_id, category='all')
-            return True
-        elif text == "лекарства":
-            set_dialog_state(user_id, npc_id, "shop_meds")
-            show_scientist_shop(player, vk, user_id, category='meds')
-            return True
-        elif text == "энергетики":
-            set_dialog_state(user_id, npc_id, "shop_food")
-            show_scientist_shop(player, vk, user_id, category='food')
-            return True
+    if npc_id in {"военный", "ученый", "медик", "дозиметрист", "местный житель", "наставник"} and text in {"купить", "продать", "оружие", "броня", "лекарства", "энергетики"}:
+        vk.messages.send(
+            user_id=user_id,
+            message="🕴️ Купля/продажа доступна только у Барыги.",
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
 
     # Обработка магазина у Барыги на КПП
     if npc_id == "барыга":
         from infra.state_manager import set_dialog_state
-        from handlers.inventory import show_artifact_shop, show_sell_artifacts
+        from handlers.inventory import show_trader_shop_all, show_trader_sell_all
 
-        if text in ["купить", "купить артефакты", "артефакты"]:
-            set_dialog_state(user_id, npc_id, "buy_artifacts")
-            show_artifact_shop(player, vk, user_id, rarity=None)
+        if text in ["купить", "купить артефакты", "артефакты", "оружие", "броня"]:
+            set_dialog_state(user_id, npc_id, "buy_all")
+            show_trader_shop_all(player, vk, user_id)
             return True
 
         if text in ["продать", "продать артефакты", "продажа артефактов"]:
-            set_dialog_state(user_id, npc_id, "sell_artifacts")
-            show_sell_artifacts(player, vk, user_id)
+            set_dialog_state(user_id, npc_id, "sell_all")
+            show_trader_sell_all(player, vk, user_id)
             return True
     
     # Обработка выбора вопроса диалога
@@ -778,10 +690,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         
         if npc_id == "ученый":
             clear_shop_cache(user_id)
-            if stage in ["shop_meds", "shop_food"]:
-                show_scientist_shop(player, vk, user_id, category='all')
-            else:
-                show_npc_dialog(player, vk, user_id, npc_id, None)
+            show_npc_dialog(player, vk, user_id, npc_id, None)
             return True
 
         # Назад от Барыги
@@ -800,7 +709,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
 
     text_lower = text.lower().strip()
 
-    if text_lower in rarity_map:
+    if npc_id == "барыга" and text_lower in rarity_map:
         from handlers.inventory import show_artifact_shop
         show_artifact_shop(player, vk, user_id, rarity=rarity_map[text_lower])
         return True
@@ -824,13 +733,13 @@ def handle_buy_sell_commands(player, vk, user_id: int, text: str, in_dialog: boo
         if player.current_location_id not in ('кпп', 'черный рынок'):
             vk.messages.send(
                 user_id=user_id,
-                message="⛠ Купить предметы можно только на КПП или Чёрном рынке.",
+                message="🕴️ Купить можно только у Барыги (КПП/Чёрный рынок).",
                 random_id=0
             )
             return True
         vk.messages.send(
             user_id=user_id,
-            message="💰 Чтобы купить предмет, напиши 'купить <название предмета>'.\n\nПример: купить нож",
+            message="🕴️ Чтобы купить, открой витрину Барыги и напиши: 'купить <название>' или 'купить <номер>'.",
             random_id=0
         )
         return True
@@ -839,11 +748,15 @@ def handle_buy_sell_commands(player, vk, user_id: int, text: str, in_dialog: boo
         if player.current_location_id not in ('кпп', 'черный рынок'):
             vk.messages.send(
                 user_id=user_id,
-                message="⛠ Продать предметы можно только на КПП или Чёрном рынке.",
+                message="🕴️ Продать можно только Барыге (КПП/Чёрный рынок).",
                 random_id=0
             )
             return True
-        show_weapons(player, vk, user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message="🕴️ Открой скупку Барыги и используй: 'продать <название>' или 'продать <номер>'.",
+            random_id=0
+        )
         return True
 
     return False

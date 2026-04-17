@@ -1123,8 +1123,10 @@ NPC_MERCHANT_TRADER = "trader"
 _NPC_SHOPS = {
     NPC_MERCHANT_SOLDIER: {"categories": ("weapons", "armor")},
     NPC_MERCHANT_SCIENTIST: {"categories": ("meds", "food")},
-    NPC_MERCHANT_TRADER: {"categories": ("artifacts",)},
+    # Барыга — единый торговец: продаёт все основные категории.
+    NPC_MERCHANT_TRADER: {"categories": ("weapons", "rare_weapons", "armor", "backpacks", "artifacts", "meds", "food")},
 }
+_TRADER_BLOCKED_RARITIES = frozenset({"legendary"})
 
 _SHOP_EVENT_POOL = [
     {
@@ -1215,6 +1217,10 @@ def _get_shop_candidates(merchant_id: str, category: str | None = None, rarity: 
         for row in by_cat.get(cat, []):
             name = row.get("name")
             if not name or name in seen_names:
+                continue
+            item_rarity = (row.get("rarity") or "common").lower()
+            # Барыга пока не продаёт легендарные предметы.
+            if merchant_id == NPC_MERCHANT_TRADER and item_rarity in _TRADER_BLOCKED_RARITIES:
                 continue
             if rarity and (row.get("rarity") or "common").lower() != rarity.lower():
                 continue
@@ -1384,6 +1390,9 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
         period_key = None
 
         if merchant_id:
+            item_rarity = (item_data.get("rarity") or "common").lower()
+            if merchant_id == NPC_MERCHANT_TRADER and item_rarity in _TRADER_BLOCKED_RARITIES:
+                return {"success": False, "message": "Легендарные предметы у Барыги пока не продаются."}
             period_key = _get_shop_period_key()
             cursor.execute(
                 """
