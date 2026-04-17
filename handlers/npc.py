@@ -5,12 +5,12 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 
-import config
-import database
-import player as player_module
-from player import invalidate_player_cache, get_player as get_player_from_module
+from infra import config
+from infra import database
+from models import player as player_module
+from models.player import invalidate_player_cache, get_player as get_player_from_module
 
-from npcs import get_npc
+from models.npcs import get_npc
 from handlers.keyboards import (
     create_location_keyboard, 
     create_npc_dialog_keyboard,
@@ -43,7 +43,7 @@ MSK_TZ = timezone(timedelta(hours=3))
 
 def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None):
     """Показать диалог с NPC"""
-    from state_manager import get_dialog_info, set_dialog_state, clear_dialog_state
+    from infra.state_manager import get_dialog_info, set_dialog_state, clear_dialog_state
 
     npc = get_npc(npc_id)
     if not npc:
@@ -114,8 +114,8 @@ def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None
 
 def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str, answer: str, next_stage: str):
     """Обработка специальных диалогов (набор, класс, смена класса)"""
-    from classes import get_class_by_weapon, format_class_info, format_passive_status
-    from state_manager import clear_dialog_state
+    from models.classes import get_class_by_weapon, format_class_info, format_passive_status
+    from infra.state_manager import clear_dialog_state
 
     # Обработка набора новичка
     if dialog_id == "набор":
@@ -397,7 +397,7 @@ def _handle_dosimeter_forecast(player, vk, user_id: int, npc_id: str, advanced: 
 
 def _handle_medic_field_check(player, vk, user_id: int, npc_id: str):
     """Бесплатный полевой осмотр с кулдауном."""
-    from player import format_radiation_rate, get_radiation_stage
+    from models.player import format_radiation_rate, get_radiation_stage
     now = int(time.time())
     last_use = int(database.get_user_flag(user_id, "medic_field_check_last", 0) or 0)
     elapsed = now - last_use if last_use else MEDIC_FIELD_CHECK_COOLDOWN
@@ -444,7 +444,7 @@ def _handle_medic_field_check(player, vk, user_id: int, npc_id: str):
 
 def _handle_medic_detox(player, vk, user_id: int, npc_id: str):
     """Платный детокс радиации."""
-    from player import format_radiation_rate, get_radiation_stage
+    from models.player import format_radiation_rate, get_radiation_stage
     if int(player.money) < MEDIC_DETOX_COST:
         vk.messages.send(
             user_id=user_id,
@@ -541,8 +541,8 @@ def _handle_medic_supply(player, vk, user_id: int, npc_id: str):
 
 def _handle_get_class(player, vk, user_id: int, npc_id: str):
     """Обработка получения класса"""
-    from classes import get_class_by_weapon, format_class_info
-    from state_manager import clear_dialog_state
+    from models.classes import get_class_by_weapon, format_class_info
+    from infra.state_manager import clear_dialog_state
 
     if player.level < 10:
         vk.messages.send(
@@ -616,8 +616,8 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
 
 def _handle_change_class(player, vk, user_id: int, npc_id: str):
     """Обработка смены класса"""
-    from classes import get_class_by_weapon, format_class_info
-    from state_manager import clear_dialog_state
+    from models.classes import get_class_by_weapon, format_class_info
+    from infra.state_manager import clear_dialog_state
 
     if player.level < 10:
         vk.messages.send(
@@ -684,7 +684,7 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
 
 def _handle_show_class(player, vk, user_id: int, npc_id: str):
     """Обработка просмотра класса"""
-    from classes import get_class_by_weapon, format_class_info, format_passive_status
+    from models.classes import get_class_by_weapon, format_class_info, format_passive_status
 
     if not player.player_class:
         vk.messages.send(
@@ -723,7 +723,7 @@ def _handle_show_class(player, vk, user_id: int, npc_id: str):
 
 def _handle_shop_redirect(player, vk, user_id: int, npc_id: str, next_stage: str):
     """Перенаправление в магазин"""
-    from state_manager import set_dialog_state
+    from infra.state_manager import set_dialog_state
 
     set_dialog_state(user_id, npc_id, next_stage)
 
@@ -766,8 +766,8 @@ def handle_npc_choice(player, vk, user_id: int, npc_id: str):
 
 def handle_npc_back(player, vk, user_id: int):
     """Обработка возврата из диалога с NPC"""
-    from state_manager import clear_dialog_state, get_dialog_info
-    from npcs import get_npc_by_location
+    from infra.state_manager import clear_dialog_state, get_dialog_info
+    from models.npcs import get_npc_by_location
 
     clear_dialog_state(user_id)
     clear_shop_cache(user_id)

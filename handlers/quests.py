@@ -1,14 +1,14 @@
 """
 Обработчики ежедневных заданий
 """
-import database
-from daily_quests import format_daily_quests_header
+from infra import database
+from game.daily_quests import format_daily_quests_header
 from handlers.keyboards import create_daily_quests_keyboard
 
 
 def handle_daily_quests_command(player, vk, user_id: int, text: str) -> bool:
     """Обработка команд daily quests"""
-    from state_manager import try_edit_or_send
+    from infra.state_manager import try_edit_or_send
     text_lower = text.strip().lower()
 
     if text_lower not in (

@@ -125,11 +125,11 @@ print("-" * 60)
 
 required_files = [
     'main.py',
-    'config.py',
-    'database.py',
-    'player.py',
-    'constants.py',
-    'state_manager.py',
+    'infra/config.py',
+    'infra/database.py',
+    'infra/state_manager.py',
+    'models/player.py',
+    'game/constants.py',
     'handlers/__init__.py',
 ]
 

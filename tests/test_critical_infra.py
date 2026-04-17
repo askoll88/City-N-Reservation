@@ -20,8 +20,8 @@ import random
 import unittest
 from unittest.mock import patch, MagicMock, PropertyMock
 
-import state_manager
-from location_mechanics import (
+import infra.state_manager as state_manager
+from game.location_mechanics import (
     LOCATION_MODIFIERS,
     LOCATION_LOOT_BIAS,
     get_energy_cost_mult,
@@ -390,7 +390,7 @@ class TestLocationModifiers(unittest.TestCase):
     """Тесты модификаторов локаций"""
 
     def test_all_research_locations_have_modifiers(self):
-        from constants import RESEARCH_LOCATIONS
+        from game.constants import RESEARCH_LOCATIONS
         for loc in RESEARCH_LOCATIONS:
             mod = get_location_modifier(loc)
             self.assertIsNotNone(mod, f"No modifiers for {loc}")
@@ -646,7 +646,7 @@ class TestLocationDataIntegrity(unittest.TestCase):
 
     def test_loot_bias_items_exist_in_database(self):
         """Проверяем что предметы из loot bias существуют в ITEMS"""
-        from constants import InventorySection
+        from game.constants import InventorySection
         # Проверяем что bias_items непустые
         for loc_id, bias in LOCATION_LOOT_BIAS.items():
             self.assertGreater(len(bias["bias_items"]), 0)
@@ -710,7 +710,7 @@ class TestParameterized(unittest.TestCase):
 
     def test_custom_location_modifier_access(self):
         """Проверка доступа к модификаторам всех исследовательских локаций"""
-        from constants import RESEARCH_LOCATIONS
+        from game.constants import RESEARCH_LOCATIONS
         for loc in RESEARCH_LOCATIONS:
             mod = get_location_modifier(loc)
             self.assertIsNotNone(mod)

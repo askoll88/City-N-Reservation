@@ -7,8 +7,8 @@ import json
 import re
 import time
 
-import config
-import database
+from infra import config
+from infra import database
 from handlers.keyboards import (
     create_player_market_keyboard,
     create_purchase_confirm_keyboard,
@@ -17,7 +17,7 @@ from handlers.keyboards import (
     create_my_listings_keyboard,
     create_market_search_keyboard,
 )
-from state_manager import (
+from infra.state_manager import (
     set_pending_purchase,
     clear_pending_purchase,
     has_pending_purchase,
@@ -843,7 +843,7 @@ def handle_market_input(player, vk, user_id, text):
             s["search"] = search
             s["searching"] = True
             return s
-        from state_manager import _market_browse_state
+        from infra.state_manager import _market_browse_state
         _market_browse_state.update(user_id, updater)
         return True
 

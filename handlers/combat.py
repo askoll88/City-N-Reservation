@@ -4,12 +4,12 @@
 import random
 import time
 import threading
-import config
-import database
-import enemies
-import ui
-from constants import RESEARCH_LOCATIONS
-from state_manager import _combat_state, set_combat_state, is_in_combat, get_combat_data
+from infra import config
+from infra import database
+from models import enemies
+from game import ui
+from game.constants import RESEARCH_LOCATIONS
+from infra.state_manager import _combat_state, set_combat_state, is_in_combat, get_combat_data, clear_research_state
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
 _active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
@@ -215,7 +215,7 @@ def _format_mult_delta(mult: float) -> str:
 
 def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str, str]:
     """Собрать инфо по модификаторам локации/событий для сообщения старта исследования."""
-    from location_mechanics import (
+    from game.location_mechanics import (
         get_location_modifier,
         get_zone_mutation_state,
         get_energy_cost_mult,
@@ -223,7 +223,7 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
         get_danger_mult,
         get_radiation_mult,
     )
-    from emission import is_emission_aftermath_active, get_emission_artifact_bonus
+    from game.emission import is_emission_aftermath_active, get_emission_artifact_bonus
 
     mod = get_location_modifier(location_id) or {}
     loc_name = mod.get("name", location_id)
@@ -433,7 +433,7 @@ def _format_combat_hud(combat: dict, player) -> str:
 def _handle_death(player, vk, user_id: int, cause: str = None, killer_name: str = None, final_damage: int = None):
     """Обработка смерти персонажа в бою с экраном поражения."""
     _, create_location_keyboard, _, _ = _get_main_imports()
-    from state_manager import clear_travel_state
+    from infra.state_manager import clear_travel_state
 
     # 1) Экран поражения (до применения штрафов/респавна)
     cause_text = cause or "полученные раны"
@@ -601,7 +601,7 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
         return
 
     # Проверка энергии (с модификатором локации)
-    from location_mechanics import get_energy_cost_mult
+    from game.location_mechanics import get_energy_cost_mult
     energy_cost_base = RESEARCH_ENERGY_COST.get(time_sec, 2)
     energy_cost = max(1, int(energy_cost_base * get_energy_cost_mult(player.current_location_id)))
 
@@ -709,7 +709,7 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
 
     # Используем полноценного Player, чтобы боевая система получала все атрибуты
     # (total_defense, dodge_chance, max_health, инициатива и т.д.).
-    from player import Player
+    from models.player import Player
     temp_player = Player(user_id)
     temp_player.current_location_id = location_id
     temp_player.energy = remaining_energy
@@ -723,7 +723,7 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
 
 def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk, user_id: int):
     """Проверить и применить уникальные механики локаций после исследования"""
-    from location_mechanics import (
+    from game.location_mechanics import (
         check_ambush, check_zone_mutation, check_mutant_hunt,
         get_mutant_hunt_count,
     )
@@ -790,7 +790,7 @@ def _select_research_event_by_chance(
     user_id: int | None = None,
 ):
     """Выбрать событие исследования на основе шансов и модификаторов локации"""
-    from location_mechanics import get_event_weights, get_find_chance_mult, get_danger_mult
+    from game.location_mechanics import get_event_weights, get_find_chance_mult, get_danger_mult
 
     no_anomaly_streak = 0
     if user_id is not None:
@@ -1040,7 +1040,7 @@ def _apply_blind_anomaly_loss(user_id: int, player) -> str:
 def _handle_anomaly(player, vk, user_id: int):
     """Обработка попадания в аномалию"""
     import anomalies as anomalies_module
-    from state_manager import set_anomaly_state
+    from infra.state_manager import set_anomaly_state
     _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
 
     # Получаем данные игрока
@@ -1053,7 +1053,7 @@ def _handle_anomaly(player, vk, user_id: int):
     detector = anomalies_module.get_equipped_detector(player)
 
     # Получаем случайную аномалию (с учётом локации)
-    from location_mechanics import get_random_anomaly_for_location
+    from game.location_mechanics import get_random_anomaly_for_location
     anomaly = get_random_anomaly_for_location(player.current_location_id)
     anomaly_type = anomaly["type"]
     anomaly_name = anomaly["name"]
@@ -1149,7 +1149,7 @@ def _handle_anomaly(player, vk, user_id: int):
 def handle_anomaly_action(player, vk, user_id: int, action: str):
     """Обработка действия игрока с аномалией"""
     import anomalies as anomalies_module
-    from state_manager import get_anomaly_data, clear_anomaly_state, set_pending_loot_choice
+    from infra.state_manager import get_anomaly_data, clear_anomaly_state, set_pending_loot_choice
 
     _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
 
@@ -1237,7 +1237,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 
         # Бросок гильзы - пытаемся получить артефакт
         luck = int(getattr(player, "effective_luck", user.get('luck', 5)) or 5)
-        from emission import get_emission_artifact_bonus
+        from game.emission import get_emission_artifact_bonus
         artifact_bonus_mult = get_emission_artifact_bonus()
         result = database.roll_artifact_from_anomaly(
             anomaly_type,
@@ -1332,8 +1332,8 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 
 def _handle_radiation(player, vk, user_id: int):
     """Обработка радиоактивного заражения (с модификатором локации)"""
-    from location_mechanics import get_radiation_mult
-    from player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
+    from game.location_mechanics import get_radiation_mult
+    from models.player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
     _, create_location_keyboard, _, _ = _get_main_imports()
 
     # Получаем реальные данные игрока
@@ -1692,7 +1692,7 @@ def _handle_found_something(player, vk, user_id: int):
 def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: bool = True):
     """Спавн врага"""
     _combat_state, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
-    from emission import is_emission_rare_enemy_bonus
+    from game.emission import is_emission_rare_enemy_bonus
 
     # Если указан тип врага - используем его, иначе - случайный для локации
     if enemy_type:
@@ -1790,7 +1790,7 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
 def _spawn_item(player, vk, user_id: int):
     """Спавн предмета (с учётом локации)"""
     _combat_state, create_location_keyboard, _, _ = _get_main_imports()
-    from location_mechanics import get_location_loot_bias, get_location_loot_bias_chance
+    from game.location_mechanics import get_location_loot_bias, get_location_loot_bias_chance
 
     # Проверяем бонус локации
     bias_items = get_location_loot_bias(player.current_location_id)
@@ -1870,7 +1870,7 @@ def _spawn_item(player, vk, user_id: int):
 def create_combat_keyboard(player=None, user_id=None):
     """Клавиатура боя"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-    from classes import get_class_by_weapon
+    from models.classes import get_class_by_weapon
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
     keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
@@ -1888,7 +1888,7 @@ def create_combat_keyboard(player=None, user_id=None):
 def create_skills_keyboard(player, user_id: int = None):
     """Клавиатура навыков в бою"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-    from classes import get_class, get_class_by_weapon
+    from models.classes import get_class, get_class_by_weapon
 
     keyboard = VkKeyboard(one_time=False)
 
@@ -1953,7 +1953,7 @@ def create_skills_keyboard(player, user_id: int = None):
 
 def show_skills_in_combat(player, vk, user_id):
     """Показать навыки в бою"""
-    from classes import get_class, get_class_by_weapon
+    from models.classes import get_class, get_class_by_weapon
 
     current_weapon = player.equipped_weapon
     class_id = get_class_by_weapon(current_weapon) if current_weapon else None
@@ -2024,8 +2024,8 @@ def show_skills_in_combat(player, vk, user_id):
 
 def use_skill(player, vk, user_id: int, skill_name: str):
     """Использовать навык в бою"""
-    from classes import get_class, get_class_by_weapon
-    import database
+    from models.classes import get_class, get_class_by_weapon
+    from infra import database
 
     combat = _combat_state.get(user_id)
     if not combat:
@@ -2214,7 +2214,7 @@ def use_skill(player, vk, user_id: int, skill_name: str):
 
 def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, effect: dict):
     """Применить эффект навыка"""
-    from classes import get_class, get_class_by_weapon
+    from models.classes import get_class, get_class_by_weapon
 
     skill_name = skill["name"]
     message = ""

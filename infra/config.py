@@ -2,9 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Загружаем .env из директории с config.py
-env_path = Path(__file__).parent / '.env'
-load_dotenv(env_path)
+# Загружаем .env из корня проекта (../.env), с fallback на текущую рабочую директорию.
+project_root_env = Path(__file__).resolve().parent.parent / '.env'
+cwd_env = Path.cwd() / '.env'
+load_dotenv(project_root_env if project_root_env.exists() else cwd_env)
 
 # VK API
 VK_TOKEN = os.getenv('VK_TOKEN')

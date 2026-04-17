@@ -1,7 +1,7 @@
 import time
 import unittest
 
-import state_manager
+import infra.state_manager as state_manager
 
 
 class StateManagerTest(unittest.TestCase):

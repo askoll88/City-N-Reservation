@@ -99,7 +99,7 @@ def get_combat_state() -> dict:
 def _persist_runtime_state(user_id: int, state_key: str, payload: dict):
     """Сохранить runtime-состояние в БД (fail-safe)."""
     try:
-        import database
+        from infra import database
         database.set_runtime_state(user_id, state_key, payload or {})
     except Exception:
         logger.exception("Не удалось сохранить runtime state: user_id=%s key=%s", user_id, state_key)
@@ -108,7 +108,7 @@ def _persist_runtime_state(user_id: int, state_key: str, payload: dict):
 def _clear_runtime_state(user_id: int, state_key: str):
     """Удалить runtime-состояние из БД (fail-safe)."""
     try:
-        import database
+        from infra import database
         database.clear_runtime_state(user_id, state_key)
     except Exception:
         logger.exception("Не удалось очистить runtime state: user_id=%s key=%s", user_id, state_key)
@@ -522,7 +522,7 @@ def ensure_runtime_state_loaded(user_id: int):
         return
 
     try:
-        import database
+        from infra import database
 
         if user_id not in _dialog_state:
             dialog = database.get_runtime_state(user_id, _RUNTIME_KEY_DIALOG)
@@ -559,7 +559,7 @@ def hydrate_travel_states_from_runtime() -> int:
     """
     restored = 0
     try:
-        import database
+        from infra import database
         rows = database.get_all_runtime_states(_RUNTIME_KEY_TRAVEL)
         for row in rows:
             try:

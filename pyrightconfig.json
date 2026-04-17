@@ -1,0 +1,29 @@
+{
+  "include": [
+    "main.py",
+    "handlers",
+    "infra",
+    "models",
+    "game",
+    "tests",
+    "scripts/dev"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "venv"
+  ],
+  "typeCheckingMode": "off",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        ".",
+        "infra",
+        "models",
+        "game",
+        "handlers",
+        "tests"
+      ]
+    }
+  ]
+}

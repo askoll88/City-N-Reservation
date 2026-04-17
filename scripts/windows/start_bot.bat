@@ -7,7 +7,7 @@ echo     STALKER VK Bot - Starter
 echo ========================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 
 echo Starting bot...
 start "" cmd /c "py main.py"

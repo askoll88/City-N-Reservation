@@ -5,7 +5,7 @@ import logging
 import traceback
 from functools import wraps
 
-import config
+from infra import config
 
 logger = logging.getLogger(__name__)
 

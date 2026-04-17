@@ -3,8 +3,8 @@
 """
 from __future__ import annotations
 import random
-import database
-from constants import RESEARCH_LOCATIONS
+from infra import database
+from game.constants import RESEARCH_LOCATIONS
 
 # =========================================================================
 # Модификаторы локаций

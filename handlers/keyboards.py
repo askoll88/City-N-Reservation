@@ -15,8 +15,8 @@
 """
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
-from constants import RESEARCH_LOCATIONS
-from npcs import get_npc_by_location, get_npc
+from game.constants import RESEARCH_LOCATIONS
+from models.npcs import get_npc_by_location, get_npc
 
 
 # ============================================================
@@ -215,7 +215,7 @@ def create_resume_keyboard(location_id: str, player_level: int = None, user_id: 
     """
     if user_id is not None:
         try:
-            from state_manager import has_travel_state
+            from infra.state_manager import has_travel_state
             if has_travel_state(user_id):
                 return create_travel_keyboard()
         except Exception:

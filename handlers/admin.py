@@ -4,7 +4,7 @@
 import re
 import time
 
-import database
+from infra import database
 from handlers.keyboards import (
     create_admin_keyboard,
     create_admin_users_keyboard,
@@ -14,7 +14,7 @@ from handlers.keyboards import (
     create_admin_market_keyboard,
     create_admin_help_keyboard,
 )
-import database
+from infra import database
 
 
 def _set_admin_menu(user_id: int, category: str):
@@ -173,7 +173,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
 
     # === Кнопки: Выброс ===
     if text == "☢️ запустить выброс":
-        from emission import schedule_admin_emission
+        from game.emission import schedule_admin_emission
         try:
             eid = schedule_admin_emission(vk)
             _send(vk, user_id, f"☢️ Выброс запущен!\n\nID: {eid}\nПредупреждение отправлено.\nУдар через 15 мин.", create_admin_emission_keyboard())
@@ -182,7 +182,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         return True
 
     if text == "⛔ отменить выброс":
-        from emission import EMISSION_PHASE_IMPACT, EMISSION_PHASE_CANCELLED, _announce_emission_cancelled
+        from game.emission import EMISSION_PHASE_IMPACT, EMISSION_PHASE_CANCELLED, _announce_emission_cancelled
         emission = database.get_active_emission()
         if not emission:
             _send(vk, user_id, "ℹ️ Нет активного выброса.", create_admin_emission_keyboard()); return True
@@ -348,8 +348,8 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     m = re.match(r"^админ\s+рандом\s+(\d+)$", text)
     if m:
         target = int(m.group(1))
-        from state_manager import has_pending_event, clear_pending_event, set_pending_event
-        from random_events import get_random_event, format_event_message
+        from infra.state_manager import has_pending_event, clear_pending_event, set_pending_event
+        from game.random_events import get_random_event, format_event_message
         from handlers.keyboards import create_random_event_keyboard
         if has_pending_event(target): clear_pending_event(target)
         event = get_random_event(user_id=target)
@@ -421,7 +421,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     if m:
         target = int(m.group(1))
         new_location = m.group(2).strip()
-        from constants import LocationType
+        from game.constants import LocationType
         valid_locations = {loc.value for loc in LocationType}
         if new_location not in valid_locations:
             _send(vk, user_id, f"❌ Неверная локация. Доступные: {', '.join(sorted(valid_locations))}"); return True

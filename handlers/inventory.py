@@ -4,9 +4,9 @@
 from __future__ import annotations
 import threading
 
-import database
-import ui
-from constants import InventorySection
+from infra import database
+from game import ui
+from game.constants import InventorySection
 
 
 def _fmt_weight(item: dict, default: float = 1.0) -> str:
@@ -383,7 +383,7 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
 def show_weapons(player, vk, user_id: int):
     """Показать оружие"""
     from main import create_inventory_keyboard
-    import database
+    from infra import database
 
     player.inventory_section = 'weapons'
     database.update_user_stats(user_id, inventory_section='weapons')
@@ -407,7 +407,7 @@ def show_weapons(player, vk, user_id: int):
 def show_armor(player, vk, user_id: int):
     """Показать броню"""
     from main import create_inventory_keyboard
-    import database
+    from infra import database
 
     player.inventory_section = 'armor'
     database.update_user_stats(user_id, inventory_section='armor')
@@ -442,7 +442,7 @@ def show_armor(player, vk, user_id: int):
 def show_backpacks(player, vk, user_id: int):
     """Показать рюкзаки"""
     from main import create_inventory_keyboard
-    import database
+    from infra import database
 
     player.inventory_section = 'backpacks'
     database.update_user_stats(user_id, inventory_section='backpacks')
@@ -466,7 +466,7 @@ def show_backpacks(player, vk, user_id: int):
 def show_artifacts(player, vk, user_id: int):
     """Показать артефакты"""
     from main import create_inventory_keyboard
-    import database
+    from infra import database
 
     player.inventory_section = 'artifacts'
     database.update_user_stats(user_id, inventory_section='artifacts')
@@ -530,7 +530,7 @@ def show_artifacts(player, vk, user_id: int):
 def show_other(player, vk, user_id: int):
     """Показать другие предметы"""
     from main import create_inventory_keyboard
-    import database
+    from infra import database
 
     player.inventory_section = 'other'
     database.update_user_stats(user_id, inventory_section='other')
@@ -553,7 +553,7 @@ def show_other(player, vk, user_id: int):
 
 def show_resources_shop(player, vk, user_id: int):
     """Показать ресурсы в магазине (гильзы)"""
-    import database as db
+    from infra import database as db
 
     # Получаем ресурсы из магазина
     resources = db.get_items_by_category('resources')
@@ -823,7 +823,7 @@ def handle_sell_item(player, item_name: str, vk, user_id: int):
 def handle_buy_artifact_slot(player, vk, user_id: int):
     """Купить слот для артефакта"""
     from main import create_inventory_keyboard
-    import config
+    from infra import config
 
     max_slots = player.artifact_slots
     cost = config.ARTIFACT_SLOT_COSTS.get(max_slots + 1)

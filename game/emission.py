@@ -9,10 +9,10 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 
-import config
-import database
-from constants import SAFE_LOCATIONS, DANGEROUS_LOCATIONS
-from state_manager import (
+from infra import config
+from infra import database
+from game.constants import SAFE_LOCATIONS, DANGEROUS_LOCATIONS
+from infra.state_manager import (
     set_emission_pending, get_emission_pending, clear_emission_pending,
     has_pending_event, get_pending_event, clear_pending_event,
     is_in_dialog, get_dialog_info, clear_dialog_state,
@@ -620,7 +620,7 @@ def _restore_interrupted_context(player, vk, user_id: int, header: str = ""):
     Восстановить интерфейс прерванного сценария после ответа на выброс.
     Приоритет: бой -> аномалия -> квест/рандом-ивент -> диалог -> исследование -> путь.
     """
-    from random_events import format_event_message
+    from game.random_events import format_event_message
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
     from handlers.combat import create_combat_keyboard
 
@@ -803,7 +803,7 @@ def _apply_emission_impact(vk, emission_id: int):
             new_radiation = int(user_row.get("radiation") or 0) + radiation
 
             # Урон от накопленной радиации: чем выше накопление, тем быстрее тает HP.
-            from player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
+            from models.player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
             rad_overload_damage = calculate_radiation_hp_loss(new_radiation, new_health)
             new_health = max(1, new_health - rad_overload_damage)
 
@@ -971,7 +971,7 @@ def _apply_impact_radiation_accumulation(vk, emission: dict):
     minute_slot = int((now - impact_time).total_seconds() // 60)
     per_min_gain = _impact_radiation_gain_per_minute(impact_time, end_time)
     players = database.get_all_active_players()
-    from player import calculate_radiation_hp_loss, format_radiation_rate
+    from models.player import calculate_radiation_hp_loss, format_radiation_rate
 
     for player_data in players:
         try:
@@ -1113,11 +1113,11 @@ def _roll_unprepared_fatality(prepared: bool, risk_locked: bool) -> tuple[bool, 
 
 def _apply_emission_death_penalty(vk_id: int, user_row: dict) -> dict:
     """Применить штрафы смерти от выброса и вернуть игрока в больницу."""
-    from state_manager import (
+    from infra.state_manager import (
         clear_travel_state, clear_combat_state, clear_dialog_state,
         clear_research_state, clear_anomaly_state,
     )
-    from player import Player
+    from models.player import Player
 
     level = int(user_row.get("level") or 1)
     old_money = int(user_row.get("money") or 0)
@@ -1504,7 +1504,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
         return False
 
     # Применяем урон
-    from player import Player
+    from models.player import Player
     player = Player(user_id)
 
     damage_pct = random.uniform(
@@ -1515,7 +1515,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
     player.health = max(1, player.health - damage)
     player.radiation = player.radiation + config.EMISSION_RADIATION
 
-    from player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
+    from models.player import calculate_radiation_hp_loss, format_radiation_rate, get_radiation_stage
     rad_overload_damage = calculate_radiation_hp_loss(player.radiation, player.health)
     player.health = max(1, player.health - rad_overload_damage)
 

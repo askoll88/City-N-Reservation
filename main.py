@@ -11,9 +11,9 @@ import traceback
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 
-import config
-import database
-import player as player_module
+from infra import config
+from infra import database
+from models import player as player_module
 
 # Настройка логирования
 logging.basicConfig(
@@ -28,7 +28,7 @@ TOKEN = config.VK_TOKEN
 GROUP_ID = config.GROUP_ID
 
 # === Выброс (Emission) ===
-from emission import emission_tick, schedule_next_emission
+from game.emission import emission_tick, schedule_next_emission
 
 # === Импорт обработчиков ===
 from handlers.commands import (
@@ -55,7 +55,7 @@ from handlers.commands import (
 
 from handlers.location import go_to_location, go_back, handle_travel_commands, travel_tick
 from handlers.admin import handle_admin_commands
-from state_manager import (
+from infra.state_manager import (
     is_in_combat, is_in_dialog,
     get_combat_data, clear_combat_state,
     get_dialog_info,
@@ -162,7 +162,7 @@ def handle_message(event, vk):
             return
 
     # === Приоритет 3.6: Случайное событие (если есть pending event) ===
-    from state_manager import has_pending_event, get_pending_event, clear_pending_event
+    from infra.state_manager import has_pending_event, get_pending_event, clear_pending_event
     if has_pending_event(user_id):
         from handlers.events import handle_event_response
         if handle_event_response(player, vk, user_id, text):
@@ -170,7 +170,7 @@ def handle_message(event, vk):
 
     # === Приоритет 3.65: Подтверждение выхода из safe во время impact ===
     if has_pending_emission_risk_exit(user_id):
-        from emission import handle_emission_risk_exit_response
+        from game.emission import handle_emission_risk_exit_response
         if handle_emission_risk_exit_response(player, vk, user_id, text):
             return
 
@@ -360,7 +360,7 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         show_artifact_slots, show_artifact_help,
     )
     from handlers.combat import handle_explore_time
-    from constants import RESEARCH_LOCATIONS
+    from game.constants import RESEARCH_LOCATIONS
 
     # Исследование
     if 'исследовать' in text:

@@ -1,10 +1,10 @@
 """
 Классы игрока и инвентаря
 """
-import database
+from infra import database
 import logging
-from locations import get_location, Location
-import ui
+from models.locations import get_location, Location
+from game import ui
 
 logger = logging.getLogger(__name__)
 
@@ -406,7 +406,7 @@ class Player:
     def _get_hp_upgrade_settings(self) -> tuple[int, int]:
         """Получить параметры прокачки HP с безопасными дефолтами."""
         try:
-            import config as game_config
+            from infra import config as game_config
             per_level = max(1, int(getattr(game_config, "HP_UPGRADE_PER_LEVEL", 3) or 3))
             max_level = max(0, int(getattr(game_config, "HP_UPGRADE_MAX_LEVEL", 10) or 10))
             return per_level, max_level
@@ -434,7 +434,7 @@ class Player:
     def _get_passive_bonuses(self) -> dict:
         """Получить бонусы от пассивных навыков класса"""
         try:
-            from classes import get_passive_bonuses, get_class_by_weapon
+            from models.classes import get_passive_bonuses, get_class_by_weapon
             # Приоритет: класс по текущему оружию (фактическая роль в бою),
             # fallback: сохранённый класс персонажа.
             class_id = None
@@ -737,7 +737,7 @@ class Player:
 
     def _handle_death(self):
         """Обработка смерти персонажа"""
-        from state_manager import clear_travel_state
+        from infra.state_manager import clear_travel_state
 
         # Штрафы при смерти
         old_money = self.money
@@ -786,7 +786,7 @@ class Player:
 
     def _handle_radiation_death(self):
         """Обработка смерти от радиации"""
-        from state_manager import clear_travel_state
+        from infra.state_manager import clear_travel_state
 
         # Штрафы при смерти от радиации
         old_money = self.money
@@ -1191,7 +1191,7 @@ class Player:
 
     def buy_item(self, item_name: str, merchant_id: str | None = None) -> tuple[bool, str]:
         """Купить предмет у торговца"""
-        import database as db
+        from infra import database as db
 
         item_info = db.get_item_by_name(item_name)
 
@@ -1221,7 +1221,7 @@ class Player:
 
     def sell_item(self, item_name: str, merchant_id: str | None = None) -> tuple[bool, str]:
         """Продать предмет торговцу"""
-        import database as db
+        from infra import database as db
 
         self.inventory.reload()
 
@@ -1257,7 +1257,7 @@ class Player:
 
     def get_shop_items(self, category: str = None) -> list[dict]:
         """Получить список предметов в магазине"""
-        import database as db
+        from infra import database as db
         return db.get_shop_items(category)
 
 

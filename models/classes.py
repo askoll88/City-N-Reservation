@@ -180,7 +180,7 @@ def _load_classes_from_db():
     if _classes_cache is not None:
         return _classes_cache
     
-    import database
+    from infra import database
     _classes_cache = {}
     
     try:

@@ -192,30 +192,44 @@ python main.py
 
 ## 🗺️ Структура проекта
 
-```
-├── main.py              # Главный файл, обработка сообщений
-├── config.py            # Конфигурация и константы
-├── database.py          # PostgreSQL с пулом соединений
-├── player.py            # Класс Player и Inventory
-├── locations.py         # Описания локаций
-├── constants.py         # Перечисления и маппинг команд
-├── state_manager.py     # Управление состоянием (бой, диалоги)
-├── anomalies.py         # Аномалии и генерация артефактов
-├── classes.py           # Классы персонажей и бонусы
-├── handlers/            # Обработчики команд
-│   ├── commands.py      # Команды навигации и статуса
-│   ├── combat.py        # Боевая система
-│   ├── inventory.py     # Инвентарь, торговля, артефакты
-│   ├── location.py      # Перемещение между локациями
-│   ├── keyboards.py     # Клавиатуры ВК
-│   └── ...
-├── requirements.txt     # Зависимости
-└── .env                 # Переменные окружения
+```text
+├── main.py                      # Точка входа бота
+├── infra/                       # Инфраструктурный слой
+│   ├── config.py                # Конфигурация
+│   ├── database.py              # PostgreSQL и транзакции
+│   ├── state_manager.py         # Runtime state (бой, диалоги, travel)
+│   └── errors.py                # Общие декораторы/логгинг ошибок
+├── models/                      # Доменные модели
+│   ├── player.py
+│   ├── classes.py
+│   ├── enemies.py
+│   ├── locations.py
+│   └── npcs.py
+├── game/                        # Игровые механики
+│   ├── constants.py
+│   ├── random_events.py
+│   ├── emission.py
+│   ├── location_mechanics.py
+│   ├── anomalies.py
+│   ├── daily_quests.py
+│   └── ui.py
+├── handlers/                    # Обработчики сообщений и игровых экранов
+├── tests/                       # Автотесты
+├── scripts/
+│   ├── deploy.sh                # Деплой на сервер
+│   ├── stalker_bot.service      # systemd unit
+│   ├── dev/                     # Локальные dev-утилиты
+│   └── windows/                 # BAT-скрипты запуска/остановки
+├── docs/
+│   ├── audit/BUG_AUDIT.md
+│   └── plans/DEVELOPMENT_PLAN.md
+├── requirements.txt
+└── .env
 ```
 
 ## ⚙️ Конфигурация
 
-Основные настройки в `config.py`:
+Основные настройки в `infra/config.py`:
 
 | Параметр | Значение | Описание |
 |----------|----------|----------|

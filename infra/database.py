@@ -1,4 +1,4 @@
-﻿"""
+"""
 База данных для игры "Город N: Запретная Зона"
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ import psycopg2
 from psycopg2 import pool, OperationalError, DatabaseError, InterfaceError
 from psycopg2.extras import RealDictCursor
 
-import config
+from infra import config
 
 logger = logging.getLogger(__name__)
 
@@ -2746,7 +2746,7 @@ def unequip_shells_bag(vk_id: int) -> dict:
 
 def give_newbie_kit(vk_id: int) -> dict:
     """Выдать набор новичка"""
-    from constants import NEWBIE_KIT_ITEMS
+    from game.constants import NEWBIE_KIT_ITEMS
     
     with db_cursor() as (cursor, _):
         cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
@@ -3102,7 +3102,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             # а не по вчерашнему значению.
             new_streak = int(streak) + 1
 
-            from daily_quests import STREAK_BONUSES
+            from game.daily_quests import STREAK_BONUSES
             best_bonus = STREAK_BONUSES.get(1, {"multiplier": 1.0})
             for threshold, bonus in sorted(STREAK_BONUSES.items()):
                 if new_streak >= int(threshold):
@@ -3115,7 +3115,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             total_money = int(total_money * mult)
 
             # Бонусный предмет выдаём только на пороговых значениях.
-            from daily_quests import resolve_streak_bonus_item
+            from game.daily_quests import resolve_streak_bonus_item
             resolved_bonus_item = resolve_streak_bonus_item(new_streak)
             if resolved_bonus_item:
                 bonus_items.append(resolved_bonus_item)
@@ -3181,7 +3181,7 @@ def reset_daily_quests_if_needed(vk_id: int):
     Возвращает (quests, progress, streak) или генерирует новые.
     """
     from datetime import timezone, datetime, timedelta
-    from daily_quests import generate_daily_quests
+    from game.daily_quests import generate_daily_quests
 
     existing = get_daily_quests_for_user(vk_id)
     if existing is not None:

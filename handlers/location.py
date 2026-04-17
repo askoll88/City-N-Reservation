@@ -5,8 +5,8 @@ import logging
 import random
 import time
 from typing import Optional
-import database
-from constants import RESEARCH_LOCATIONS, NPC_LOCATIONS, SAFE_LOCATIONS
+from infra import database
+from game.constants import RESEARCH_LOCATIONS, NPC_LOCATIONS, SAFE_LOCATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +216,7 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
         npc_message = f"\n\nNPC: {npc_list}"
 
     location_info = ""
-    from location_mechanics import get_location_modifier, get_zone_mutation_state
+    from game.location_mechanics import get_location_modifier, get_zone_mutation_state
     mod = get_location_modifier(location_id)
     if mod:
         parts = []
@@ -247,7 +247,7 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
 def _arrive_to_location(player, vk, user_id: int, location_id: str, from_location: str):
     """Финализировать переход и показать локацию."""
     from handlers.quests import track_quest_explore, track_quest_visit
-    from state_manager import clear_travel_state, set_ui_screen
+    from infra.state_manager import clear_travel_state, set_ui_screen
 
     clear_travel_state(user_id)
 
@@ -271,11 +271,11 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
     Сгенерировать событие в коридоре перехода.
     Возвращает True если сгенерирован интерактивный контент (бой/ивент).
     """
-    from state_manager import set_pending_event, update_travel_data
-    from random_events import get_random_event, format_event_message
+    from infra.state_manager import set_pending_event, update_travel_data
+    from game.random_events import get_random_event, format_event_message
     from handlers.keyboards import create_random_event_keyboard
     from handlers.combat import _spawn_enemy
-    from emission import is_emission_rare_enemy_bonus
+    from game.emission import is_emission_rare_enemy_bonus
 
     roll = random.randint(1, 100)
     event_threshold = TRAVEL_EVENT_CHANCE_FORCED if forced else TRAVEL_EVENT_CHANCE
@@ -342,7 +342,7 @@ def _travel_progress(travel: dict, now_ts: float) -> tuple[float, int]:
 
 def travel_tick(player, vk, user_id: int, silent: bool = True) -> bool:
     """Тик коридора перехода. Возвращает True если переход ещё активен."""
-    from state_manager import (
+    from infra.state_manager import (
         get_travel_data, update_travel_data, clear_travel_state,
         has_pending_event, has_emission_pending,
         is_in_combat, is_in_anomaly, is_in_dialog,
@@ -431,7 +431,7 @@ def travel_tick(player, vk, user_id: int, silent: bool = True) -> bool:
 
 def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
     """Команды внутри коридора перехода."""
-    from state_manager import has_travel_state, get_travel_data, update_travel_data, clear_travel_state, set_ui_screen
+    from infra.state_manager import has_travel_state, get_travel_data, update_travel_data, clear_travel_state, set_ui_screen
     from handlers.keyboards import create_travel_keyboard
     from main import create_location_keyboard
 
@@ -537,7 +537,7 @@ def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
 def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confirm: bool = False):
     """Запустить переход в локацию через коридор перемещения."""
     from handlers.keyboards import create_travel_keyboard
-    from state_manager import has_travel_state, set_travel_state, set_ui_screen
+    from infra.state_manager import has_travel_state, set_travel_state, set_ui_screen
     from main import create_location_keyboard
 
     if has_travel_state(user_id):
@@ -555,7 +555,7 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
 
     if not bypass_risk_confirm:
         try:
-            from emission import prompt_emission_risk_exit_confirmation
+            from game.emission import prompt_emission_risk_exit_confirmation
             if prompt_emission_risk_exit_confirmation(player, vk, user_id, from_location, location_id):
                 return
         except Exception:
@@ -563,7 +563,7 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
 
     # Если игрок вышел из укрытия во время impact — возврат в safe закрыт до конца impact.
     try:
-        from emission import mark_emission_safe_exit_during_impact
+        from game.emission import mark_emission_safe_exit_during_impact
         mark_emission_safe_exit_during_impact(user_id, from_location, location_id)
     except Exception:
         logger.exception("Не удалось отметить выход из safe в impact: user_id=%s", user_id)
@@ -579,7 +579,7 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
         return
 
     if location_id in SAFE_LOCATIONS:
-        from emission import is_emission_safe_entry_blocked_for_user
+        from game.emission import is_emission_safe_entry_blocked_for_user
         blocked, seconds_to_impact = is_emission_safe_entry_blocked_for_user(user_id)
         # Во время impact разрешаем перемещение ВНУТРИ safe-зон (город/больница/убежище).
         # Блокируем только вход в safe из опасных локаций.
@@ -655,7 +655,7 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
 
 def go_to_inventory(player, vk, user_id: int):
     """Открыть инвентарь - показать все категории"""
-    from state_manager import get_ui_current_screen, set_ui_screen
+    from infra.state_manager import get_ui_current_screen, set_ui_screen
     from handlers.inventory import show_all
 
     # Сохраняем текущую локацию как предыдущую (для возврата из инвентаря)
@@ -678,7 +678,7 @@ def go_back(player, vk, user_id: int):
     from main import create_location_keyboard
     from handlers.inventory import show_all
     from handlers.keyboards import create_character_keyboard
-    from state_manager import pop_ui_screen, set_ui_screen
+    from infra.state_manager import pop_ui_screen, set_ui_screen
 
     prev_screen = pop_ui_screen(user_id)
     if prev_screen:
@@ -732,8 +732,8 @@ def go_back(player, vk, user_id: int):
 def handle_sleep(player, vk, user_id: int):
     """Спать в убежище"""
     from main import create_location_keyboard
-    from player import format_radiation_rate, get_radiation_stage
-    import config
+    from models.player import format_radiation_rate, get_radiation_stage
+    from infra import config
     
     if player.current_location_id == "убежище":
         now = int(time.time())
@@ -816,8 +816,8 @@ def handle_heal(player, vk, user_id: int):
     При стартовых настройках: 100 + (level-1) * 50, максимум 3000
     """
     from main import create_location_keyboard
-    import database
-    import config
+    from infra import database
+    from infra import config
 
     if player.current_location_id == "больница":
         user_data = database.get_user_by_vk(user_id)
@@ -887,7 +887,7 @@ def handle_heal(player, vk, user_id: int):
 
 def get_status(player, vk, user_id: int):
     """Показать статус персонажа"""
-    from state_manager import try_edit_or_send
+    from infra.state_manager import try_edit_or_send
     try_edit_or_send(
         vk, user_id,
         message=player.get_status(),
@@ -897,10 +897,10 @@ def get_status(player, vk, user_id: int):
 def show_welcome(vk, user_id: int):
     """Показать приветственное сообщение"""
     from handlers.keyboards import create_main_keyboard, create_location_keyboard
-    from state_manager import set_ui_screen
+    from infra.state_manager import set_ui_screen
     from handlers.commands import get_welcome_message
-    from locations import get_location
-    import database
+    from models.locations import get_location
+    from infra import database
 
     # Проверяем, новый ли игрок
     user_data = database.get_user_by_vk(user_id)

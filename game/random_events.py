@@ -1675,25 +1675,25 @@ for _chain_key, _chain_data in QUEST_CHAINS.items():
 
 def _get_quest_stage(user_id: int, chain_key: str) -> int:
     """Получить текущую стадию квеста для игрока."""
-    import database
+    from infra import database
     return database.get_user_flag(user_id, f"quest_{chain_key}_stage", 0)
 
 
 def _set_quest_stage(user_id: int, chain_key: str, stage: int):
     """Установить стадию квеста для игрока."""
-    import database
+    from infra import database
     database.set_user_flag(user_id, f"quest_{chain_key}_stage", stage)
 
 
 def _get_quest_cooldown(user_id: int, chain_key: str) -> int:
     """Получить время окончания кулдауна квеста (timestamp часов)."""
-    import database
+    from infra import database
     return database.get_user_flag(user_id, f"quest_{chain_key}_cooldown", 0)
 
 
 def _set_quest_cooldown(user_id: int, chain_key: str, cooldown_until: int):
     """Установить кулдаун квеста (timestamp часов)."""
-    import database
+    from infra import database
     database.set_user_flag(user_id, f"quest_{chain_key}_cooldown", cooldown_until)
 
 
@@ -2033,7 +2033,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 # --- Вспомогательные функции для apply_event_choice ---
 
 def _apply_random_loot(player):
-    import database
+    from infra import database
     money_reward = random.randint(50, 300)
     player.money += money_reward
     item_text = "ничего"
@@ -2052,7 +2052,7 @@ def _apply_random_loot(player):
 
 def _apply_random_artifact(player):
     from anomalies import get_artifact_from_anomaly
-    import database
+    from infra import database
     anomaly_type = random.choice(["жарка", "электра", "воронка", "туман", "магнит"])
     artifact = get_artifact_from_anomaly(anomaly_type)
     if artifact:
@@ -2065,8 +2065,8 @@ def _apply_random_artifact(player):
 
 def _apply_artifact_chance(player, effect=None):
     from anomalies import get_random_anomaly, get_artifact_from_anomaly
-    import database
-    from emission import get_emission_artifact_bonus
+    from infra import database
+    from game.emission import get_emission_artifact_bonus
     anomaly = get_random_anomaly()
     artifact = get_artifact_from_anomaly(anomaly["type"])
     success_chance = min(95, int(30 * get_emission_artifact_bonus()))
@@ -2132,7 +2132,7 @@ def _apply_need_item(player, effect):
         for item in cat
     )
     if has_item:
-        import database
+        from infra import database
         database.remove_item_from_inventory(player.vk_id, item_name, 1)
         player.experience += effect.get("xp", 0)
         return effect.get("message", f"Ты использовал {item_name}.")

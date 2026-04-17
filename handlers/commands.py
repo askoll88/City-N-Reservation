@@ -4,8 +4,8 @@
 """
 import sys
 
-import player as player_module
-from player import get_player as get_player_cached
+from models import player as player_module
+from models.player import get_player as get_player_cached
 
 from handlers.location import (
     go_to_location, go_to_inventory, go_back,
@@ -32,8 +32,8 @@ from handlers.keyboards import (
     create_npc_select_keyboard, create_kpp_shop_keyboard,
     create_scientist_shop_keyboard
 )
-from npcs import get_npc_by_location
-from state_manager import (
+from models.npcs import get_npc_by_location
+from infra.state_manager import (
     is_in_combat,
     is_in_dialog, get_dialog_info, clear_dialog_state,
     is_researching as is_in_research,
@@ -446,7 +446,7 @@ def handle_class_commands(player, vk, user_id: int, text: str):
     if text not in ['класс', 'мой класс', 'получить класс', 'мои навыки', 'навыки']:
         return False
 
-    from classes import get_class_by_weapon, format_class_info, format_passive_status
+    from models.classes import get_class_by_weapon, format_class_info, format_passive_status
     from handlers.keyboards import create_location_keyboard
 
     # Если игрок в убежище - показываем через NPC
@@ -692,7 +692,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
     
     # Обработка меню магазина у военного
     if npc_id == "военный" and text in ["купить", "оружие", "броня", "продать"]:
-        from state_manager import set_dialog_state
+        from infra.state_manager import set_dialog_state
         from handlers.keyboards import create_kpp_shop_keyboard
         from handlers.inventory import show_weapons
         
@@ -725,7 +725,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
     
     # Обработка меню магазина у учёного
     if npc_id == "ученый" and text in ["купить", "лекарства", "энергетики"]:
-        from state_manager import set_dialog_state
+        from infra.state_manager import set_dialog_state
         from handlers.keyboards import create_scientist_shop_keyboard
         
         if text == "купить":
@@ -743,7 +743,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
 
     # Обработка магазина у Барыги на КПП
     if npc_id == "барыга":
-        from state_manager import set_dialog_state
+        from infra.state_manager import set_dialog_state
         from handlers.inventory import show_artifact_shop, show_sell_artifacts
 
         if text in ["купить", "купить артефакты", "артефакты"]:
@@ -757,7 +757,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
             return True
     
     # Обработка выбора вопроса диалога
-    from npcs import get_npc
+    from models.npcs import get_npc
     npc = get_npc(npc_id)
     if npc:
         menu = npc.get_menu()
@@ -813,7 +813,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
 def handle_buy_sell_commands(player, vk, user_id: int, text: str, in_dialog: bool):
     """Обработка команд покупки/продажи"""
     # Если есть pending покупка на рынке — пропускаем, её обрабатывает handle_market_confirm_purchase
-    from state_manager import has_pending_purchase
+    from infra.state_manager import has_pending_purchase
     if has_pending_purchase(user_id):
         return False
 
