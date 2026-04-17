@@ -57,7 +57,7 @@ def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None
     # Если это начало диалога - показываем приветствие
     if dialog_id is None:
         from handlers.quests import track_quest_talk_npc
-        track_quest_talk_npc(user_id)
+        track_quest_talk_npc(user_id, vk=vk)
         set_dialog_state(user_id, npc_id, "menu")
         vk.messages.send(
             user_id=user_id,
@@ -600,7 +600,7 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
     # Если класса ещё нет - просто выдаём
     database.update_user_stats(user_id, player_class=class_id)
     from handlers.quests import track_quest_change_class
-    track_quest_change_class(user_id)
+    track_quest_change_class(user_id, vk=vk)
     invalidate_player_cache(user_id)
     player = get_player_from_module(user_id)
 
@@ -668,7 +668,7 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
     new_money = player.money - CLASS_CHANGE_COST
     database.update_user_stats(user_id, money=new_money, player_class=new_class_id)
     from handlers.quests import track_quest_change_class
-    track_quest_change_class(user_id)
+    track_quest_change_class(user_id, vk=vk)
     invalidate_player_cache(user_id)
     player = get_player_from_module(user_id)
 

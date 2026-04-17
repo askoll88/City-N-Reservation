@@ -6,6 +6,27 @@ from game.daily_quests import format_daily_quests_header
 from handlers.keyboards import create_daily_quests_keyboard
 
 
+def _send_daily_progress_notifications(vk, user_id: int, progress_result: dict | None):
+    """Отправить уведомления о прогрессе/выполнении ежедневных заданий."""
+    if not vk or not progress_result:
+        return
+
+    completed_now = progress_result.get("completed_now") or []
+    for quest in completed_now:
+        msg = (
+            f"✅ Дейлик выполнен: {quest.get('text', quest.get('id', ''))}\n"
+            f"Прогресс: {quest.get('after', 0)}/{quest.get('target', 1)}"
+        )
+        vk.messages.send(user_id=user_id, message=msg, random_id=0)
+
+    if progress_result.get("all_completed_now"):
+        vk.messages.send(
+            user_id=user_id,
+            message="🎁 Все ежедневные задания выполнены!\nМожно забрать награду: напиши 'забрать награду'.",
+            random_id=0,
+        )
+
+
 def handle_daily_quests_command(player, vk, user_id: int, text: str) -> bool:
     """Обработка команд daily quests"""
     from infra.state_manager import try_edit_or_send
@@ -107,56 +128,67 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
     return True
 
 
-def track_quest_kill(user_id: int, location: str = None):
+def track_quest_kill(user_id: int, location: str = None, vk=None):
     """Отслеживать убийства для заданий"""
-    database.track_quest_progress(user_id, "kill", location)
+    res = database.track_quest_progress(user_id, "kill", location)
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_explore(user_id: int, location: str = None):
+def track_quest_explore(user_id: int, location: str = None, vk=None):
     """Отслеживать исследование для заданий"""
-    database.track_quest_progress(user_id, "explore", location)
+    res = database.track_quest_progress(user_id, "explore", location)
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_artifact(user_id: int):
+def track_quest_artifact(user_id: int, vk=None):
     """Отслеживать сбор артефактов для заданий"""
-    database.track_quest_progress(user_id, "collect_artifact")
+    res = database.track_quest_progress(user_id, "collect_artifact")
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_shells(user_id: int, count: int = 1):
+def track_quest_shells(user_id: int, count: int = 1, vk=None):
     """Отслеживать сбор гильз для заданий"""
-    database.track_quest_progress(user_id, "collect_shells", increment=count)
+    res = database.track_quest_progress(user_id, "collect_shells", increment=count)
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_visit(user_id: int, location: str):
+def track_quest_visit(user_id: int, location: str, vk=None):
     """Отслеживать посещение локаций для заданий"""
-    database.track_quest_progress(user_id, "visit_location", location)
+    res = database.track_quest_progress(user_id, "visit_location", location)
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_market_list(user_id: int):
+def track_quest_market_list(user_id: int, vk=None):
     """Отслеживать выставление лота для заданий"""
-    database.track_quest_progress(user_id, "market_list")
+    res = database.track_quest_progress(user_id, "market_list")
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_market_buy(user_id: int):
+def track_quest_market_buy(user_id: int, vk=None):
     """Отслеживать покупку лота для заданий"""
-    database.track_quest_progress(user_id, "market_buy")
+    res = database.track_quest_progress(user_id, "market_buy")
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_talk_npc(user_id: int):
+def track_quest_talk_npc(user_id: int, vk=None):
     """Отслеживать разговор с NPC для заданий"""
-    database.track_quest_progress(user_id, "talk_npc")
+    res = database.track_quest_progress(user_id, "talk_npc")
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_change_class(user_id: int):
+def track_quest_change_class(user_id: int, vk=None):
     """Отслеживать смену класса для заданий"""
-    database.track_quest_progress(user_id, "change_class")
+    res = database.track_quest_progress(user_id, "change_class")
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_shop_buy(user_id: int):
+def track_quest_shop_buy(user_id: int, vk=None):
     """Отслеживать покупку у NPC-магазинов для заданий"""
-    database.track_quest_progress(user_id, "shop_buy")
+    res = database.track_quest_progress(user_id, "shop_buy")
+    _send_daily_progress_notifications(vk, user_id, res)
 
 
-def track_quest_shop_sell(user_id: int):
+def track_quest_shop_sell(user_id: int, vk=None):
     """Отслеживать продажу NPC-магазинам для заданий"""
-    database.track_quest_progress(user_id, "shop_sell")
+    res = database.track_quest_progress(user_id, "shop_sell")
+    _send_daily_progress_notifications(vk, user_id, res)

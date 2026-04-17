@@ -3208,17 +3208,37 @@ def reset_daily_quests_if_needed(vk_id: int):
     return quests, {}, streak_seed
 
 
-def track_quest_progress(vk_id: int, quest_type: str, location: str = None, increment: int = 1):
+def track_quest_progress(vk_id: int, quest_type: str, location: str = None, increment: int = 1) -> dict:
     """
     Автоматически обновить прогресс подходящих заданий.
     Вызывается при действиях игрока.
     """
+    result = {
+        "updated": [],
+        "completed_now": [],
+        "all_completed": False,
+        "all_completed_now": False,
+    }
+
     existing = get_daily_quests_for_user(vk_id)
     if not existing:
         quests, progress, streak = reset_daily_quests_if_needed(vk_id)
         existing = {"quests": quests, "progress": progress, "streak": streak}
 
     quests = existing["quests"]
+    progress_map = dict(existing.get("progress") or {})
+
+    def _all_done(progress_dict: dict) -> bool:
+        if not quests:
+            return False
+        for quest in quests:
+            target = max(1, int(quest.get("target", 1) or 1))
+            if int(progress_dict.get(quest["id"], 0) or 0) < target:
+                return False
+        return True
+
+    all_done_before = _all_done(progress_map)
+
     for q in quests:
         qid = q["id"]
         qtype = q.get("type")
@@ -3232,7 +3252,27 @@ def track_quest_progress(vk_id: int, quest_type: str, location: str = None, incr
             matched = True
 
         if matched:
+            target = max(1, int(q.get("target", 1) or 1))
+            before = int(progress_map.get(qid, 0) or 0)
             update_quest_progress(vk_id, qid, increment)
+            after = min(target, before + max(0, int(increment or 0)))
+            progress_map[qid] = after
+            update_entry = {
+                "id": qid,
+                "text": q.get("text", qid),
+                "before": before,
+                "after": after,
+                "target": target,
+                "completed": after >= target,
+            }
+            result["updated"].append(update_entry)
+            if before < target <= after:
+                result["completed_now"].append(update_entry)
+
+    all_done_after = _all_done(progress_map)
+    result["all_completed"] = all_done_after
+    result["all_completed_now"] = (not all_done_before) and all_done_after
+    return result
 
 
 # =========================================================================

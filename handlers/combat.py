@@ -1552,7 +1552,7 @@ def _handle_artifact_cluster(player, vk, user_id: int):
         artifact = random.choice(artifacts)
         found.append(artifact["name"])
         database.add_item_to_inventory(user_id, artifact["name"], 1)
-        track_quest_artifact(user_id)
+        track_quest_artifact(user_id, vk=vk)
 
     vk.messages.send(
         user_id=user_id,
@@ -1659,7 +1659,7 @@ def _spawn_artifact(player, vk, user_id: int):
     artifact = random.choice(artifacts)
     database.add_item_to_inventory(user_id, artifact['name'], 1)
     from handlers.quests import track_quest_artifact
-    track_quest_artifact(user_id)
+    track_quest_artifact(user_id, vk=vk)
 
     vk.messages.send(
         user_id=user_id,
@@ -2771,10 +2771,10 @@ def _handle_victory(player, combat, user_id: int) -> str:
     capacity = shells_info['capacity']
 
     # Автопрогресс daily-заданий: убийства и собранные гильзы.
-    track_quest_kill(user_id, combat.get("location_id"))
+    track_quest_kill(user_id, combat.get("location_id"), vk=vk)
     added_shells = max(0, int(current_shells or 0) - int(shells_before or 0))
     if added_shells > 0:
-        track_quest_shells(user_id, count=added_shells)
+        track_quest_shells(user_id, count=added_shells, vk=vk)
 
     database.update_user_stats(user_id, experience=player.experience, money=player.money)
     

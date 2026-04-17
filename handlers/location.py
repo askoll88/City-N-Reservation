@@ -259,9 +259,9 @@ def _arrive_to_location(player, vk, user_id: int, location_id: str, from_locatio
     database.update_user_location(user_id, location_id)
     set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
 
-    track_quest_visit(user_id, location_id)
+    track_quest_visit(user_id, location_id, vk=vk)
     if location_id in RESEARCH_LOCATIONS:
-        track_quest_explore(user_id, location_id)
+        track_quest_explore(user_id, location_id, vk=vk)
 
     _send_location_overview(player, vk, user_id, location_id)
 

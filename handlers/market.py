@@ -279,7 +279,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
         result = database.create_market_listing(user_id, item_name, price, qty)
         if result.get("success"):
             from handlers.quests import track_quest_market_list
-            track_quest_market_list(user_id)
+            track_quest_market_list(user_id, vk=vk)
 
         vk.messages.send(
             user_id=user_id,
@@ -506,7 +506,7 @@ def handle_market_create_listing(player, vk, user_id, text):
     result = database.create_market_listing(user_id, item_name, price, qty)
     if result.get("success"):
         from handlers.quests import track_quest_market_list
-        track_quest_market_list(user_id)
+        track_quest_market_list(user_id, vk=vk)
     vk.messages.send(
         user_id=user_id,
         message=result.get("message", "Не удалось выставить лот."),
@@ -653,7 +653,7 @@ def handle_market_confirm_purchase(player, vk, user_id, text):
 
         if result.get("success"):
             from handlers.quests import track_quest_market_buy
-            track_quest_market_buy(user_id)
+            track_quest_market_buy(user_id, vk=vk)
             vk.messages.send(
                 user_id=user_id,
                 message=f"✅ {result['message']}",

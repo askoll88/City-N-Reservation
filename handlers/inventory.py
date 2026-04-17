@@ -800,7 +800,7 @@ def handle_buy_item(player, item_name: str, vk, user_id: int):
 
     success, msg = player.buy_item(item_name, merchant_id=merchant_id)
     if success:
-        track_quest_shop_buy(user_id)
+        track_quest_shop_buy(user_id, vk=vk)
     vk.messages.send(user_id=user_id, message=msg, random_id=0)
 
 
@@ -816,7 +816,7 @@ def handle_sell_item(player, item_name: str, vk, user_id: int):
             merchant_id = database.NPC_MERCHANT_TRADER
     success, msg = player.sell_item(item_name, merchant_id=merchant_id)
     if success:
-        track_quest_shop_sell(user_id)
+        track_quest_shop_sell(user_id, vk=vk)
     vk.messages.send(user_id=user_id, message=msg, random_id=0)
 
 
@@ -1739,7 +1739,7 @@ def handle_sell_artifact(player, artifact_name: str, vk, user_id: int) -> bool:
 
         if success:
             from handlers.quests import track_quest_shop_sell
-            track_quest_shop_sell(user_id)
+            track_quest_shop_sell(user_id, vk=vk)
             vk.messages.send(
                 user_id=user_id,
                 message=f"💰Артефакт продан!\n\n🔮 {artifact_name}\n{msg}",
@@ -1837,7 +1837,7 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
 
         if success:
             from handlers.quests import track_quest_shop_buy
-            track_quest_shop_buy(user_id)
+            track_quest_shop_buy(user_id, vk=vk)
             player.inventory.reload()
 
             vk.messages.send(

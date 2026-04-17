@@ -606,7 +606,7 @@ def _handle_pending_loot_choice(player, vk, user_id: int, text: str) -> bool:
         database.add_item_to_inventory(user_id, item_name, 1)
         if item_type == "artifact":
             from handlers.quests import track_quest_artifact
-            track_quest_artifact(user_id)
+            track_quest_artifact(user_id, vk=vk)
         remain_part = f"\nГильз осталось: {shells_after}" if shells_after is not None else ""
         vk.messages.send(
             user_id=user_id,
