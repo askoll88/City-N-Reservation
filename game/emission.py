@@ -1180,18 +1180,14 @@ def _apply_emission_death_penalty(vk_id: int, user_row: dict) -> dict:
         clear_travel_state, clear_combat_state, clear_dialog_state,
         clear_research_state, clear_anomaly_state,
     )
-    from models.player import Player
-
-    level = int(user_row.get("level") or 1)
     old_money = int(user_row.get("money") or 0)
     old_experience = int(user_row.get("experience") or 0)
 
-    money_lost = int(old_money * 0.1)
+    money_lost = int(old_money * 0.20)
     new_money = max(0, old_money - money_lost)
 
-    exp_loss = int(old_experience * 0.25)
-    min_exp = int(Player.LEVELS.get(level, 0))
-    new_experience = max(min_exp, old_experience - exp_loss)
+    exp_loss = int(old_experience * 0.15)
+    new_experience = max(0, old_experience - exp_loss)
     experience_lost = old_experience - new_experience
 
     clear_travel_state(vk_id)

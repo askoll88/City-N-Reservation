@@ -184,14 +184,14 @@ QUEST_POOL = [
 
 STREAK_BONUSES = {
     1: {"multiplier": 1.0,  "title": "Первый день",            "bonus_item": None},
-    2: {"multiplier": 1.2,  "title": "Два дня подряд",         "bonus_item": ("Бинт", 2)},
-    3: {"multiplier": 1.5,  "title": "Три дня подряд",         "bonus_item": ("Аптечка", 1)},
-    5: {"multiplier": 2.0,  "title": "Пять дней подряд",       "bonus_item": ("Антидот", 1)},
+    2: {"multiplier": 1.1,  "title": "Два дня подряд",         "bonus_item": ("Бинт", 2)},
+    3: {"multiplier": 1.2,  "title": "Три дня подряд",         "bonus_item": ("Аптечка", 1)},
+    5: {"multiplier": 1.35, "title": "Пять дней подряд",       "bonus_item": ("Антидот", 1)},
     # Первая неделя: фиксированный "легендарный" подарок новичку (временная заглушка).
-    7: {"multiplier": 2.5,  "title": "Первая неделя!",         "bonus_item": ("Мамины бусы", 1)},
+    7: {"multiplier": 1.5,  "title": "Первая неделя!",         "bonus_item": ("Мамины бусы", 1)},
     # Дальше по стрикам: недельная ротация (одинакова для всех игроков в течение недели).
-    14: {"multiplier": 3.0, "title": "Две недели подряд!",     "bonus_item": "weekly_rotate"},
-    30: {"multiplier": 5.0, "title": "Легенда Зоны (30 дней)", "bonus_item": "weekly_rotate"},
+    14: {"multiplier": 1.75, "title": "Две недели подряд!",    "bonus_item": "weekly_rotate"},
+    30: {"multiplier": 2.0,  "title": "Легенда Зоны (30 дней)","bonus_item": "weekly_rotate"},
 }
 
 # Пулы ротации по порогам стрика.

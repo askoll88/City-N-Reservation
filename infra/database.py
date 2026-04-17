@@ -1133,22 +1133,22 @@ _SHOP_EVENT_POOL = [
         "id": "soldier_artifacts",
         "merchant_id": NPC_MERCHANT_SOLDIER,
         "categories": ("artifacts",),
-        "sell_bonus_pct": 20,
-        "title": "Сегодня военный принимает артефакты дороже (+20%).",
+        "sell_bonus_pct": 10,
+        "title": "Сегодня военный принимает артефакты дороже (+10%).",
     },
     {
         "id": "scientist_meds",
         "merchant_id": NPC_MERCHANT_SCIENTIST,
         "categories": ("meds",),
-        "sell_bonus_pct": 20,
-        "title": "Сегодня учёный скупает медикаменты по повышенной цене (+20%).",
+        "sell_bonus_pct": 10,
+        "title": "Сегодня учёный скупает медикаменты по повышенной цене (+10%).",
     },
     {
         "id": "trader_artifacts",
         "merchant_id": NPC_MERCHANT_TRADER,
         "categories": ("artifacts",),
-        "sell_bonus_pct": 20,
-        "title": "Сегодня барыга берёт артефакты по повышенной цене (+20%).",
+        "sell_bonus_pct": 10,
+        "title": "Сегодня барыга берёт артефакты по повышенной цене (+10%).",
     },
 ]
 

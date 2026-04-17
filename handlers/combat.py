@@ -467,9 +467,9 @@ def _handle_death(player, vk, user_id: int, cause: str = None, killer_name: str 
         random_id=0
     )
 
-    # Штрафы при смерти
-    lost_money = player.money // 2
-    lost_exp = player.experience // 4
+    # Штрафы при смерти (единые с выбросом): -20% деньги, -15% XP
+    lost_money = int(player.money * 0.20)
+    lost_exp = int(player.experience * 0.15)
 
     player.money -= lost_money
     player.experience -= lost_exp

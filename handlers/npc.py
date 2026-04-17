@@ -145,7 +145,7 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
 
             vk.messages.send(
                 user_id=user_id,
-                message=f"{answer}\n\n📦Получено:\n{items_list}\n\n💰 Деньги: 10000 руб.",
+                message=f"{answer}\n\n📦Получено:\n{items_list}",
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )

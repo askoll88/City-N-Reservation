@@ -44,7 +44,7 @@ LIMITED_EVENTS = {
             "artifact_event_mult": 2.00,
             "enemy_event_mult": 0.95,
             "enemy_stat_mult": 1.00,
-            "combat_reward_mult": 1.10,
+            "combat_reward_mult": 1.05,
         },
     },
     "predator_night": {
@@ -65,7 +65,7 @@ LIMITED_EVENTS = {
             "artifact_event_mult": 0.90,
             "enemy_event_mult": 1.70,
             "enemy_stat_mult": 1.25,
-            "combat_reward_mult": 1.90,
+            "combat_reward_mult": 1.35,
         },
     },
     "scavenger_window": {
@@ -86,7 +86,7 @@ LIMITED_EVENTS = {
             "artifact_event_mult": 1.35,
             "enemy_event_mult": 1.10,
             "enemy_stat_mult": 1.05,
-            "combat_reward_mult": 1.35,
+            "combat_reward_mult": 1.20,
         },
     },
 }

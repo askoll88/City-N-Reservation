@@ -28,16 +28,16 @@ DB_POOL_MIN = int(os.getenv('DB_POOL_MIN', '2'))
 DB_POOL_MAX = int(os.getenv('DB_POOL_MAX', '30'))
 
 # === Настройки игры ===
-START_MONEY = 10000
+START_MONEY = 2500
 START_HEALTH = 100
 MAX_HEALTH = 150
 HEAL_COST_PER_HP = 50
 
 # Лечение в больнице
 # 1-е лечение бесплатно, далее: base + (level-1) * multiplier, с потолком cap
-HEAL_BASE_PRICE = 100          # базовая цена за лечение (2-е и далее)
-HEAL_LEVEL_MULTIPLIER = 50     # добавка за каждый уровень игрока
-HEAL_PRICE_CAP = 3000          # максимальная цена лечения
+HEAL_BASE_PRICE = 250          # базовая цена за лечение (2-е и далее)
+HEAL_LEVEL_MULTIPLIER = 120    # добавка за каждый уровень игрока
+HEAL_PRICE_CAP = 25000         # максимальная цена лечения
 
 # Прокачка максимального HP через расходники (мягкий кап для баланса)
 HP_UPGRADE_PER_LEVEL = int(os.getenv('HP_UPGRADE_PER_LEVEL', '3'))   # +3 HP за 1 апгрейд
@@ -136,10 +136,10 @@ SHOP_STOCK_DEFAULT = int(os.getenv('SHOP_STOCK_DEFAULT', '6'))
 SHOP_STOCK_RARE = int(os.getenv('SHOP_STOCK_RARE', '4'))
 SHOP_STOCK_UNIQUE = int(os.getenv('SHOP_STOCK_UNIQUE', '3'))
 SHOP_STOCK_LEGENDARY = int(os.getenv('SHOP_STOCK_LEGENDARY', '2'))
-SHOP_BUY_MULT_FLOOR = float(os.getenv('SHOP_BUY_MULT_FLOOR', '0.70'))
-SHOP_BUY_MULT_CEIL = float(os.getenv('SHOP_BUY_MULT_CEIL', '1.35'))
-SHOP_SELL_MULT_FLOOR = float(os.getenv('SHOP_SELL_MULT_FLOOR', '0.70'))
-SHOP_SELL_MULT_CEIL = float(os.getenv('SHOP_SELL_MULT_CEIL', '1.50'))
+SHOP_BUY_MULT_FLOOR = float(os.getenv('SHOP_BUY_MULT_FLOOR', '0.90'))
+SHOP_BUY_MULT_CEIL = float(os.getenv('SHOP_BUY_MULT_CEIL', '1.20'))
+SHOP_SELL_MULT_FLOOR = float(os.getenv('SHOP_SELL_MULT_FLOOR', '0.35'))
+SHOP_SELL_MULT_CEIL = float(os.getenv('SHOP_SELL_MULT_CEIL', '0.65'))
 
 # === Retry для БД ===
 DB_MAX_RETRIES = 3
