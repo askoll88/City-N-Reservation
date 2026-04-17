@@ -299,8 +299,13 @@ def init_db():
                 expires_at      TIMESTAMP   NOT NULL,
                 completed_at    TIMESTAMP,
                 cancelled_at    TIMESTAMP,
-                expired_at      TIMESTAMP
+                expired_at      TIMESTAMP,
+                expired_notified BOOLEAN    NOT NULL DEFAULT FALSE
             )
+        """)
+        cursor.execute("""
+            ALTER TABLE market_listings
+            ADD COLUMN IF NOT EXISTS expired_notified BOOLEAN NOT NULL DEFAULT FALSE
         """)
 
         # -- market_transactions -------------------------------------------
@@ -345,6 +350,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status)",
             "CREATE INDEX IF NOT EXISTS idx_market_listings_exp    ON market_listings(expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_market_listings_seller ON market_listings(seller_vk_id)",
+            "CREATE INDEX IF NOT EXISTS idx_market_listings_exp_notified ON market_listings(status, expired_notified, expired_at)",
             "CREATE INDEX IF NOT EXISTS idx_market_trx_buyer       ON market_transactions(buyer_vk_id)",
             "CREATE INDEX IF NOT EXISTS idx_market_trx_seller      ON market_transactions(seller_vk_id)",
             "CREATE INDEX IF NOT EXISTS idx_npc_shop_stock_merchant_period ON npc_shop_stock(merchant_id, period_key)",
@@ -1847,7 +1853,7 @@ def _expire_market_listings_tx(cursor, limit: int = 200) -> int:
     listing_ids = [row["id"] for row in expired_rows]
     cursor.execute("""
         UPDATE market_listings
-        SET status = 'expired', expired_at = NOW()
+        SET status = 'expired', expired_at = NOW(), expired_notified = FALSE
         WHERE id = ANY(%s)
     """, (listing_ids,))
     return len(expired_rows)
@@ -1856,6 +1862,34 @@ def _expire_market_listings_tx(cursor, limit: int = 200) -> int:
 def expire_market_listings(limit: int = 200) -> int:
     with db_cursor() as (cursor, _):
         return _expire_market_listings_tx(cursor, limit=limit)
+
+
+def claim_expired_market_notifications(limit: int = 100) -> list[dict]:
+    """
+    Забрать пачку истёкших лотов, по которым ещё не отправлено уведомление,
+    и сразу пометить их как отправленные (без дублей).
+    """
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            SELECT id, seller_vk_id, item_name, quantity, expired_at
+            FROM market_listings
+            WHERE status = 'expired'
+              AND COALESCE(expired_notified, FALSE) = FALSE
+            ORDER BY expired_at ASC NULLS LAST, id ASC
+            LIMIT %s
+            FOR UPDATE SKIP LOCKED
+        """, (limit,))
+        rows = cursor.fetchall() or []
+        if not rows:
+            return []
+
+        listing_ids = [int(r["id"]) for r in rows]
+        cursor.execute("""
+            UPDATE market_listings
+            SET expired_notified = TRUE
+            WHERE id = ANY(%s)
+        """, (listing_ids,))
+        return [dict(r) for r in rows]
 
 
 def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quantity: int = 1) -> dict:
@@ -2228,6 +2262,14 @@ def buy_market_listing(vk_id: int, listing_id: int) -> dict:
 
     return {
         "success": True,
+        "listing_id": listing_id,
+        "seller_vk_id": lot["seller_vk_id"],
+        "buyer_vk_id": vk_id,
+        "item_name": lot["item_name"],
+        "quantity": lot["quantity"],
+        "total_price": total_price,
+        "sale_fee": sale_fee,
+        "seller_payout": seller_payout,
         "message": (
             f"Куплено: {lot['item_name']} x{lot['quantity']} за {total_price} руб.\n"
             f"Комиссия рынка (с продавца): {sale_fee} руб."
@@ -2273,6 +2315,10 @@ def cancel_market_listing(vk_id: int, listing_id: int) -> dict:
 
     return {
         "success": True,
+        "listing_id": listing_id,
+        "seller_vk_id": vk_id,
+        "item_name": lot["item_name"],
+        "quantity": lot["quantity"],
         "message": f"Лот #{listing_id} снят. Предмет возвращён в инвентарь.",
     }
 
@@ -2338,7 +2384,14 @@ def admin_cancel_market_listing(listing_id: int) -> dict:
             WHERE id = %s
         """, (listing_id,))
 
-    return {"success": True, "message": f"Лот #{listing_id} принудительно снят администратором."}
+    return {
+        "success": True,
+        "listing_id": listing_id,
+        "seller_vk_id": lot["seller_vk_id"],
+        "item_name": lot["item_name"],
+        "quantity": lot["quantity"],
+        "message": f"Лот #{listing_id} принудительно снят администратором.",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -3442,7 +3495,7 @@ def get_all_active_players():
     """Получить всех активных игроков (vk_id, location, name, health)"""
     with db_cursor() as (cursor, _):
         cursor.execute("""
-            SELECT vk_id, location, name, health, level
+            SELECT vk_id, location, previous_location, name, health, level
             FROM users
             WHERE is_banned = 0
         """)

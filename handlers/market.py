@@ -50,6 +50,15 @@ SORT_MAP = {
 PER_PAGE = 8  # Лотов на страницу
 
 
+def _notify_user(vk, user_id: int, message: str):
+    """Безопасная отправка уведомления пользователю."""
+    try:
+        vk.messages.send(user_id=user_id, message=message, random_id=0)
+    except Exception:
+        # Уведомления не должны ломать основной сценарий рынка.
+        pass
+
+
 def _resolve_player_item_name(player, item_input: str) -> tuple[str, dict | None]:
     """Найти каноничное имя предмета из инвентаря игрока."""
     name_raw = (item_input or "").strip()
@@ -660,6 +669,21 @@ def handle_market_confirm_purchase(player, vk, user_id, text):
                 keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
             )
+            seller_vk_id = int(result.get("seller_vk_id", 0) or 0)
+            if seller_vk_id > 0:
+                _notify_user(
+                    vk,
+                    seller_vk_id,
+                    (
+                        "💸 СДЕЛКА ПО ЛОТУ\n\n"
+                        f"Лот #{result.get('listing_id')} продан.\n"
+                        f"Покупатель: {result.get('buyer_vk_id')}\n"
+                        f"Предмет: {result.get('item_name')} x{result.get('quantity')}\n"
+                        f"Сумма: {int(result.get('total_price', 0) or 0):,} руб.\n"
+                        f"Комиссия: {int(result.get('sale_fee', 0) or 0):,} руб.\n"
+                        f"Зачислено: {int(result.get('seller_payout', 0) or 0):,} руб."
+                    ),
+                )
         else:
             vk.messages.send(
                 user_id=user_id,
@@ -686,6 +710,17 @@ def handle_market_cancel_listing(player, vk, user_id, text):
         keyboard=create_player_market_keyboard().get_keyboard(),
         random_id=0,
     )
+    if result.get("success"):
+        _notify_user(
+            vk,
+            user_id,
+            (
+                "📭 ЛОТ СНЯТ С РЫНКА\n\n"
+                f"Лот #{result.get('listing_id')} снят.\n"
+                f"Предмет: {result.get('item_name')} x{result.get('quantity')}\n"
+                "Предмет возвращён в инвентарь."
+            ),
+        )
     return True
 
 

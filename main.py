@@ -925,6 +925,49 @@ def main():
     ).start()
     logger.info("Планировщик переходов запущен")
 
+    def _market_scheduler():
+        """Фоновый поток: истечение лотов и рассылка уведомлений об истечении."""
+        import time
+        last_expire_tick = 0.0
+        while True:
+            time.sleep(10)
+            now = time.time()
+            try:
+                # Регулярно закрываем истёкшие лоты даже без активности игроков в рынке.
+                if now - last_expire_tick >= 30:
+                    database.expire_market_listings(limit=300)
+                    last_expire_tick = now
+
+                # Рассылаем уведомления по истёкшим лотам без дублей.
+                notifications = database.claim_expired_market_notifications(limit=120)
+                for n in notifications:
+                    try:
+                        vk.messages.send(
+                            user_id=int(n["seller_vk_id"]),
+                            message=(
+                                "⏰ ЛОТ ИСТЁК\n\n"
+                                f"Лот #{n['id']} истёк по времени.\n"
+                                f"Предмет: {n['item_name']} x{n['quantity']}\n"
+                                "Предмет автоматически возвращён в инвентарь."
+                            ),
+                            random_id=0,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Не удалось отправить уведомление об истечении лота #%s пользователю %s",
+                            n.get("id"), n.get("seller_vk_id"),
+                            exc_info=True,
+                        )
+            except Exception as e:
+                logger.error("Ошибка в market_scheduler: %s", e, exc_info=True)
+
+    threading.Thread(
+        target=_market_scheduler,
+        name="market-scheduler",
+        daemon=True,
+    ).start()
+    logger.info("Планировщик рынка запущен")
+
     processed_events = set()
     MAX_PROCESSED = 1000
     

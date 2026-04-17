@@ -318,6 +318,22 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     m = re.match(r"^админ\s+снять\s+лот\s+(\d+)$", text)
     if m:
         result = database.admin_cancel_market_listing(int(m.group(1)))
+        if result.get("success"):
+            seller_vk_id = int(result.get("seller_vk_id", 0) or 0)
+            if seller_vk_id > 0:
+                try:
+                    vk.messages.send(
+                        user_id=seller_vk_id,
+                        message=(
+                            "⛔ ЛОТ СНЯТ АДМИНИСТРАТОРОМ\n\n"
+                            f"Лот #{result.get('listing_id')} снят с рынка.\n"
+                            f"Предмет: {result.get('item_name')} x{result.get('quantity')}\n"
+                            "Предмет возвращён в инвентарь."
+                        ),
+                        random_id=0,
+                    )
+                except Exception:
+                    pass
         _send(vk, user_id, result["message"]); return True
 
     m = re.match(r"^админ\s+квесты\s+(\d+)$", text)

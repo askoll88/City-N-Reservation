@@ -49,6 +49,26 @@ EMISSION_PREPARED_MAX_RADIATION = int(getattr(config, "EMISSION_PREPARED_MAX_RAD
 EMISSION_IMPACT_HALF_DEATH_RAD = int(getattr(config, "EMISSION_IMPACT_HALF_DEATH_RAD", 250) or 250)
 
 
+def _resolve_emission_location(vk_id: int, location: str | None, row: dict | None = None) -> str:
+    """
+    Нормализовать локацию для логики выброса.
+    Важно: экран 'инвентарь' не является физическим местом.
+    """
+    loc = (location or "").strip() or "город"
+    if loc != "инвентарь":
+        return loc
+
+    prev = None
+    if isinstance(row, dict):
+        prev = row.get("previous_location")
+    if not prev:
+        user = database.get_user_by_vk(vk_id) or {}
+        prev = user.get("previous_location")
+    if prev:
+        return str(prev)
+    return "город"
+
+
 def _log_emission_exception(
     action: str,
     *,
@@ -386,7 +406,7 @@ def _send_warning_to_all_players(vk, emission_id: int):
 
     for player in players:
         vk_id = player["vk_id"]
-        location = player.get("location", "город")
+        location = _resolve_emission_location(vk_id, player.get("location", "город"), row=player)
 
         if location in SAFE_LOCATIONS:
             safe_count += 1
@@ -767,8 +787,8 @@ def _apply_emission_impact(vk, emission_id: int):
     for player_data in players:
         try:
             vk_id = player_data["vk_id"]
-            location = player_data.get("location", "город")
             user_row = database.get_user_by_vk(vk_id) or {}
+            location = _resolve_emission_location(vk_id, player_data.get("location", "город"), row=user_row)
             current_health = int(user_row.get("health") or player_data.get("health") or 100)
 
             if location in SAFE_LOCATIONS:
@@ -976,7 +996,7 @@ def _apply_impact_radiation_accumulation(vk, emission: dict):
     for player_data in players:
         try:
             vk_id = int(player_data["vk_id"])
-            location = player_data.get("location", "город")
+            location = _resolve_emission_location(vk_id, player_data.get("location", "город"), row=player_data)
             if location in SAFE_LOCATIONS:
                 continue
 
@@ -1500,7 +1520,8 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
     if now < impact_time or now > end_time:
         return False
 
-    if location in SAFE_LOCATIONS:
+    effective_location = _resolve_emission_location(user_id, location)
+    if effective_location in SAFE_LOCATIONS:
         return False
 
     # Применяем урон
@@ -1531,7 +1552,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
             user_id=user_id,
             message=(
                 f"☢️ **ВЫБРОС БУШУЕТ!**\n\n"
-                f"Ты в Зоне ({location}) и получаешь урон!\n"
+                f"Ты в Зоне ({effective_location}) и получаешь урон!\n"
                 f"💔 Урон: -{damage} HP\n"
                 f"☣️ Токсичность: -{rad_overload_damage} HP\n"
                 f"❤️ HP: {player.health}\n"
@@ -1547,7 +1568,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
             emission_id=int(emission.get("id") or 0),
             phase=EMISSION_PHASE_IMPACT,
             user_id=user_id,
-            location=location,
+            location=effective_location,
         )
 
     return True
