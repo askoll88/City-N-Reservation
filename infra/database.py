@@ -1781,6 +1781,117 @@ def admin_set_user_field(vk_id: int, field: str, value: int) -> dict:
     }
 
 
+def _resolve_rank_tier_by_level(level: int, rank_tiers: list[dict]) -> int:
+    """
+    Определить тир ранга по уровню.
+    Ожидается, что rank_tiers отсортированы по возрастанию min_level.
+    """
+    if not rank_tiers:
+        return 1
+    safe_level = max(1, int(level or 1))
+    tier = 1
+    for idx, row in enumerate(rank_tiers, start=1):
+        min_level = int(row.get("min_level", 1) or 1)
+        if safe_level >= min_level:
+            tier = idx
+        else:
+            break
+    return max(1, min(len(rank_tiers), tier))
+
+
+def admin_sync_ranks_by_level(rank_tiers: list[dict], overwrite_existing: bool = True) -> dict:
+    """
+    Синхронизировать rank_tier всем игрокам по текущему уровню.
+
+    overwrite_existing=True:
+        Перезаписывать существующий rank_tier по таблице рангов.
+    overwrite_existing=False:
+        Выдавать ранг только тем, у кого флаг rank_tier отсутствует.
+    """
+    if not rank_tiers:
+        return {"success": False, "message": "Список рангов пуст."}
+
+    with db_cursor() as (cursor, _):
+        cursor.execute(
+            """
+            SELECT
+                u.id AS user_id,
+                u.vk_id,
+                u.level,
+                uf.value AS current_rank_tier
+            FROM users u
+            LEFT JOIN user_flags uf
+              ON uf.user_id = u.id
+             AND uf.flag_name = 'rank_tier'
+            ORDER BY u.id
+            """
+        )
+        users = cursor.fetchall()
+
+        if not users:
+            return {
+                "success": True,
+                "total_players": 0,
+                "updated": 0,
+                "new_assignments": 0,
+                "reassigned": 0,
+                "unchanged": 0,
+                "skipped_existing": 0,
+                "overwrite_existing": overwrite_existing,
+            }
+
+        updates: list[tuple[int, int]] = []
+        unchanged = 0
+        skipped_existing = 0
+        new_assignments = 0
+        reassigned = 0
+
+        for row in users:
+            user_id = int(row["user_id"])
+            level = int(row.get("level") or 1)
+            target_tier = _resolve_rank_tier_by_level(level, rank_tiers)
+
+            current_raw = row.get("current_rank_tier")
+            current_tier = int(current_raw) if current_raw is not None else None
+
+            if (not overwrite_existing) and (current_tier is not None):
+                skipped_existing += 1
+                continue
+
+            if current_tier == target_tier:
+                unchanged += 1
+                continue
+
+            if current_tier is None:
+                new_assignments += 1
+            else:
+                reassigned += 1
+
+            updates.append((user_id, target_tier))
+
+        if updates:
+            cursor.executemany(
+                """
+                INSERT INTO user_flags (user_id, flag_name, value)
+                VALUES (%s, 'rank_tier', %s)
+                ON CONFLICT (user_id, flag_name) DO UPDATE
+                SET value = EXCLUDED.value
+                """,
+                updates,
+            )
+
+    return {
+        "success": True,
+        "total_players": len(users),
+        "updated": len(updates),
+        "new_assignments": new_assignments,
+        "reassigned": reassigned,
+        "unchanged": unchanged,
+        "skipped_existing": skipped_existing,
+        "overwrite_existing": overwrite_existing,
+    }
+
+
 # ---------------------------------------------------------------------------
 # P2P Рынок игроков
 # ---------------------------------------------------------------------------
@@ -3105,6 +3216,15 @@ def update_quest_progress(vk_id: int, quest_id: str, increment: int = 1):
         """, (json.dumps(progress, ensure_ascii=False), vk_id))
 
 
+def _calc_daily_xp_scale(level: int, rank_tier: int) -> float:
+    """Мягкий множитель XP дейликов под прогрессию уровня/ранга."""
+    lvl = max(1, int(level or 1))
+    rank = max(1, int(rank_tier or 1))
+    level_mult = 1.0 + min(1.6, (lvl - 1) / 130.0)
+    rank_mult = 1.0 + min(0.7, (rank - 1) * 0.03)
+    return min(2.8, level_mult * rank_mult)
+
+
 def claim_daily_rewards(vk_id: int) -> dict | None:
     """
     Забрать награду за ежедневные задания.
@@ -3123,6 +3243,25 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 return None
             if row["claimed"]:
                 return {"error": "already_claimed"}
+
+            cursor.execute("""
+                SELECT id, level
+                FROM users
+                WHERE vk_id = %s
+                FOR UPDATE
+            """, (vk_id,))
+            user_meta = cursor.fetchone()
+            if not user_meta:
+                return {"error": "user_not_found"}
+
+            user_internal_id = int(user_meta["id"])
+            user_level = int(user_meta.get("level", 1) or 1)
+            cursor.execute(
+                "SELECT value FROM user_flags WHERE user_id = %s AND flag_name = 'rank_tier'",
+                (user_internal_id,),
+            )
+            rank_row = cursor.fetchone()
+            user_rank_tier = int(rank_row["value"]) if rank_row and rank_row.get("value") is not None else 1
 
             quests = row["quest_json"] or []
             progress = row["progress_json"] or {}
@@ -3175,6 +3314,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             mult = float(best_bonus.get("multiplier", 1.0) or 1.0)
             total_xp = int(total_xp * mult)
             total_money = int(total_money * mult)
+            total_xp = int(total_xp * _calc_daily_xp_scale(user_level, user_rank_tier))
 
             # Бонусный предмет выдаём только на пороговых значениях.
             from game.daily_quests import resolve_streak_bonus_item
@@ -3201,10 +3341,9 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 RETURNING id, money, experience
             """, (total_money, total_xp, vk_id))
             user_row = cursor.fetchone()
-            user_internal_id = int(user_row["id"]) if user_row and user_row.get("id") is not None else None
 
             # Бонусные предметы выдаём здесь же, в той же транзакции.
-            if user_internal_id is not None:
+            if user_internal_id:
                 for item_name, qty in bonus_items:
                     if int(qty or 0) <= 0:
                         continue

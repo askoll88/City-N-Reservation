@@ -5,7 +5,6 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from infra import database
 from handlers.keyboards import (
     create_admin_keyboard,
     create_admin_users_keyboard,
@@ -85,6 +84,7 @@ def _show_category(vk, user_id: int, category: str):
                 "• `админ выдать <vk_id> <кол-во> <предмет>`\n"
                 "• `админ удалить <vk_id> <предмет> [кол-во]`\n"
                 "• `админ set <vk_id> <поле> <значение>`\n"
+                "• `админ ранги синхронизировать [мягко]`\n"
                 "  поля: money, level, experience, health, energy,\n"
                 "  radiation, strength, stamina, perception, luck,\n"
                 "  shells, artifact_slots, max_weight\n"
@@ -380,6 +380,31 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     if m:
         result = database.admin_set_user_field(int(m.group(1)), m.group(2), int(m.group(3)))
         _send(vk, user_id, result["message"]); return True
+
+    m = re.match(r"^админ\s+ранги\s+(?:синхронизировать|выдать)(?:\s+(мягко|soft))?$", text)
+    if m:
+        from models.player import Player
+
+        overwrite_existing = m.group(1) is None
+        sync_result = database.admin_sync_ranks_by_level(
+            Player.RANK_TIERS,
+            overwrite_existing=overwrite_existing,
+        )
+        if not sync_result.get("success"):
+            _send(vk, user_id, f"❌ {sync_result.get('message', 'Не удалось синхронизировать ранги.')}"); return True
+
+        mode = "жёсткий (перезапись)" if overwrite_existing else "мягкий (только без ранга)"
+        msg = (
+            "🏅 СИНХРОНИЗАЦИЯ РАНГОВ\n\n"
+            f"Режим: {mode}\n"
+            f"Игроков всего: {sync_result.get('total_players', 0)}\n"
+            f"Обновлено: {sync_result.get('updated', 0)}\n"
+            f"Новых выдач: {sync_result.get('new_assignments', 0)}\n"
+            f"Переназначено: {sync_result.get('reassigned', 0)}\n"
+            f"Без изменений: {sync_result.get('unchanged', 0)}\n"
+            f"Пропущено (уже был ранг): {sync_result.get('skipped_existing', 0)}"
+        )
+        _send(vk, user_id, msg); return True
 
     m = re.match(r"^админ\s+лоты(?:\s+(active|sold|cancelled|expired|all))?$", text)
     if m:

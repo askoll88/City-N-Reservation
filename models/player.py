@@ -1,6 +1,7 @@
 """
 Классы игрока и инвентаря
 """
+from infra import config as game_config
 from infra import database
 import logging
 from models.locations import get_location, Location
@@ -10,6 +11,37 @@ logger = logging.getLogger(__name__)
 
 
 RADIATION_RPH_PER_POINT = 0.2
+MAX_PLAYER_LEVEL = max(20, int(getattr(game_config, "MAX_PLAYER_LEVEL", 297) or 297))
+BASE_LEVEL_THRESHOLDS = {
+    1: 0, 2: 100, 3: 250, 4: 450, 5: 700,
+    6: 1000, 7: 1400, 8: 1900, 9: 2500, 10: 3200,
+    11: 4000, 12: 5000, 13: 6200, 14: 7600, 15: 9200,
+    16: 11000, 17: 13000, 18: 15500, 19: 18500, 20: 22000,
+}
+
+
+def build_level_thresholds(max_level: int = MAX_PLAYER_LEVEL) -> dict[int, int]:
+    """
+    Пороговый опыт для уровней 1..max_level.
+    1-20 оставляем как есть для совместимости баланса, дальше плавно наращиваем.
+    """
+    max_level = max(20, int(max_level or MAX_PLAYER_LEVEL))
+    levels = dict(BASE_LEVEL_THRESHOLDS)
+    last_delta = levels[20] - levels[19]
+    post20_base = max(200, int(getattr(game_config, "XP_POST20_BASE_DELTA", 3600) or 3600))
+    post20_linear = max(0, int(getattr(game_config, "XP_POST20_LINEAR_GROWTH", 180) or 180))
+    post20_quad = max(0, int(getattr(game_config, "XP_POST20_QUADRATIC_GROWTH", 2200) or 2200))
+
+    for lvl in range(21, max_level + 1):
+        # Плавный рост стоимости уровня после 20-го.
+        x = lvl - 20
+        p = x / (max_level - 20)
+        delta = int(post20_base + post20_linear * x + post20_quad * (p ** 2))
+        delta = max(last_delta + 10, delta)
+        levels[lvl] = levels[lvl - 1] + delta
+        last_delta = delta
+
+    return levels
 
 
 def radiation_points_to_rph(radiation: int) -> float:
@@ -177,12 +209,35 @@ class Player:
     """Класс игрока (загружается из БД)"""
 
     # Опыт для каждого уровня
-    LEVELS = {
-        1: 0, 2: 100, 3: 250, 4: 450, 5: 700,
-        6: 1000, 7: 1400, 8: 1900, 9: 2500, 10: 3200,
-        11: 4000, 12: 5000, 13: 6200, 14: 7600, 15: 9200,
-        16: 11000, 17: 13000, 18: 15500, 19: 18500, 20: 22000
-    }
+    MAX_LEVEL = MAX_PLAYER_LEVEL
+    LEVELS = build_level_thresholds(MAX_LEVEL)
+    RANK_FLAG_NAME = "rank_tier"
+    RANK_TIERS = [
+        {"name": "Новичок", "min_level": 1, "max_level": 4},
+        {"name": "Салага", "min_level": 5, "max_level": 8},
+        {"name": "Ходок", "min_level": 9, "max_level": 13},
+        {"name": "Следопыт", "min_level": 14, "max_level": 19},
+        {"name": "Искатель", "min_level": 20, "max_level": 26},
+        {"name": "Разведчик", "min_level": 27, "max_level": 34},
+        {"name": "Полевик", "min_level": 35, "max_level": 43},
+        {"name": "Охотник", "min_level": 44, "max_level": 53},
+        {"name": "Дозорный", "min_level": 54, "max_level": 64},
+        {"name": "Проводник", "min_level": 65, "max_level": 76},
+        {"name": "Сталкер", "min_level": 77, "max_level": 89},
+        {"name": "Бродяга Зоны", "min_level": 90, "max_level": 103},
+        {"name": "Вольный", "min_level": 104, "max_level": 118},
+        {"name": "Бывалый", "min_level": 119, "max_level": 134},
+        {"name": "Ветеран Зоны", "min_level": 135, "max_level": 151},
+        {"name": "Мастер Троп", "min_level": 152, "max_level": 169},
+        {"name": "Серый Волк", "min_level": 170, "max_level": 188},
+        {"name": "Охотник Теней", "min_level": 189, "max_level": 208},
+        {"name": "Легенда Периметра", "min_level": 209, "max_level": 229},
+        {"name": "Штормовой Ходок", "min_level": 230, "max_level": 251},
+        {"name": "Хозяин Троп", "min_level": 252, "max_level": 272},
+        {"name": "Тень Зоны", "min_level": 273, "max_level": 286},
+        {"name": "Живая Легенда", "min_level": 287, "max_level": 294},
+        {"name": "Призрак Выброса", "min_level": 295, "max_level": 297},
+    ]
 
     def __init__(self, user_id: int):
         self.user_id = user_id
@@ -448,6 +503,130 @@ class Player:
         except Exception:
             return {}
 
+    def _get_rank_tier(self) -> int:
+        """Текущий тир ранга (1..N)."""
+        tiers_total = len(self.RANK_TIERS)
+        value = int(database.get_user_flag(self.user_id, self.RANK_FLAG_NAME, 1) or 1)
+        return max(1, min(tiers_total, value))
+
+    def _set_rank_tier(self, tier: int):
+        """Сохранить тир ранга."""
+        tiers_total = len(self.RANK_TIERS)
+        value = max(1, min(tiers_total, int(tier or 1)))
+        database.set_user_flag(self.user_id, self.RANK_FLAG_NAME, value)
+
+    def get_rank_name(self) -> str:
+        """Название текущего ранга игрока."""
+        tier = self._get_rank_tier()
+        return str(self.RANK_TIERS[tier - 1]["name"])
+
+    def _get_rank_requirements(self, target_tier: int) -> dict:
+        """
+        Требования для перехода на target_tier.
+        Переход не "за просто так": кроме уровня нужны ресурсы/прокачка.
+        """
+        target = self.RANK_TIERS[target_tier - 1]
+        req = {
+            "level": int(target.get("min_level", 1)),
+            "money": max(0, int((target_tier - 1) * 700)),
+            "stat_total": 16 + max(0, (target_tier - 1) * 2),
+        }
+        if target_tier >= 3:
+            req["has_class"] = 1
+        if target_tier >= 4:
+            req["hp_upgrade_level"] = min(10, 1 + (target_tier - 4) // 3)
+        if target_tier >= 6:
+            req["shells"] = min(5000, max(0, (target_tier - 5) * 40))
+        if target_tier >= 12:
+            req["artifact_slots"] = 4
+        if target_tier >= 20:
+            req["artifact_slots"] = 5
+        return req
+
+    def _get_rank_metrics(self) -> dict:
+        """Фактические метрики игрока для проверки ранга."""
+        return {
+            "level": int(self.level),
+            "money": int(self.money),
+            "stat_total": int(self.strength + self.stamina + self.perception + self.luck),
+            "has_class": 1 if self.player_class else 0,
+            "hp_upgrade_level": int(self.hp_upgrade_level),
+            "shells": int(database.get_user_shells(self.user_id)),
+            "artifact_slots": int(self.artifact_slots),
+        }
+
+    def _rank_requirements_lines(self, target_tier: int) -> list[str]:
+        """Список строк условий перехода на следующий ранг."""
+        req = self._get_rank_requirements(target_tier)
+        cur = self._get_rank_metrics()
+        rows = []
+
+        labels = {
+            "level": "Уровень",
+            "money": "Деньги",
+            "stat_total": "Сумма характеристик",
+            "has_class": "Класс",
+            "hp_upgrade_level": "Прокачка HP",
+            "shells": "Гильзы",
+            "artifact_slots": "Слоты артефактов",
+        }
+
+        for key, need in req.items():
+            got = cur.get(key, 0)
+            ok = got >= need
+            mark = "✅" if ok else "🔒"
+            if key == "has_class":
+                got_text = "получен" if got else "не получен"
+                need_text = "получить"
+            else:
+                got_text = f"{got}"
+                need_text = f"{need}"
+            rows.append(f"{mark} {labels.get(key, key)}: {got_text} / {need_text}")
+        return rows
+
+    def _can_promote_rank(self, target_tier: int) -> bool:
+        """Проверить, можно ли повысить ранг до target_tier."""
+        req = self._get_rank_requirements(target_tier)
+        cur = self._get_rank_metrics()
+        for key, need in req.items():
+            if int(cur.get(key, 0)) < int(need):
+                return False
+        return True
+
+    def _try_rank_promotions(self) -> list[str]:
+        """Повысить ранг, если выполнены условия. Может поднять несколько тиров."""
+        promoted = []
+        tier = self._get_rank_tier()
+        max_tier = len(self.RANK_TIERS)
+
+        while tier < max_tier:
+            next_tier = tier + 1
+            if not self._can_promote_rank(next_tier):
+                break
+            tier = next_tier
+            self._set_rank_tier(tier)
+            promoted.append(self.RANK_TIERS[tier - 1]["name"])
+
+        return promoted
+
+    def get_rank_progress_block(self) -> str:
+        """Текстовый блок ранга и требований до следующего."""
+        tier = self._get_rank_tier()
+        current = self.RANK_TIERS[tier - 1]
+        header = f"🏅 Ранг: {current['name']} ({current['min_level']}-{current['max_level']} ур.)"
+        if tier >= len(self.RANK_TIERS):
+            return f"{header}\n⭐ Достигнут максимальный ранг."
+
+        next_tier = tier + 1
+        next_rank = self.RANK_TIERS[next_tier - 1]
+        lines = self._rank_requirements_lines(next_tier)
+        return (
+            f"{header}\n"
+            f"➡️ Следующий: {next_rank['name']} (c {next_rank['min_level']} ур.)\n"
+            f"🧭 Повышение ранга: у Куратора рангов в Убежище.\n"
+            + "\n".join(lines)
+        )
+
     @property
     def fire_defense(self) -> int:
         """Защита от огня от артефактов"""
@@ -507,7 +686,7 @@ class Player:
             self.equipped_device = user_data.get('equipped_device')
 
         loc = self.location
-        exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[20])
+        exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
         current_weight = self.inventory.total_weight
         weight_status = "✅ В норме" if current_weight <= self.max_weight else "❌ ПЕРЕГРУЗ"
 
@@ -574,6 +753,7 @@ class Player:
         # ═══════════════════════════════════════════════════
         passive_bonuses = self._get_passive_bonuses()
         class_info = f"🎭 {self.player_class.upper()}" if self.player_class else "🎭 Нет класса"
+        rank_name = self.get_rank_name()
 
         # ═══════════════════════════════════════════════════
         # ХАРАКТЕРИСТИКИ (derived)
@@ -588,7 +768,8 @@ class Player:
         lines = []
         lines.append(ui.title("Статус персонажа"))
         lines.append(f"📍 {loc_name}")
-        lines.append(f"🎯 Ур. {self.level}  |  {class_info}")
+        lines.append(f"🎯 Ур. {self.level}  |  🏅 {rank_name}")
+        lines.append(class_info)
         lines.append("")
 
         # --- Жизненные показатели ---
@@ -605,6 +786,10 @@ class Player:
         lines.append(ui.section("Прогресс"))
         lines.append(f"⭐ {exp_line}")
         lines.append(f"💰 {self.money:,} ₽")
+        lines.append("")
+
+        lines.append(ui.section("Ранг"))
+        lines.append(self.get_rank_progress_block())
         lines.append("")
 
         # --- Снаряжение ---
@@ -682,7 +867,7 @@ class Player:
         if money is not None:
             self.money = max(0, money)
         if level is not None:
-            self.level = max(1, min(20, level))
+            self.level = max(1, min(self.MAX_LEVEL, level))
         if experience is not None:
             self.experience = max(0, experience)
             self._check_level_up()
@@ -750,7 +935,7 @@ class Player:
         # Теряем 25% опыта, но не ниже порога текущего уровня
         exp_loss = int(old_experience * 0.25)
         exp_needed_current = self.LEVELS.get(self.level, 0)
-        exp_needed_next = self.LEVELS.get(self.level + 1, self.LEVELS[20])
+        exp_needed_next = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
 
         # Минимальный опыт для сохранения текущего уровня
         min_exp = exp_needed_current
@@ -799,7 +984,7 @@ class Player:
         # Теряем 25% опыта, но не ниже порога текущего уровня
         exp_loss = int(old_experience * 0.25)
         exp_needed_current = self.LEVELS.get(self.level, 0)
-        exp_needed_next = self.LEVELS.get(self.level + 1, self.LEVELS[20])
+        exp_needed_next = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
 
         # Минимальный опыт для сохранения текущего уровня
         min_exp = exp_needed_current
@@ -835,8 +1020,8 @@ class Player:
 
     def _check_level_up(self) -> str | None:
         """Проверить повышение уровня. Возвращает сообщение о повышении или None"""
-        exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[20])
-        if self.experience >= exp_needed and self.level < 20:
+        exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
+        if self.experience >= exp_needed and self.level < self.MAX_LEVEL:
             old_level = self.level
             self.level += 1
 

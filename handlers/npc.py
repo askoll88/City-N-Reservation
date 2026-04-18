@@ -180,6 +180,15 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
     if dialog_id == "прогнозпрем":
         return _handle_dosimeter_forecast(player, vk, user_id, npc_id, advanced=True)
 
+    if dialog_id == "мойранг":
+        return _handle_rank_status(player, vk, user_id, npc_id)
+
+    if dialog_id == "условия":
+        return _handle_rank_requirements(player, vk, user_id, npc_id)
+
+    if dialog_id == "повысить":
+        return _handle_rank_promotion(player, vk, user_id, npc_id)
+
     return False
 
 
@@ -534,6 +543,99 @@ def _handle_medic_supply(player, vk, user_id: int, npc_id: str):
             "Держи паёк перед выходом.\n\n"
             f"⚡ Энергия: {old_energy} → {new_energy}\n"
             "📦 Выдано: Бинт x1, Антирад x1, Вода x1"
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def _handle_rank_status(player, vk, user_id: int, npc_id: str):
+    """Показать текущий ранг игрока и прогресс до следующего."""
+    tier = int(player._get_rank_tier())
+    total = len(player.RANK_TIERS)
+    rank_name = player.get_rank_name()
+    progress_block = player.get_rank_progress_block()
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🧭Куратор рангов:\n\n"
+            f"Твой текущий ранг: {rank_name} ({tier}/{total}).\n\n"
+            f"{progress_block}"
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def _handle_rank_requirements(player, vk, user_id: int, npc_id: str):
+    """Показать требования для следующего ранга."""
+    tier = int(player._get_rank_tier())
+    total = len(player.RANK_TIERS)
+    current_name = player.get_rank_name()
+
+    if tier >= total:
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🧭Куратор рангов:\n\n"
+                f"Твой ранг: {current_name} ({tier}/{total}).\n"
+                "Это максимальная ступень. Дальше только удерживать планку."
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    next_tier = tier + 1
+    next_rank = player.RANK_TIERS[next_tier - 1]
+    req_lines = player._rank_requirements_lines(next_tier)
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🧭Куратор рангов:\n\n"
+            f"Сейчас: {current_name} ({tier}/{total}).\n"
+            f"Следующий ранг: {next_rank['name']}.\n\n"
+            "Требования к повышению:\n"
+            + "\n".join(req_lines)
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def _handle_rank_promotion(player, vk, user_id: int, npc_id: str):
+    """Попытка повышения ранга у НПС."""
+    promoted = player._try_rank_promotions()
+
+    if promoted:
+        tier = int(player._get_rank_tier())
+        total = len(player.RANK_TIERS)
+        lines = "\n".join(f"• {name}" for name in promoted)
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🧭Куратор рангов:\n\n"
+                "Досье подтверждено. Повышение оформлено:\n"
+                f"{lines}\n\n"
+                f"Текущий статус: {player.get_rank_name()} ({tier}/{total}).\n\n"
+                f"{player.get_rank_progress_block()}"
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🧭Куратор рангов:\n\n"
+            "Пока не могу подтвердить повышение. Закрой условия и приходи снова.\n\n"
+            f"{player.get_rank_progress_block()}"
         ),
         keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
         random_id=0

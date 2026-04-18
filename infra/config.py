@@ -47,6 +47,12 @@ HP_UPGRADE_MAX_LEVEL = int(os.getenv('HP_UPGRADE_MAX_LEVEL', '10'))  # макс�
 RESEARCH_TIME = 30  # секунд
 RESEARCH_BONUS_XP = 50
 
+# Прогрессия уровней
+MAX_PLAYER_LEVEL = int(os.getenv('MAX_PLAYER_LEVEL', '297'))
+XP_POST20_BASE_DELTA = int(os.getenv('XP_POST20_BASE_DELTA', '3600'))
+XP_POST20_LINEAR_GROWTH = int(os.getenv('XP_POST20_LINEAR_GROWTH', '180'))
+XP_POST20_QUADRATIC_GROWTH = int(os.getenv('XP_POST20_QUADRATIC_GROWTH', '2200'))
+
 # === Бой ===
 BASE_CRIT_CHANCE = 5  # % базовый шанс крита
 BASE_DODGE_CHANCE = 10  # % базовое уклонение

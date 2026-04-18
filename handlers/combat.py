@@ -203,6 +203,42 @@ def _clamp(value: int, min_val: int, max_val: int) -> int:
     return max(min_val, min(max_val, value))
 
 
+def _get_player_rank_tier(player) -> int:
+    """Безопасно получить текущий ранг (тир) игрока."""
+    try:
+        getter = getattr(player, "_get_rank_tier", None)
+        if callable(getter):
+            return max(1, int(getter() or 1))
+    except Exception:
+        pass
+    return 1
+
+
+def _scale_xp_reward(base_xp: int, player, source: str = "combat", enemy_level: int | None = None) -> int:
+    """
+    Скейл XP по прогрессии игрока.
+    Цель: не "душить" раннюю игру и не обрушивать темп в мид/эндгейме.
+    """
+    base = max(1, int(base_xp or 1))
+    lvl = max(1, int(getattr(player, "level", 1) or 1))
+    rank_tier = _get_player_rank_tier(player)
+
+    # Базовый рост за уровень и ранг.
+    level_mult = 1.0 + min(2.2, max(0, lvl - 1) / 140.0)
+    rank_mult = 1.0 + min(0.9, max(0, rank_tier - 1) * 0.04)
+
+    # Дополнительный контекстный коэффициент.
+    context_mult = 1.0
+    if source == "combat":
+        e_lvl = max(1, int(enemy_level or lvl))
+        context_mult = 0.9 + min(2.4, e_lvl / 120.0)
+    elif source == "research":
+        context_mult = 1.0 + min(0.8, lvl / 250.0)
+
+    xp = int(base * level_mult * rank_mult * context_mult)
+    return max(base, xp)
+
+
 def _format_mult_delta(mult: float) -> str:
     """Форматирование множителя в вид +N% / -N%."""
     delta_pct = int(round((float(mult) - 1.0) * 100))
@@ -331,11 +367,13 @@ def _get_enemy_by_type_for_location(location_id: str, enemy_type: str):
 def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_elite: bool = True) -> dict:
     """Собрать боевой профиль врага со стабильным скейлингом по уровню игрока."""
     player_level = max(1, int(getattr(player, "level", 1) or 1))
+    rank_tier = _get_player_rank_tier(player)
     zone_level = _get_zone_level(location_id)
 
     # Раньше уровень был зажат до zone+4, из-за чего на хай-левеле враги "застревали" около 20.
     # Новый подход: смесь уровня зоны и игрока + шум, с мягкими ограничениями.
-    desired_level = int(round(zone_level * 0.35 + player_level * 0.75))
+    rank_level_bonus = int(max(0, rank_tier - 1) * 0.45)
+    desired_level = int(round(zone_level * 0.35 + player_level * 0.75)) + rank_level_bonus
     spread = 1 + min(4, player_level // 20)  # 1..5
     enemy_level = desired_level + random.randint(-spread, spread)
     min_enemy_level = max(1, int(player_level * 0.55) - 2)
@@ -345,6 +383,8 @@ def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_el
     # Плавный рост статов без резких скачков.
     hp_mult = 1.0 + 0.035 * max(0, enemy_level - 1)
     dmg_mult = 1.0 + 0.028 * max(0, enemy_level - 1)
+    hp_mult *= 1.0 + min(0.55, max(0, rank_tier - 1) * 0.025)
+    dmg_mult *= 1.0 + min(0.40, max(0, rank_tier - 1) * 0.018)
 
     role_key = random.choices(
         population=list(ENEMY_ROLE_PROFILES.keys()),
@@ -374,6 +414,7 @@ def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_el
     enemy_speed = max(3, int(10 + enemy_level // 5 + role.get("speed_mod", 0)))
 
     reward_mult = 1.0 + max(0.0, (enemy_level - zone_level) * 0.06)
+    reward_mult *= 1.0 + min(0.35, max(0, rank_tier - 1) * 0.015)
     if is_elite:
         reward_mult += 0.25
 
@@ -1514,7 +1555,7 @@ def _handle_intel_find(player, vk, user_id: int):
         return
 
     money_gain = random.randint(90, 240)
-    exp_gain = random.randint(8, 20)
+    exp_gain = _scale_xp_reward(random.randint(8, 20), player, source="research")
     new_money = int(user.get("money", 0)) + money_gain
     new_exp = int(user.get("experience", 0)) + exp_gain
     database.update_user_stats(user_id, money=new_money, experience=new_exp)
@@ -2800,7 +2841,13 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     limited_mods = get_limited_event_modifiers()
     event_reward_mult = max(0.5, float(limited_mods.get("combat_reward_mult", 1.0) or 1.0))
     reward_mult *= event_reward_mult
-    experience = max(5, int(random.randint(10, 30) * reward_mult))
+    base_xp = _scale_xp_reward(
+        random.randint(10, 30),
+        player,
+        source="combat",
+        enemy_level=int(combat.get("enemy_level", 1) or 1),
+    )
+    experience = max(5, int(base_xp * reward_mult))
     money = max(3, int(random.randint(5, 25) * reward_mult))
     shells_drop = max(1, int(round(random.randint(1, 3) * min(2.0, 0.8 + reward_mult * 0.4))))
 
