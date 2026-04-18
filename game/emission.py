@@ -3,6 +3,8 @@
 Глобальное событие, которое происходит 1-2 раза в сутки.
 Предупреждение за 15 минут → урон игрокам в Зоне → бонусы после.
 """
+from __future__ import annotations
+
 import logging
 import math
 import random

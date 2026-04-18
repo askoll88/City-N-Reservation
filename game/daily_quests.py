@@ -5,6 +5,8 @@
 Задания ротируются в полночь (по UTC).
 Игрок получает 3 задания в день. Награда растёт с серией дней (streak).
 """
+from __future__ import annotations
+
 import random
 from datetime import datetime, timezone
 from typing import Optional

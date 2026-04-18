@@ -276,7 +276,12 @@ class Player:
         self.hp_upgrade_level = int(self._data.get('hp_upgrade_level', 0) or 0)
         self.inventory_section = self._data.get('inventory_section')  # Текущий раздел инвентаря
         self.previous_location = self._data.get('previous_location')  # Предыдущая локация для возврата
-        self.player_class = self._data.get('player_class')  # Класс персонажа
+        raw_player_class = self._data.get('player_class')  # Класс персонажа
+        try:
+            from models.classes import normalize_class_id
+            self.player_class = normalize_class_id(raw_player_class)
+        except Exception:
+            self.player_class = raw_player_class
         self.is_admin = self._data.get('is_admin', 0)
         self.is_banned = self._data.get('is_banned', 0)
         self.ban_reason = self._data.get('ban_reason')
@@ -370,22 +375,26 @@ class Player:
     @property
     def effective_strength(self) -> int:
         """Сила с учетом бонусов от артефактов."""
-        return max(1, int(self.strength + self._artifact_bonuses.get('strength', 0)))
+        passive = self._get_passive_bonuses()
+        return max(1, int(self.strength + self._artifact_bonuses.get('strength', 0) + passive.get('strength', 0)))
 
     @property
     def effective_stamina(self) -> int:
         """Выносливость с учетом бонусов от артефактов."""
-        return max(1, int(self.stamina + self._artifact_bonuses.get('stamina', 0)))
+        passive = self._get_passive_bonuses()
+        return max(1, int(self.stamina + self._artifact_bonuses.get('stamina', 0) + passive.get('stamina', 0)))
 
     @property
     def effective_perception(self) -> int:
         """Восприятие с учетом бонусов от артефактов."""
-        return max(1, int(self.perception + self._artifact_bonuses.get('perception', 0)))
+        passive = self._get_passive_bonuses()
+        return max(1, int(self.perception + self._artifact_bonuses.get('perception', 0) + passive.get('perception', 0)))
 
     @property
     def effective_luck(self) -> int:
         """Удача с учетом бонусов от артефактов."""
-        return max(1, int(self.luck + self._artifact_bonuses.get('luck', 0)))
+        passive = self._get_passive_bonuses()
+        return max(1, int(self.luck + self._artifact_bonuses.get('luck', 0) + passive.get('luck', 0)))
 
     @property
     def dodge_chance(self) -> int:
@@ -442,10 +451,8 @@ class Player:
     @property
     def melee_damage(self) -> int:
         """Урон в ближнем бою"""
-        passive = self._get_passive_bonuses()
-        strength_bonus = passive.get('strength', 0)
         artifact_damage_boost = int(self._artifact_bonuses.get('damage_boost', 0) or 0)
-        base_damage = 5 + self.effective_strength + strength_bonus
+        base_damage = 5 + self.effective_strength
         if artifact_damage_boost > 0:
             base_damage = int(base_damage * (1 + artifact_damage_boost / 100))
         return base_damage
@@ -492,14 +499,8 @@ class Player:
     def _get_passive_bonuses(self) -> dict:
         """Получить бонусы от пассивных навыков класса"""
         try:
-            from models.classes import get_passive_bonuses, get_class_by_weapon
-            # Приоритет: класс по текущему оружию (фактическая роль в бою),
-            # fallback: сохранённый класс персонажа.
-            class_id = None
-            if self.equipped_weapon:
-                class_id = get_class_by_weapon(self.equipped_weapon)
-            if not class_id:
-                class_id = self.player_class
+            from models.classes import get_passive_bonuses
+            class_id = self.player_class
             if not class_id:
                 return {}
             return get_passive_bonuses(class_id, self.level)
@@ -529,12 +530,13 @@ class Player:
         Переход не "за просто так": кроме уровня нужны ресурсы/прокачка.
         """
         target = self.RANK_TIERS[target_tier - 1]
+        current = self.RANK_TIERS[max(0, target_tier - 2)]
         req = {
-            "level": int(target.get("min_level", 1)),
+            "level": int(current.get("max_level", target.get("min_level", 1)) or target.get("min_level", 1)),
             "money": max(0, int((target_tier - 1) * 700)),
             "stat_total": 16 + max(0, (target_tier - 1) * 2),
         }
-        if target_tier >= 3:
+        if target_tier >= 4:
             req["has_class"] = 1
         if target_tier >= 4:
             req["hp_upgrade_level"] = min(10, 1 + (target_tier - 4) // 3)
@@ -622,7 +624,7 @@ class Player:
 
         next_tier = tier + 1
         next_rank = self.RANK_TIERS[next_tier - 1]
-        return f"{header}\n➡️ Следующий: {next_rank['name']} (c {next_rank['min_level']} ур.)"
+        return f"{header}\n➡️ Следующий: {next_rank['name']} ({next_rank['min_level']}-{next_rank['max_level']} ур. после повышения)"
 
     def _is_rank_xp_locked(self) -> bool:
         """
@@ -857,6 +859,14 @@ class Player:
                 bonus_parts.append(f"защита +{passive_bonuses['defense']}")
             if passive_bonuses.get('strength'):
                 bonus_parts.append(f"сила +{passive_bonuses['strength']}")
+            if passive_bonuses.get('stamina'):
+                bonus_parts.append(f"выносливость +{passive_bonuses['stamina']}")
+            if passive_bonuses.get('perception'):
+                bonus_parts.append(f"восприятие +{passive_bonuses['perception']}")
+            if passive_bonuses.get('luck'):
+                bonus_parts.append(f"удача +{passive_bonuses['luck']}")
+            if passive_bonuses.get('rare_find_chance'):
+                bonus_parts.append(f"редкое +{passive_bonuses['rare_find_chance']}%")
             if passive_bonuses.get('crit_damage'):
                 bonus_parts.append(f"крит.урон +{passive_bonuses['crit_damage']}%")
             if bonus_parts:

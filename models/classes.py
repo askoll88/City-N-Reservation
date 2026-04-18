@@ -11,144 +11,164 @@ from typing import Optional
 _classes_cache = None
 
 _CLASS_ID_ALIASES = {
-    "пулеметчик": "пулемётчик",
-    "shotgun": "дробовик",
-    "sniper": "снайпер",
-    "assault": "автоматчик",
-    "rifleman": "автоматчик",
-    "pistol": "пистолетчик",
-    "mg": "пулемётчик",
-    "fighter": "боец",
-    "melee": "боец",
+    "пистолетчик": "следопыт",
+    "снайпер": "следопыт",
+    "автоматчик": "штурмовик",
+    "пулемётчик": "штурмовик",
+    "пулеметчик": "штурмовик",
+    "дробовик": "штурмовик",
+    "боец": "охотник",
+    "медик": "санитар",
+    "полевой медик": "санитар",
+    "сталкер": "следопыт",
+    "разведчик": "следопыт",
+    "sniper": "следопыт",
+    "scout": "следопыт",
+    "assault": "штурмовик",
+    "rifleman": "штурмовик",
+    "stormtrooper": "штурмовик",
+    "fighter": "охотник",
+    "hunter": "охотник",
+    "medic": "санитар",
+    "tech": "техник",
+    "technician": "техник",
+    "anomaly": "аномалист",
+    "anomalist": "аномалист",
 }
 
 
 # Fallback-набор классов, если БД не содержит таблиц/функций классов.
 _DEFAULT_CLASSES = {
-    "пистолетчик": {
-        "class_id": "пистолетчик",
-        "name": "🔫 Пистолетчик",
-        "description": "Быстрый и точный боец на коротких дистанциях.",
-        "weapon_type": "pistol",
-        "weapon_keywords": ["пм", "глок", "гш", "пистолет", "glock", "beretta", "pistol", "тт", "удав", "п-99", "п-96", "с-40п", "гроз-35"],
+    "следопыт": {
+        "class_id": "следопыт",
+        "name": "🧭 Следопыт",
+        "description": "Разведчик маршрутов. Выживает за счёт наблюдательности, тихого движения и точного первого решения.",
+        "weapon_type": "any",
+        "weapon_keywords": [],
         "required_weapons": [],
         "active_skills": [
             {
-                "name": "Точный выстрел",
-                "description": "Следующая атака наносит +50% урона.",
+                "name": "Слабое место",
+                "description": "Следующая атака наносит +50% урона: следопыт выжидает момент и бьёт в уязвимость.",
                 "energy_cost": 20,
                 "cooldown": 3,
                 "effect": {"damage_boost": 1.5},
             }
         ],
         "passive_skills": [
-            {"name": "Быстрые руки", "required_level": 10, "description": "+5% к уклонению", "dodge": 5},
-            {"name": "Холодная голова", "required_level": 20, "description": "+5% к шансу крита", "crit_chance": 5},
+            {"name": "Тихий шаг", "required_level": 10, "description": "+6% к уклонению", "dodge": 6},
+            {"name": "Глазомер", "required_level": 20, "description": "+6% к шансу крита", "crit_chance": 6},
+            {"name": "Маршрутная память", "required_level": 35, "description": "+6% к редким находкам", "rare_find_chance": 6},
         ],
     },
-    "автоматчик": {
-        "class_id": "автоматчик",
-        "name": "⚔️ Автоматчик",
-        "description": "Универсальный штурмовик с упором в стабильный урон.",
-        "weapon_type": "assault_rifle",
-        "weapon_keywords": ["ак", "м4", "м16", "автомат", "scar", "ar-", "rifle", "акс", "акс-74у", "ак-101", "ак-105", "ак-12", "м4а1", "кастом"],
+    "штурмовик": {
+        "class_id": "штурмовик",
+        "name": "🛡️ Штурмовик",
+        "description": "Линия давления. Держит удар, прикрывает отход и вытаскивает бой из плохой позиции.",
+        "weapon_type": "any",
+        "weapon_keywords": [],
         "required_weapons": [],
         "active_skills": [
             {
-                "name": "Бронирование",
-                "description": "Временное усиление защиты в бою.",
+                "name": "Заслон",
+                "description": "Даёт +14 защиты до ближайшей атаки врага.",
                 "energy_cost": 18,
                 "cooldown": 4,
-                "effect": {"temp_defense": 10},
+                "effect": {"temp_defense": 14},
             }
         ],
         "passive_skills": [
-            {"name": "Штурмовой напор", "required_level": 10, "description": "+8% урона оружием", "weapon_damage": 8},
-            {"name": "Полевая выучка", "required_level": 20, "description": "+4 к защите", "defense": 4},
+            {"name": "Упор", "required_level": 10, "description": "+4 к защите", "defense": 4},
+            {"name": "Темп атаки", "required_level": 20, "description": "+7% урона оружием", "weapon_damage": 7},
+            {"name": "Плотная стойка", "required_level": 35, "description": "+5 к защите", "defense": 5},
         ],
     },
-    "снайпер": {
-        "class_id": "снайпер",
-        "name": "🎯 Снайпер",
-        "description": "Максимум урона за выстрел и повышенный крит.",
-        "weapon_type": "sniper",
-        "weapon_keywords": ["свд", "винтовк", "снайпер", "barrett", "awp", "sniper", "винторез", "св-98", "т-5000", "осв-96", "мосина", "вск-100", "лось-7"],
+    "санитар": {
+        "class_id": "санитар",
+        "name": "🩺 Санитар",
+        "description": "Полевой спасатель. Не самый громкий боец, зато чаще других доживает до эвакуации.",
+        "weapon_type": "any",
+        "weapon_keywords": [],
         "required_weapons": [],
         "active_skills": [
             {
-                "name": "Точный выстрел",
-                "description": "Следующая атака наносит +50% урона.",
-                "energy_cost": 22,
-                "cooldown": 3,
-                "effect": {"damage_boost": 1.5},
-            }
-        ],
-        "passive_skills": [
-            {"name": "Смертельная меткость", "required_level": 10, "description": "+10% шанса крита", "crit_chance": 10},
-            {"name": "Выверенный выстрел", "required_level": 20, "description": "+15% к крит-урону", "crit_damage": 15},
-        ],
-    },
-    "пулемётчик": {
-        "class_id": "пулемётчик",
-        "name": "💥 Пулемётчик",
-        "description": "Тяжелый боец с высоким давлением огнем.",
-        "weapon_type": "machine_gun",
-        "weapon_keywords": ["пулем", "рпк", "м249", "pkm", "minigun", "пкм", "печенег", "м240", "корд", "рпк-16", "рпк-74"],
-        "required_weapons": [],
-        "active_skills": [
-            {
-                "name": "Заградительный огонь",
-                "description": "Снижает входящий урон на несколько ходов.",
-                "energy_cost": 25,
+                "name": "Полевой шов",
+                "description": "Срочно восстанавливает часть HP прямо в бою.",
+                "energy_cost": 24,
                 "cooldown": 5,
-                "effect": {"aoe_damage_reduction": 0.15},
+                "effect": {"self_heal": 45},
             }
         ],
         "passive_skills": [
-            {"name": "Тяжелый калибр", "required_level": 10, "description": "+10% урона оружием", "weapon_damage": 10},
-            {"name": "Боевая устойчивость", "required_level": 20, "description": "+6 к защите", "defense": 6},
+            {"name": "Перевязка на ходу", "required_level": 10, "description": "+3 к защите", "defense": 3},
+            {"name": "Медицинская сумка", "required_level": 20, "description": "+8 кг переносимого веса", "max_weight": 8},
+            {"name": "Живучесть", "required_level": 35, "description": "+2 к выносливости", "stamina": 2},
         ],
     },
-    "дробовик": {
-        "class_id": "дробовик",
-        "name": "🏹 Дробовик",
-        "description": "Крайне опасен на ближней дистанции.",
-        "weapon_type": "shotgun",
-        "weapon_keywords": ["дробов", "shotgun", "remington", "saiga", "тоз", "toz", "вепрь", "бекас", "иж-27", "мр-153", "сайга-12", "сайга-410", "кострома"],
+    "техник": {
+        "class_id": "техник",
+        "name": "🔧 Техник",
+        "description": "Специалист по снаряжению. Чинит, усиливает, тащит лишнее и превращает хлам в преимущество.",
+        "weapon_type": "any",
+        "weapon_keywords": [],
         "required_weapons": [],
         "active_skills": [
             {
-                "name": "Точный выстрел",
-                "description": "Следующая атака наносит +50% урона.",
+                "name": "Полевая доработка",
+                "description": "Следующая атака наносит больше урона за счёт быстрой настройки оружия и хвата.",
+                "energy_cost": 19,
+                "cooldown": 5,
+                "effect": {"damage_boost": 1.35},
+            }
+        ],
+        "passive_skills": [
+            {"name": "Разгрузка", "required_level": 10, "description": "+10 кг переносимого веса", "max_weight": 10},
+            {"name": "Настройка механизмов", "required_level": 20, "description": "+5% урона оружием", "weapon_damage": 5},
+            {"name": "Усиленные пластины", "required_level": 35, "description": "+4 к защите", "defense": 4},
+        ],
+    },
+    "аномалист": {
+        "class_id": "аномалист",
+        "name": "☢️ Аномалист",
+        "description": "Ходок по искажённым местам. Читает поведение Зоны, датчики и странные тени у края зрения.",
+        "weapon_type": "any",
+        "weapon_keywords": [],
+        "required_weapons": [],
+        "active_skills": [
+            {
+                "name": "Срыв контура",
+                "description": "Ослабляет ближайшую атаку врага, сбивая его темп аномальным импульсом.",
+                "energy_cost": 21,
+                "cooldown": 4,
+                "effect": {"enemy_damage_reduction": 0.40},
+            }
+        ],
+        "passive_skills": [
+            {"name": "Чутьё искажений", "required_level": 10, "description": "+5% к редким находкам", "rare_find_chance": 5},
+            {"name": "Холодный расчёт", "required_level": 20, "description": "+4% к уклонению", "dodge": 4},
+            {"name": "Резонанс", "required_level": 35, "description": "+6% к критическому урону", "crit_damage": 6},
+        ],
+    },
+    "охотник": {
+        "class_id": "охотник",
+        "name": "🐾 Охотник",
+        "description": "Специалист по живым угрозам Зоны. Не гонится за честным боем, он читает повадки и добивает быстро.",
+        "weapon_type": "any",
+        "weapon_keywords": [],
+        "required_weapons": [],
+        "active_skills": [
+            {
+                "name": "Ложный след",
+                "description": "Гарантированно срывает следующую атаку врага.",
                 "energy_cost": 18,
-                "cooldown": 3,
-                "effect": {"damage_boost": 1.5},
-            }
-        ],
-        "passive_skills": [
-            {"name": "Картечный залп", "required_level": 10, "description": "+8% урона оружием", "weapon_damage": 8},
-            {"name": "Мясник", "required_level": 20, "description": "+8% шанса крита", "crit_chance": 8},
-        ],
-    },
-    "боец": {
-        "class_id": "боец",
-        "name": "🔪 Боец",
-        "description": "Мастер ближнего боя и выживаемости.",
-        "weapon_type": "melee",
-        "weapon_keywords": ["нож", "мачете", "топор", "финка", "knife", "machete", "dagger", "bayonet", "кинжал", "ятаган", "штык"],
-        "required_weapons": [],
-        "active_skills": [
-            {
-                "name": "Уклонение",
-                "description": "Следующая вражеская атака с высокой вероятностью промахнется.",
-                "energy_cost": 16,
                 "cooldown": 4,
                 "effect": {"perfect_dodge": 1},
             }
         ],
         "passive_skills": [
-            {"name": "Реакция", "required_level": 10, "description": "+10% уклонения", "dodge": 10},
-            {"name": "Стальная воля", "required_level": 20, "description": "+6 к защите", "defense": 6},
+            {"name": "Звериная реакция", "required_level": 10, "description": "+5% к уклонению", "dodge": 5},
+            {"name": "Добивание", "required_level": 20, "description": "+7% к шансу крита", "crit_chance": 7},
+            {"name": "Разделка добычи", "required_level": 35, "description": "+6% урона оружием", "weapon_damage": 6},
         ],
     },
 }
@@ -196,8 +216,20 @@ def _load_classes_from_db():
             return _classes_cache
 
         classes = database.get_all_classes_from_db() or []
+        legacy_class_ids = {
+            "пистолетчик", "автоматчик", "снайпер", "пулемётчик", "пулеметчик", "дробовик", "боец",
+        }
+        raw_db_class_ids = {str(class_data.get('class_id', '')).strip().lower() for class_data in classes}
+        # Старые таблицы классов были привязаны к типам оружия. Если в БД лежит именно
+        # такой набор, используем новый кодовый набор, чтобы классы стали ролью игрока.
+        if raw_db_class_ids and raw_db_class_ids.issubset(legacy_class_ids):
+            _classes_cache = _load_default_classes()
+            return _classes_cache
+
         for class_data in classes:
-            class_id = class_data['class_id']
+            class_id = normalize_class_id(class_data['class_id'])
+            if not class_id:
+                continue
 
             # Загружаем активные навыки
             active_skills = database.get_class_active_skills(class_id) or []
@@ -323,53 +355,13 @@ def get_all_classes() -> dict:
 
 
 def get_class_by_weapon(weapon_name: str) -> Optional[str]:
-    """Определить класс по оружию"""
-    if not weapon_name:
-        return None
-
-    classes = _get_classes_dict()
-    weapon_lower = weapon_name.lower().strip()
-
-    # 1) точное совпадение с белым списком оружия
-    for class_id, data in classes.items():
-        required_weapons = data.get("required_weapons", [])
-        if weapon_name in required_weapons:
-            return class_id
-
-    # 2) эвристика по ключевым словам (fallback)
-    for class_id, data in classes.items():
-        keywords = data.get("weapon_keywords", [])
-        if any(k.lower() in weapon_lower for k in keywords):
-            return class_id
-
-    # 3) эвристика по типу класса (если keywords не заданы)
-    if any(k in weapon_lower for k in ("нож", "мачете", "knife", "machete", "dagger", "bayonet", "кинжал", "ятаган", "штык")):
-        return "боец"
-    if any(k in weapon_lower for k in ("дробов", "shotgun", "saiga", "toz", "вепрь", "бекас", "иж-27", "мр-153", "сайга")):
-        return "дробовик"
-    if any(k in weapon_lower for k in ("снайпер", "свд", "sniper", "awp", "винтовк", "винторез", "св-98", "т-5000", "осв-96", "мосина", "вск-100", "лось-7")):
-        return "снайпер"
-    if any(k in weapon_lower for k in ("пулем", "pkm", "m249", "minigun", "рпк", "пкм", "печенег", "м240", "корд")):
-        return "пулемётчик"
-    if any(k in weapon_lower for k in ("пистолет", "пм", "глок", "pistol", "glock", "beretta", "тт", "удав", "п-99", "п-96", "с-40п", "гроз-35")):
-        return "пистолетчик"
-    if any(k in weapon_lower for k in ("автомат", "ак", "м4", "m4", "ar-", "scar", "rifle", "акс", "ак-101", "ак-105", "ак-12", "м4а1")):
-        return "автоматчик"
-
+    """Классы больше не определяются оружием: оружие можно менять свободно."""
     return None
 
 
 def get_available_classes(equipped_weapon: str = None) -> list[str]:
-    """Получить доступные классы (те, которые можно использовать с текущим оружием)"""
-    if not equipped_weapon:
-        return []
-    
-    classes = _get_classes_dict()
-    available = []
-    for class_id, data in classes.items():
-        if equipped_weapon in data.get("required_weapons", []) or get_class_by_weapon(equipped_weapon) == class_id:
-            available.append(class_id)
-    return available
+    """Получить доступные классы. Все специализации работают с любым оружием."""
+    return list(_get_classes_dict().keys())
 
 
 def format_class_info(class_id: str, player_level: int = None) -> str:
@@ -381,8 +373,11 @@ def format_class_info(class_id: str, player_level: int = None) -> str:
     msg = f"{player_class.name}\n"
     msg += f"{player_class.description}\n\n"
     
-    msg += "📦Требуемое оружие: "
-    msg += ", ".join(player_class.required_weapons) + "\n\n"
+    if player_class.required_weapons:
+        msg += "📦Требуемое оружие: "
+        msg += ", ".join(player_class.required_weapons) + "\n\n"
+    else:
+        msg += "📦Оружие: любое экипированное\n\n"
     
     msg += "⚡Активные навыки:\n"
     for skill in player_class.active_skills:
@@ -452,7 +447,7 @@ def format_all_classes() -> str:
     msg = "🎭Доступные классы:\n\n"
     
     for class_id, data in classes.items():
-        weapons = ", ".join(data.get("required_weapons", []))
+        weapons = ", ".join(data.get("required_weapons", [])) or "любое"
         active_count = len(data.get("active_skills", []))
         passive_count = len(data.get("passive_skills", []))
         

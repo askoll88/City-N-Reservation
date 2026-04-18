@@ -1,6 +1,8 @@
 """
 VK S.T.A.L.K.E.R. Бот - Главный файл
 """
+from __future__ import annotations
+
 import logging
 import os
 import queue

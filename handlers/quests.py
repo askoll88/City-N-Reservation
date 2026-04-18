@@ -1,6 +1,8 @@
 """
 Обработчики ежедневных заданий
 """
+from __future__ import annotations
+
 from infra import database
 from game.daily_quests import format_daily_quests_header
 from handlers.keyboards import create_daily_quests_keyboard

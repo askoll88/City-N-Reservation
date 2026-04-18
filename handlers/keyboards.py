@@ -13,6 +13,8 @@
 5. Максимум 2 кнопки в ряду, максимум 4 ряда
 6. Текст кнопок БЕЗ эмодзи — должен совпадать с текстовыми хендлерами
 """
+from __future__ import annotations
+
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 from game.constants import RESEARCH_LOCATIONS
@@ -112,6 +114,7 @@ def create_location_keyboard(location_id: str, player_level: int = None):
     # --- Больница ---
     elif location_id == "больница":
         keyboard.add_button("Лечиться", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button("Поговорить", color=VkKeyboardColor.PRIMARY)
         keyboard.add_line()
         keyboard.add_button("В город", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
@@ -443,12 +446,18 @@ def create_npc_dialog_keyboard(npc_id: str):
         return create_location_keyboard("кпп")
 
     menu = npc.get_menu()
+    row_buttons = 0
     for dialog_id in menu:
         question = npc.get_question_text(dialog_id)
         if question:
             keyboard.add_button(question, color=VkKeyboardColor.SECONDARY)
-            keyboard.add_line()
+            row_buttons += 1
+            if row_buttons >= 2:
+                keyboard.add_line()
+                row_buttons = 0
 
+    if row_buttons:
+        keyboard.add_line()
     keyboard.add_button("К выбору NPC", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 

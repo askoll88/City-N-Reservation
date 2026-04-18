@@ -1,6 +1,8 @@
 """
 Обработчики боя и исследования
 """
+from __future__ import annotations
+
 import random
 import time
 import threading
@@ -1948,14 +1950,12 @@ def _spawn_item(player, vk, user_id: int):
 def create_combat_keyboard(player=None, user_id=None):
     """Клавиатура боя"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-    from models.classes import get_class_by_weapon
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
     keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
-    # Кнопка навыков - показываем только если есть класс
-    class_from_weapon = get_class_by_weapon(player.equipped_weapon) if player and player.equipped_weapon else None
-    if player and (player.player_class or class_from_weapon):
+    # Кнопка навыков - показываем только если есть выбранная специализация.
+    if player and player.player_class:
         keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
         keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
     else:
@@ -1966,16 +1966,11 @@ def create_combat_keyboard(player=None, user_id=None):
 def create_skills_keyboard(player, user_id: int = None):
     """Клавиатура навыков в бою"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-    from models.classes import get_class, get_class_by_weapon
+    from models.classes import get_class
 
     keyboard = VkKeyboard(one_time=False)
 
-    # Определяем текущий класс по оружию
-    current_weapon = player.equipped_weapon
-    class_id = get_class_by_weapon(current_weapon) if current_weapon else None
-    if not class_id:
-        class_id = player.player_class
-
+    class_id = player.player_class
     if not class_id:
         return None
 
@@ -2031,13 +2026,9 @@ def create_skills_keyboard(player, user_id: int = None):
 
 def show_skills_in_combat(player, vk, user_id):
     """Показать навыки в бою"""
-    from models.classes import get_class, get_class_by_weapon
+    from models.classes import get_class
 
-    current_weapon = player.equipped_weapon
-    class_id = get_class_by_weapon(current_weapon) if current_weapon else None
-    if not class_id:
-        class_id = player.player_class
-
+    class_id = player.player_class
     if not class_id:
         vk.messages.send(
             user_id=user_id,
@@ -2102,7 +2093,7 @@ def show_skills_in_combat(player, vk, user_id):
 
 def use_skill(player, vk, user_id: int, skill_name: str):
     """Использовать навык в бою"""
-    from models.classes import get_class, get_class_by_weapon
+    from models.classes import get_class
     from infra import database
 
     combat = _combat_state.get(user_id)
@@ -2114,11 +2105,7 @@ def use_skill(player, vk, user_id: int, skill_name: str):
         )
         return
 
-    current_weapon = player.equipped_weapon
-    class_id = get_class_by_weapon(current_weapon) if current_weapon else None
-    if not class_id:
-        class_id = player.player_class
-
+    class_id = player.player_class
     if not class_id:
         vk.messages.send(
             user_id=user_id,
@@ -2133,8 +2120,10 @@ def use_skill(player, vk, user_id: int, skill_name: str):
 
     # Ищем навык
     skill = None
+    requested_skill = skill_name.lower().strip()
     for s in player_class.active_skills:
-        if skill_name.lower() in s["name"].lower():
+        known_skill = s["name"].lower()
+        if requested_skill in known_skill or known_skill in requested_skill:
             skill = s
             break
 
@@ -2180,7 +2169,7 @@ def use_skill(player, vk, user_id: int, skill_name: str):
     result_msg = _apply_skill_effect(player, vk, user_id, skill, combat, effect)
 
     # === Проверяем, нанесен ли урон (мгновенные эффекты) или требуется следующий ход ===
-    instant_damage_effects = ["double_shot", "burst_count", "damage_mult", "ignore_defense"]
+    instant_damage_effects = ["double_shot", "burst_count", "damage_mult", "ignore_defense", "self_heal"]
 
     if any(eff in effect for eff in instant_damage_effects):
         # Мгновенный урон - обрабатываем ответ врага
@@ -2292,8 +2281,6 @@ def use_skill(player, vk, user_id: int, skill_name: str):
 
 def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, effect: dict):
     """Применить эффект навыка"""
-    from models.classes import get_class, get_class_by_weapon
-
     skill_name = skill["name"]
     message = ""
 
@@ -2324,6 +2311,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         if user_id not in _active_skill_effects:
             _active_skill_effects[user_id] = {}
         _active_skill_effects[user_id]["damage_boost"] = 1  # 1 ход
+        _active_skill_effects[user_id]["damage_boost_mult"] = mult
 
         message = f"🎯{skill_name}\n\n"
         message += f"Прицел взят! Следующая атака нанесет {int((mult-1)*100)}% бонусного урона.\n\n"
@@ -2449,6 +2437,20 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         message = f"💨{skill_name}\n\n"
         message += "Ты готов уклониться от следующей атаки!\n\n"
 
+    # === Полевое лечение ===
+    elif "self_heal" in effect:
+        heal_value = max(1, int(effect.get("self_heal", 40) or 40))
+        old_health = int(getattr(player, "health", 0) or 0)
+        max_health = int(getattr(player, "max_health", max(old_health, 1)) or max(old_health, 1))
+        player.health = min(max_health, old_health + heal_value)
+        restored = player.health - old_health
+
+        message = f"🩺{skill_name}\n\n"
+        if restored > 0:
+            message += f"Раны быстро стянуты полевой перевязкой: HP {old_health} → {player.health}/{max_health}.\n\n"
+        else:
+            message += "Перевязка готова, но лечить сейчас нечего.\n\n"
+
     # === Заградительный огонь ===
     elif "aoe_damage_reduction" in effect:
         reduction = effect.get("aoe_damage_reduction", 0.15)
@@ -2483,6 +2485,8 @@ def _decrease_cooldowns(user_id: int):
                 _active_skill_effects[user_id][effect_name] -= 1
                 if _active_skill_effects[user_id][effect_name] <= 0:
                     del _active_skill_effects[user_id][effect_name]
+                    if effect_name == "damage_boost":
+                        _active_skill_effects[user_id].pop("damage_boost_mult", None)
 
 
 def get_active_effects(user_id: int) -> dict:
@@ -2571,9 +2575,11 @@ def handle_combat_attack(player, vk, user_id: int):
 
     # Damage boost (Точный выстрел)
     if "damage_boost" in active_effects:
-        total_damage = int(total_damage * 1.5)  # +50%
-        skill_message += "🎯 Точный выстрел! +50% урона!\n"
+        boost_mult = float(active_effects.get("damage_boost_mult", 1.5) or 1.5)
+        total_damage = int(total_damage * boost_mult)
+        skill_message += f"🎯 Прицельный приём! +{int((boost_mult - 1) * 100)}% урона!\n"
         del _active_skill_effects[user_id]["damage_boost"]
+        _active_skill_effects[user_id].pop("damage_boost_mult", None)
 
     is_crit = random.randint(1, 100) <= player.crit_chance
     if is_crit:

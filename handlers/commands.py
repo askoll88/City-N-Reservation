@@ -225,9 +225,13 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
             return True
 
     # Использование навыка по имени
-    skill_keywords = ['двойной выстрел', 'точный выстрел', 'очередь', 'подавление', 
-                      'прицельный выстрел', 'незримый', 'шквал огня', 'бронирование', 
-                      'клинок в сердце', 'уклонение', 'заградительный огонь']
+    skill_keywords = [
+        'двойной выстрел', 'точный выстрел', 'очередь', 'подавление',
+        'прицельный выстрел', 'незримый', 'шквал огня', 'бронирование',
+        'клинок в сердце', 'уклонение', 'заградительный огонь',
+        'слабое место', 'заслон', 'полевой шов', 'полевая доработка',
+        'срыв контура', 'ложный след',
+    ]
     if any(skill_name in text for skill_name in skill_keywords):
         use_skill(player, vk, user_id, original_text)
         return True
@@ -468,7 +472,7 @@ def handle_class_commands(player, vk, user_id: int, text: str):
     if text not in ['класс', 'мой класс', 'получить класс', 'мои навыки', 'навыки']:
         return False
 
-    from models.classes import get_class_by_weapon, format_class_info, format_passive_status
+    from models.classes import format_all_classes, format_class_info, format_passive_status
     from handlers.keyboards import create_location_keyboard
 
     # Если игрок в убежище - показываем через NPC
@@ -479,22 +483,18 @@ def handle_class_commands(player, vk, user_id: int, text: str):
 
     # Иначе показываем информацию о классе напрямую
     if not player.player_class:
-        # Попробуем определить класс по оружию
-        if player.equipped_weapon:
-            class_id = get_class_by_weapon(player.equipped_weapon)
-            if class_id:
-                class_info = format_class_info(class_id, player.level)
-                vk.messages.send(
-                    user_id=user_id,
-                    message=f"🎓Твой класс: {class_id.upper()}\n\n{class_info}\n\nДля получения класса найди наставника в убежище (дорога → убежище).",
-                    keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
-                    random_id=0
-                )
-                return True
-
         vk.messages.send(
             user_id=user_id,
-            message="🎓КЛАСС ПЕРСОНАЖА\n\nУ тебя пока нет класса!\n\nДля получения класса:\n1. Дойди до 10 уровня\n2. Экипируй оружие\n3. Найди наставника в убежище\n\n🚪 Путь: Дорога → Убежище",
+            message=(
+                "🎓КЛАСС ПЕРСОНАЖА\n\n"
+                "У тебя пока нет класса. Класс выбирается у Наставника и больше не зависит от оружия.\n\n"
+                "Для получения класса:\n"
+                "1. Дойди до 10 уровня\n"
+                "2. Найди Наставника в Убежище\n"
+                "3. Выбери специализацию\n\n"
+                f"{format_all_classes()}\n"
+                "🚪 Путь: Дорога → Убежище"
+            ),
             keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
             random_id=0
         )
@@ -505,7 +505,6 @@ def handle_class_commands(player, vk, user_id: int, text: str):
     passive_status = format_passive_status(player.player_class, player.level)
 
     current_weapon = player.equipped_weapon or "нет"
-    current_class = get_class_by_weapon(current_weapon) if current_weapon != "нет" else None
 
     msg = f"🎓ТВОЙ КЛАСС\n\n"
     msg += f"Класс: {player.player_class.upper()}\n"

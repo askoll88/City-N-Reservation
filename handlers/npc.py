@@ -1,6 +1,8 @@
 """
 Модуль диалогов с NPC
 """
+from __future__ import annotations
+
 import random
 import time
 from datetime import datetime, timedelta, timezone
@@ -118,8 +120,16 @@ def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None
 
 def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str, answer: str, next_stage: str):
     """Обработка специальных диалогов (набор, класс, смена класса)"""
-    from models.classes import get_class_by_weapon, format_class_info, format_passive_status
+    from models.classes import get_all_classes, normalize_class_id
     from infra.state_manager import clear_dialog_state
+    special_id = next(
+        (
+            value for value in (dialog_id, answer, next_stage)
+            if value in {"get_class", "change_class", "my_class", "class_selection"}
+            or str(value).startswith("select_class:")
+        ),
+        dialog_id,
+    )
 
     # Обработка набора новичка
     if dialog_id == "набор":
@@ -154,16 +164,24 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
         return True
 
     # Обработка получения класса персонажа
-    if dialog_id == "get_class":
+    if special_id == "get_class":
         return _handle_get_class(player, vk, user_id, npc_id)
 
     # Обработка смены класса
-    if dialog_id == "change_class":
+    if special_id == "change_class":
         return _handle_change_class(player, vk, user_id, npc_id)
 
     # Обработка просмотра своего класса
-    if dialog_id == "my_class":
+    if special_id == "my_class":
         return _handle_show_class(player, vk, user_id, npc_id)
+
+    if special_id == "class_selection":
+        return _handle_class_selection_menu(player, vk, user_id, npc_id)
+
+    if isinstance(special_id, str) and special_id.startswith("select_class:"):
+        class_id = normalize_class_id(special_id.split(":", 1)[1])
+        if class_id in get_all_classes():
+            return _handle_select_class(player, vk, user_id, npc_id, class_id)
 
     # Сервисы медика
     if dialog_id == "осмотр":
@@ -782,73 +800,41 @@ def _handle_rank_promotion(player, vk, user_id: int, npc_id: str):
 
 def _handle_get_class(player, vk, user_id: int, npc_id: str):
     """Обработка получения класса"""
-    from models.classes import get_class_by_weapon, format_class_info
-    from infra.state_manager import clear_dialog_state
+    return _handle_class_selection_menu(player, vk, user_id, npc_id)
+
+
+def _handle_class_selection_menu(player, vk, user_id: int, npc_id: str):
+    """Показать выбор специализаций у Наставника."""
+    from models.classes import format_all_classes
 
     if player.level < 10:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«Ты ещё слишком слаб, сталкер. Приходи, когда достигнешь 10 уровня. К тому времени я посмотрю, на что ты способен.»",
+            message=(
+                "🎓Наставник:\n\n"
+                "«Ты ещё слишком сырой для специализации. Доживи до 10 уровня, тогда разговор будет предметным.»"
+            ),
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
         return True
 
-    if not player.equipped_weapon:
-        vk.messages.send(
-            user_id=user_id,
-            message="🎓Наставник:\n\n«У тебя нет оружия! Как ты собираешься выживать в Зоне? Экипируй оружие и приходи снова.»",
-            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
-            random_id=0
-        )
-        return True
-
-    class_id = get_class_by_weapon(player.equipped_weapon)
-    if not class_id:
-        vk.messages.send(
-            user_id=user_id,
-            message="🎓Наставник:\n\n«Хм, это оружие мне не знакомо. Приходи с другим — я посмотрю, какой стиль боя тебе подходит.»",
-            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
-            random_id=0
-        )
-        return True
-
-    # Если класс уже есть - проверяем деньги на смену
-    if player.player_class and player.player_class != class_id:
-        if player.money < CLASS_CHANGE_COST:
-            vk.messages.send(
-                user_id=user_id,
-                message=f"🎓Наставник:\n\n«Ты уже имеешь класс, но хочешь сменить на {class_id.upper()}. Это стоит {CLASS_CHANGE_COST:,} руб.\n\nУ тебя недостаточно денег — нужно ещё {CLASS_CHANGE_COST - player.money:,} руб.»",
-                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
-                random_id=0
-            )
-            return True
-
-        new_money = player.money - CLASS_CHANGE_COST
-        database.update_user_stats(user_id, money=new_money, player_class=class_id)
-        invalidate_player_cache(user_id)
-        player = get_player_from_module(user_id)
-
-        class_info = format_class_info(class_id)
-        vk.messages.send(
-            user_id=user_id,
-            message=f"💰Наставник:\n\n«Переобучение прошло успешно! Списано {CLASS_CHANGE_COST:,} руб.\n\nТеперь ты — {class_id.split()[0]} {class_id.upper()}.\n\n{class_info}\n\n'Запомни: сила класса — в оружии. Меняй оружие — меняется и класс!'»",
-            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
-            random_id=0
-        )
-        return True
-
-    # Если класса ещё нет - просто выдаём
-    database.update_user_stats(user_id, player_class=class_id)
-    from handlers.quests import track_quest_change_class
-    track_quest_change_class(user_id, vk=vk)
-    invalidate_player_cache(user_id)
-    player = get_player_from_module(user_id)
-
-    class_info = format_class_info(class_id)
+    current = f"\n\nТекущий класс: {player.player_class.upper()}." if player.player_class else ""
+    change_note = (
+        f"\nСмена уже выбранного класса стоит {CLASS_CHANGE_COST:,} руб."
+        if player.player_class else
+        "\nПервый выбор бесплатный."
+    )
     vk.messages.send(
         user_id=user_id,
-        message=f"🎓Наставник:\n\n«Отлично! Теперь ты — {class_id.split()[0]} {class_id.upper()}. Вот твои навыки:\n\n{class_info}\n\n'Запомни: сила класса — в оружии. Меняй оружие — меняется и класс!'»",
+        message=(
+            "🎓Наставник:\n\n"
+            "«Класс теперь не привязан к стволу. Оружие меняй под задачу, а специализация остаётся твоей школой выживания.»\n\n"
+            f"{format_all_classes()}"
+            f"{current}"
+            f"{change_note}\n\n"
+            "Выбери специализацию кнопкой ниже."
+        ),
         keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
         random_id=0
     )
@@ -857,66 +843,78 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
 
 def _handle_change_class(player, vk, user_id: int, npc_id: str):
     """Обработка смены класса"""
-    from models.classes import get_class_by_weapon, format_class_info
-    from infra.state_manager import clear_dialog_state
+    return _handle_class_selection_menu(player, vk, user_id, npc_id)
+
+
+def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
+    """Выбрать или сменить специализацию."""
+    from models.classes import format_class_info, get_class
 
     if player.level < 10:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«Ты ещё слишком слаб для смены класса. Приходи на 10 уровне.»",
+            message="🎓Наставник:\n\n«Сначала 10 уровень. До этого специализация только навредит: будешь копировать форму без понимания.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
         return True
 
-    if not player.equipped_weapon:
+    selected = get_class(class_id)
+    if not selected:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«Экипируй оружие, на которое хочешь перейти, и приходи снова.»",
+            message="🎓Наставник:\n\n«Такой школы у меня нет. Выбери нормальную специализацию из списка.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
         return True
 
-    new_class_id = get_class_by_weapon(player.equipped_weapon)
-    if not new_class_id:
+    if class_id == player.player_class:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«Это оружие мне не знакомо. Приходи с другим.»",
+            message=f"🎓Наставник:\n\n«Ты уже идёшь школой {selected.name}. Тренируй её в поле, а не на кнопках.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
         return True
 
-    if new_class_id == player.player_class:
+    is_change = bool(player.player_class)
+    if is_change and player.money < CLASS_CHANGE_COST:
         vk.messages.send(
             user_id=user_id,
-            message=f"🎓Наставник:\n\n«У тебя уже есть класс {player.player_class.upper()}. Экипируй другое оружие для смены.»",
+            message=(
+                "🎓Наставник:\n\n"
+                f"«Переобучение на {selected.name} стоит {CLASS_CHANGE_COST:,} руб.\n\n"
+                f"У тебя есть {player.money:,} руб. Не хватает {CLASS_CHANGE_COST - player.money:,} руб.»"
+            ),
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
         return True
 
-    if player.money < CLASS_CHANGE_COST:
-        vk.messages.send(
-            user_id=user_id,
-            message=f"🎓Наставник:\n\n«Смена класса на {new_class_id.upper()} стоит {CLASS_CHANGE_COST:,} руб.\n\nУ тебя есть {player.money:,} руб. Не хватает {CLASS_CHANGE_COST - player.money:,} руб.»",
-            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
-            random_id=0
-        )
-        return True
-
-    new_money = player.money - CLASS_CHANGE_COST
-    database.update_user_stats(user_id, money=new_money, player_class=new_class_id)
+    old_money = int(player.money)
+    new_money = old_money - CLASS_CHANGE_COST if is_change else old_money
+    database.update_user_stats(user_id, money=new_money, player_class=class_id)
     from handlers.quests import track_quest_change_class
     track_quest_change_class(user_id, vk=vk)
     invalidate_player_cache(user_id)
     player = get_player_from_module(user_id)
 
-    class_info = format_class_info(new_class_id)
+    class_info = format_class_info(class_id, player.level)
+    payment_line = (
+        f"Списано за переобучение: {CLASS_CHANGE_COST:,} руб.\nБаланс: {old_money:,} → {new_money:,}\n\n"
+        if is_change else
+        "Первое обучение бесплатно.\n\n"
+    )
     vk.messages.send(
         user_id=user_id,
-        message=f"💰Наставник:\n\n«Класс успешно сменён! Списано {CLASS_CHANGE_COST:,} руб.\n\nТеперь ты — {new_class_id.split()[0]} {new_class_id.upper()}.\n\n{class_info}\n\n'Запомни: сила класса — в оружии!'»",
+        message=(
+            "🎓Наставник:\n\n"
+            f"«Принято. Теперь твоя специализация — {selected.name}. "
+            "Оружие выбирай под рейд, но навыки и пассивки останутся от выбранной школы.»\n\n"
+            f"{payment_line}"
+            f"{class_info}"
+        ),
         keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
         random_id=0
     )
@@ -925,12 +923,12 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
 
 def _handle_show_class(player, vk, user_id: int, npc_id: str):
     """Обработка просмотра класса"""
-    from models.classes import get_class_by_weapon, format_class_info, format_passive_status
+    from models.classes import format_class_info, format_passive_status
 
     if not player.player_class:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«У тебя ещё нет класса! Приходи, когда достигнешь 10 уровня и экипируй оружие. Я обучу тебя боевому стилю.»",
+            message="🎓Наставник:\n\n«У тебя ещё нет класса. Дойди до 10 уровня и выбери специализацию здесь, в Убежище.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -938,16 +936,11 @@ def _handle_show_class(player, vk, user_id: int, npc_id: str):
 
     class_info = format_class_info(player.player_class, player.level)
     current_weapon = player.equipped_weapon or "нет"
-    current_class = get_class_by_weapon(current_weapon) if current_weapon != "нет" else None
 
     msg = f"🎓Наставник:\n\n"
     msg += f"📌Твой текущий класс: {player.player_class.upper()}\n"
     msg += f"🔫Экипированное оружие: {current_weapon}\n"
     msg += f"⭐Твой уровень: {player.level}\n\n"
-
-    if current_class and current_class != player.player_class:
-        msg += f"⚠️Внимание! Твой экипированный класс: {current_class.upper()}\n"
-        msg += "Класс меняется в зависимости от оружия!\n\n"
 
     passive_status = format_passive_status(player.player_class, player.level)
     msg += f"{passive_status}\n"
