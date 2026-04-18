@@ -589,10 +589,13 @@ def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
                 random_id=0,
             )
             return True
-        if player.energy < TRAVEL_ACCELERATION_ENERGY:
+        passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+        accel_discount = max(0, int(passive.get("travel_acceleration_energy_reduction", 0) or 0))
+        acceleration_energy = max(1, TRAVEL_ACCELERATION_ENERGY - accel_discount)
+        if player.energy < acceleration_energy:
             vk.messages.send(
                 user_id=user_id,
-                message=f"⚡ Не хватает энергии. Нужно {TRAVEL_ACCELERATION_ENERGY}, у тебя {player.energy}.",
+                message=f"⚡ Не хватает энергии. Нужно {acceleration_energy}, у тебя {player.energy}.",
                 keyboard=create_travel_keyboard().get_keyboard(),
                 random_id=0,
             )
@@ -600,14 +603,14 @@ def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
         cut = min(TRAVEL_ACCELERATION_SECONDS, max(0, remaining - 5))
         if cut <= 0:
             return travel_tick(player, vk, user_id, silent=False)
-        player.energy -= TRAVEL_ACCELERATION_ENERGY
+        player.energy -= acceleration_energy
         database.update_user_stats(user_id, energy=player.energy)
         new_duration = max(TRAVEL_MIN_SECONDS, int(travel.get("duration", TRAVEL_DEFAULT_SECONDS)) - cut)
         update_travel_data(user_id, {"duration": new_duration})
         vk.messages.send(
             user_id=user_id,
             message=(
-                f"🏃 Ты ускорился! -{TRAVEL_ACCELERATION_ENERGY}⚡\n"
+                f"🏃 Ты ускорился! -{acceleration_energy}⚡\n"
                 f"Время в пути сокращено на {cut} сек."
             ),
             keyboard=create_travel_keyboard().get_keyboard(),
@@ -618,8 +621,11 @@ def handle_travel_commands(player, vk, user_id: int, text: str) -> bool:
     if "осмотр" in text_lower:
         now_ts = time.time()
         last_scout = int(travel.get("last_scout_time", 0))
-        if last_scout and now_ts - last_scout < TRAVEL_SCOUT_COOLDOWN:
-            wait_left = int(TRAVEL_SCOUT_COOLDOWN - (now_ts - last_scout))
+        passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+        scout_cd_reduction = max(0, int(passive.get("travel_scout_cooldown_reduction", 0) or 0))
+        scout_cooldown = max(10, TRAVEL_SCOUT_COOLDOWN - scout_cd_reduction)
+        if last_scout and now_ts - last_scout < scout_cooldown:
+            wait_left = int(scout_cooldown - (now_ts - last_scout))
             vk.messages.send(
                 user_id=user_id,
                 message=f"👀 Осмотреться можно чуть позже. Подожди {wait_left} сек.",
@@ -726,7 +732,12 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
         _arrive_to_location(player, vk, user_id, location_id, from_location)
         return
 
-    duration = _get_travel_duration_seconds(from_location, location_id)
+    base_duration = _get_travel_duration_seconds(from_location, location_id)
+    passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+    travel_reduction_pct = max(0, min(60, int(passive.get("travel_time_reduction_pct", 0) or 0)))
+    duration = base_duration
+    if travel_reduction_pct > 0:
+        duration = max(TRAVEL_MIN_SECONDS, int(base_duration * (100 - travel_reduction_pct) / 100))
     now_ts = time.time()
     eta = now_ts + duration
     checkpoints = [0.35, 0.75] if duration >= 35 else [0.6]
@@ -752,7 +763,9 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
         user_id=user_id,
         message=(
             f"🧭 Ты отправился в путь: {from_location} → {location_id}\n"
-            f"⏱️ Примерное время: {duration} сек\n\n"
+            f"⏱️ Примерное время: {duration} сек"
+            + (f" (маршрут сокращён на {travel_reduction_pct}%)" if travel_reduction_pct > 0 else "")
+            + "\n\n"
             "По дороге могут случиться события. "
             "Используй 'Осмотреться' для рискованной разведки."
         ),
@@ -1039,15 +1052,23 @@ def handle_heal(player, vk, user_id: int):
             rank_min_level=rank_min_level,
         )
         price = int(price_info["price"])
+        passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+        hospital_discount_pct = max(0, min(80, int(passive.get("hospital_price_discount_pct", 0) or 0)))
+        if hospital_discount_pct > 0 and price > 0:
+            price = max(0, int(price * (100 - hospital_discount_pct) / 100))
 
         # Проверяем, хватает ли денег
         if player.money < price:
+            discount_line = (
+                f"\nСкидка класса: -{hospital_discount_pct}%." if hospital_discount_pct > 0 else ""
+            )
             vk.messages.send(
                 user_id=user_id,
                 message=(
                     f"💸 Лечение стоит {price:,} руб., а у тебя {player.money:,} руб.\n\n"
                     f"Цена рассчитана по травмам: +{missing_hp} HP, +{missing_energy} энергии.\n"
                     f"Потолок твоего ранга ({rank_name}): {price_info['cap']:,} руб."
+                    f"{discount_line}"
                 ),
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
@@ -1074,6 +1095,8 @@ def handle_heal(player, vk, user_id: int):
             )
         else:
             price_text = f"{price:,} руб. (ранг {rank_name}, уровень {player.level})"
+        if hospital_discount_pct > 0 and not bool(price_info.get("free")):
+            price_text += f", скидка класса -{hospital_discount_pct}%"
 
         message = (
             f"🏥ЛЕЧЕНИЕ В БОЛЬНИЦЕ\n\n"

@@ -662,6 +662,10 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
     from game.location_mechanics import get_energy_cost_mult
     energy_cost_base = RESEARCH_ENERGY_COST.get(time_sec, 2)
     energy_cost = max(1, int(energy_cost_base * get_energy_cost_mult(player.current_location_id)))
+    passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+    research_discount_pct = max(0, min(80, int(passive.get("research_energy_discount_pct", 0) or 0)))
+    if research_discount_pct > 0:
+        energy_cost = max(1, int(energy_cost * (100 - research_discount_pct) / 100))
 
     if player.energy < energy_cost:
         vk.messages.send(
@@ -1414,6 +1418,11 @@ def _handle_radiation(player, vk, user_id: int):
     rad_mult = get_radiation_mult(player.current_location_id)
     rad_damage = int(random.randint(15, 35) * rad_mult)
     rad_gain = int(random.randint(10, 25) * rad_mult)
+    passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+    rad_reduction_pct = max(0, min(80, int(passive.get("radiation_reduction_pct", 0) or 0)))
+    if rad_reduction_pct > 0:
+        rad_damage = max(0, int(rad_damage * (100 - rad_reduction_pct) / 100))
+        rad_gain = max(0, int(rad_gain * (100 - rad_reduction_pct) / 100))
     new_radiation = user['radiation'] + rad_gain
     rad_overload = calculate_radiation_hp_loss(new_radiation, user['health'])
     total_rad_damage = rad_damage + rad_overload
@@ -1422,6 +1431,7 @@ def _handle_radiation(player, vk, user_id: int):
     database.update_user_stats(user_id, health=new_health, radiation=new_radiation)
 
     rad_mult_text = f" (x{rad_mult:.1f} зона)" if rad_mult != 1.0 else ""
+    rad_reduction_text = f"\nСопротивление класса: -{rad_reduction_pct}%" if rad_reduction_pct > 0 else ""
     stage = get_radiation_stage(new_radiation)
 
     max_hp = int(getattr(player, "max_health", 100) or 100)
@@ -1429,7 +1439,7 @@ def _handle_radiation(player, vk, user_id: int):
         user_id=user_id,
         message=(
             f"РАДИАЦИЯ!\n\n"
-            f"Ты вошёл в зону повышенной радиации!{rad_mult_text}\n\n"
+            f"Ты вошёл в зону повышенной радиации!{rad_mult_text}{rad_reduction_text}\n\n"
             f"Базовый урон: {rad_damage}\n"
             f"Токсичность накопления: {rad_overload}\n"
             f"Итоговый урон: {total_rad_damage}\n"
@@ -2440,6 +2450,10 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
     # === Полевое лечение ===
     elif "self_heal" in effect:
         heal_value = max(1, int(effect.get("self_heal", 40) or 40))
+        passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+        heal_bonus_pct = max(0, int(passive.get("self_heal_bonus_pct", 0) or 0))
+        if heal_bonus_pct > 0:
+            heal_value = max(1, int(heal_value * (100 + heal_bonus_pct) / 100))
         old_health = int(getattr(player, "health", 0) or 0)
         max_health = int(getattr(player, "max_health", max(old_health, 1)) or max(old_health, 1))
         player.health = min(max_health, old_health + heal_value)
@@ -2524,12 +2538,13 @@ def _resolve_player_weapon(player, user_id: int | None = None) -> tuple[int, str
 
 
 def _apply_weapon_damage_bonus(player, damage: int) -> tuple[int, int]:
-    """Применить пассивный бонус урона оружия класса."""
+    """Применить пассивный модификатор урона оружия класса."""
     passive = player._get_passive_bonuses()
     bonus_pct = int(passive.get('weapon_damage', 0) or 0)
-    if bonus_pct <= 0:
+    if bonus_pct == 0:
         return damage, 0
-    return int(damage * (1 + bonus_pct / 100)), bonus_pct
+    multiplier = max(0.1, 1 + bonus_pct / 100)
+    return max(1, int(damage * multiplier)), bonus_pct
 
 
 def _apply_crit_damage_bonus(player, damage: int) -> tuple[int, int]:
@@ -2618,8 +2633,9 @@ def handle_combat_attack(player, vk, user_id: int):
     if weapon_damage > 0:
         damage_details.append(f"Оружие {weapon_name}: {weapon_damage}")
     damage_details.append(f"Рукопашный: {melee}")
-    if weapon_bonus_pct > 0:
-        damage_details.append(f"Пассив класса: +{weapon_bonus_pct}%")
+    if weapon_bonus_pct:
+        sign = "+" if weapon_bonus_pct > 0 else ""
+        damage_details.append(f"Модификатор класса: {sign}{weapon_bonus_pct}%")
 
     # Добавляем информацию о характеристиках
     crit_chance = player.crit_chance
@@ -2778,8 +2794,10 @@ def handle_combat_flee(player, vk, user_id: int):
     combat = _combat_state.get(user_id)
     if not combat:
         return
-    
-    if random.randint(1, 100) <= 50:
+
+    passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+    flee_chance = max(5, min(90, 50 + int(passive.get("flee_chance_bonus", 0) or 0)))
+    if random.randint(1, 100) <= flee_chance:
         del _combat_state[user_id]
         from handlers.keyboards import create_resume_keyboard
         player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)

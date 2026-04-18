@@ -887,6 +887,17 @@ def _format_class_preview(player, class_id: str) -> str:
                 f"(ур. {required}, {status})"
             )
 
+    if selected.drawbacks:
+        lines.append("")
+        lines.append("Уязвимости класса:")
+        for drawback in selected.drawbacks:
+            required = int(drawback.get("required_level", 10) or 10)
+            status = "активно" if int(player.level) >= required else "откроется"
+            lines.append(
+                f"• {drawback['name']} — {drawback['description']} "
+                f"(ур. {required}, {status})"
+            )
+
     is_change = bool(player.player_class and player.player_class != class_id)
     if player.player_class == class_id:
         lines.extend(["", "Это уже твоя текущая специализация."])

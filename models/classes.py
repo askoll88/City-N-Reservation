@@ -69,6 +69,17 @@ _DEFAULT_CLASSES = {
             {"name": "Тихий шаг", "required_level": 10, "description": "привычка ставить ногу туда, где Зона не ждёт; +6% к уклонению", "dodge": 6},
             {"name": "Глазомер", "required_level": 20, "description": "умение ловить правильную долю секунды; +6% к шансу крита", "crit_chance": 6},
             {"name": "Маршрутная память", "required_level": 35, "description": "память на тайники, тропы и чужие ошибки; +6% к редким находкам", "rare_find_chance": 6},
+            {"name": "Короткая тропа", "required_level": 50, "description": "следопыт знает, где коридор можно срезать без лишнего риска; -15% к времени переходов", "travel_time_reduction_pct": 15},
+            {"name": "Разведка без шума", "required_level": 75, "description": "осмотр маршрута быстрее возвращается в рабочий ритм; -20 сек к ожиданию между осмотрами", "travel_scout_cooldown_reduction": 20},
+        ],
+        "drawbacks": [
+            {
+                "name": "Лёгкий ход",
+                "required_level": 10,
+                "description": "следопыт не таскает лишние пластины и тяжёлый груз, чтобы не шуметь; -2 к защите, -3 кг переносимого веса",
+                "defense": -2,
+                "max_weight": -3,
+            },
         ],
     },
     "штурмовик": {
@@ -101,6 +112,17 @@ _DEFAULT_CLASSES = {
             {"name": "Упор", "required_level": 10, "description": "тело уже знает, как встретить удар; +4 к защите", "defense": 4},
             {"name": "Темп атаки", "required_level": 20, "description": "давление не даёт врагу восстановиться; +7% урона оружием", "weapon_damage": 7},
             {"name": "Плотная стойка", "required_level": 35, "description": "штурмовика сложнее сдвинуть, чем убить; +5 к защите", "defense": 5},
+            {"name": "Рывок под бронёй", "required_level": 50, "description": "штурмовик умеет ускоряться, не разваливая строй; ускорение в коридоре стоит на 5 энергии меньше", "travel_acceleration_energy_reduction": 5},
+            {"name": "Стена в проходе", "required_level": 75, "description": "даже при неудачном побеге удар принимает броня и стойка; +4 к защите", "defense": 4},
+        ],
+        "drawbacks": [
+            {
+                "name": "Тяжёлая поступь",
+                "required_level": 10,
+                "description": "броня, плотная стойка и прямой напор плохо дружат с тихим манёвром; -5% к уклонению, -3% к редким находкам",
+                "dodge": -5,
+                "rare_find_chance": -3,
+            },
         ],
     },
     "санитар": {
@@ -132,6 +154,17 @@ _DEFAULT_CLASSES = {
             {"name": "Перевязка на ходу", "required_level": 10, "description": "мелкие раны не выбивают из темпа; +3 к защите", "defense": 3},
             {"name": "Медицинская сумка", "required_level": 20, "description": "место под ампулы, бинты и лишний шанс; +8 кг переносимого веса", "max_weight": 8},
             {"name": "Живучесть", "required_level": 35, "description": "организм привык работать на последнем ресурсе; +2 к выносливости", "stamina": 2},
+            {"name": "Свои в приёмной", "required_level": 50, "description": "санитара в больнице считают коллегой, а не клиентом; -20% к цене лечения", "hospital_price_discount_pct": 20},
+            {"name": "Твёрдая рука", "required_level": 75, "description": "полевой шов держит лучше, когда пальцы не дрожат; +20% к лечению активным навыком", "self_heal_bonus_pct": 20},
+        ],
+        "drawbacks": [
+            {
+                "name": "Рука спасателя",
+                "required_level": 10,
+                "description": "санитар реже идёт на рискованный добивающий выстрел: он привык сохранять ресурс и контролировать раны; -4% к шансу крита, -4% к урону оружием",
+                "crit_chance": -4,
+                "weapon_damage": -4,
+            },
         ],
     },
     "техник": {
@@ -163,6 +196,17 @@ _DEFAULT_CLASSES = {
             {"name": "Разгрузка", "required_level": 10, "description": "каждый ремень на месте, каждый карман работает; +10 кг переносимого веса", "max_weight": 10},
             {"name": "Настройка механизмов", "required_level": 20, "description": "оружие стреляет ровнее, чем должно; +5% урона оружием", "weapon_damage": 5},
             {"name": "Усиленные пластины", "required_level": 35, "description": "самодельные правки держат там, где завод сэкономил; +4 к защите", "defense": 4},
+            {"name": "Экономный контур", "required_level": 50, "description": "техник заранее гасит лишние траты фонарей, датчиков и инструмента; -25% к расходу энергии при исследовании", "research_energy_discount_pct": 25},
+            {"name": "Лёгкая переделка", "required_level": 75, "description": "ускорение по коридору даётся дешевле благодаря подогнанной разгрузке; ускорение стоит на 5 энергии меньше", "travel_acceleration_energy_reduction": 5},
+        ],
+        "drawbacks": [
+            {
+                "name": "Перегруженный пояс",
+                "required_level": 10,
+                "description": "инструменты, ремкомплект и запасные детали цепляются за всё подряд; -3% к уклонению, -2% к шансу крита",
+                "dodge": -3,
+                "crit_chance": -2,
+            },
         ],
     },
     "аномалист": {
@@ -194,6 +238,17 @@ _DEFAULT_CLASSES = {
             {"name": "Чутьё искажений", "required_level": 10, "description": "редкое чаще откликается тем, кто умеет слушать; +5% к редким находкам", "rare_find_chance": 5},
             {"name": "Холодный расчёт", "required_level": 20, "description": "паника убивает быстрее радиации; +4% к уклонению", "dodge": 4},
             {"name": "Резонанс", "required_level": 35, "description": "удар попадает в момент, когда мир уже треснул; +6% к критическому урону", "crit_damage": 6},
+            {"name": "Свинцовая привычка", "required_level": 50, "description": "аномалист знает, когда задержать дыхание и куда не ставить ногу; -20% к радиационному урону и набору радиации", "radiation_reduction_pct": 20},
+            {"name": "Тонкий отклик", "required_level": 75, "description": "редкие вещи чаще цепляются за того, кто слышит фон Зоны; +5% к редким находкам", "rare_find_chance": 5},
+        ],
+        "drawbacks": [
+            {
+                "name": "Пси-шум",
+                "required_level": 10,
+                "description": "постоянная работа рядом с искажениями выматывает тело и сбивает силовой темп; -1 к выносливости, -3% к урону оружием",
+                "stamina": -1,
+                "weapon_damage": -3,
+            },
         ],
     },
     "охотник": {
@@ -225,6 +280,17 @@ _DEFAULT_CLASSES = {
             {"name": "Звериная реакция", "required_level": 10, "description": "тело дёргается раньше, чем мысль успевает назвать угрозу; +5% к уклонению", "dodge": 5},
             {"name": "Добивание", "required_level": 20, "description": "охотник видит момент, когда добыча уже проиграла; +7% к шансу крита", "crit_chance": 7},
             {"name": "Разделка добычи", "required_level": 35, "description": "каждый удар идёт туда, где живое ломается быстрее; +6% урона оружием", "weapon_damage": 6},
+            {"name": "Уход с линии", "required_level": 50, "description": "охотник знает, когда бой перестал быть охотой; +20% к шансу сбежать из боя", "flee_chance_bonus": 20},
+            {"name": "Запах крови", "required_level": 75, "description": "раненую цель охотник чувствует почти физически; +5% к шансу крита", "crit_chance": 5},
+        ],
+        "drawbacks": [
+            {
+                "name": "Охота налегке",
+                "required_level": 10,
+                "description": "охотник берёт только то, что не мешает преследованию, и хуже держит прямой удар; -2 к защите, -4 кг переносимого веса",
+                "defense": -2,
+                "max_weight": -4,
+            },
         ],
     },
 }
@@ -342,7 +408,8 @@ def _load_classes_from_db():
                 "weapon_keywords": weapon_keywords,
                 "required_weapons": required_weapons,
                 "active_skills": formatted_active,
-                "passive_skills": formatted_passive
+                "passive_skills": formatted_passive,
+                "drawbacks": [],
             }
     except Exception:
         _classes_cache = _load_default_classes()
@@ -393,6 +460,10 @@ class PlayerClass:
     def passive_skills(self) -> list[dict]:
         return self.data.get("passive_skills", [])
 
+    @property
+    def drawbacks(self) -> list[dict]:
+        return self.data.get("drawbacks", [])
+
 
 def get_class(class_id: str) -> Optional[PlayerClass]:
     """Получить класс по ID"""
@@ -439,12 +510,17 @@ def format_class_info(class_id: str, player_level: int = None) -> str:
     for skill in player_class.active_skills:
         msg += f"• {skill['name']} — {skill['description']} "
         msg += f"({skill['energy_cost']} энергии, перезарядка: {skill['cooldown']} ходов)\n"
+
+    if player_class.drawbacks:
+        msg += "\n⚠️ Уязвимости класса:\n"
+        for drawback in player_class.drawbacks:
+            msg += f"• {drawback['name']} — {drawback['description']}\n"
     
     return msg
 
 
 def get_passive_bonuses(class_id: str, player_level: int) -> dict:
-    """Получить бонусы пассивных навыков для указанного уровня игрока"""
+    """Получить суммарные пассивные модификаторы класса, включая уязвимости."""
     class_id = normalize_class_id(class_id)
     player_class = get_class(class_id)
     if not player_class:
@@ -452,7 +528,7 @@ def get_passive_bonuses(class_id: str, player_level: int) -> dict:
     
     bonuses = {}
     
-    for passive in player_class.passive_skills:
+    for passive in player_class.passive_skills + player_class.drawbacks:
         required = passive.get("required_level", 10)
         if player_level >= required:
             # Добавляем все бонусы этого навыка (исключая мета-поля)
@@ -478,6 +554,20 @@ def get_unlocked_passives(class_id: str, player_level: int) -> list:
     return unlocked
 
 
+def get_unlocked_drawbacks(class_id: str, player_level: int) -> list:
+    """Получить список активных уязвимостей класса."""
+    player_class = get_class(class_id)
+    if not player_class:
+        return []
+
+    unlocked = []
+    for drawback in player_class.drawbacks:
+        required = drawback.get("required_level", 10)
+        if player_level >= required:
+            unlocked.append(drawback)
+    return unlocked
+
+
 def format_passive_status(class_id: str, player_level: int) -> str:
     """Форматировать статус пассивных навыков"""
     player_class = get_class(class_id)
@@ -493,6 +583,13 @@ def format_passive_status(class_id: str, player_level: int) -> str:
         else:
             status = "🔒"
         msg += f"{status} {passive['name']} (ур. {required})\n"
+
+    if player_class.drawbacks:
+        msg += "\n⚠️ Уязвимости класса:\n"
+        for drawback in player_class.drawbacks:
+            required = drawback.get("required_level", 10)
+            status = "⚠️" if player_level >= required else "🔒"
+            msg += f"{status} {drawback['name']} (ур. {required})\n"
     
     return msg
 
@@ -506,10 +603,11 @@ def format_all_classes() -> str:
         weapons = ", ".join(data.get("required_weapons", [])) or "любое"
         active_count = len(data.get("active_skills", []))
         passive_count = len(data.get("passive_skills", []))
+        drawback_count = len(data.get("drawbacks", []))
         
         msg += f"{data['name']}\n"
         msg += f"   Оружие: {weapons}\n"
-        msg += f"   Пассивные: {passive_count} | Активные: {active_count}\n\n"
+        msg += f"   Активные: {active_count} | Пассивные: {passive_count} | Уязвимости: {drawback_count}\n\n"
     
     return msg
 

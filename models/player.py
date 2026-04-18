@@ -402,7 +402,7 @@ class Player:
         base = 10  # Базовый шанс уклонения
         passive = self._get_passive_bonuses()
         artifact = self._artifact_bonuses.get('dodge', 0)
-        return base + passive.get('dodge', 0) + artifact
+        return max(0, min(100, base + passive.get('dodge', 0) + artifact))
 
     @property
     def artifact_radiation(self) -> int:
@@ -424,7 +424,7 @@ class Player:
             except:
                 pass
 
-        return min(100, base + artifact_bonus + detector_bonus)
+        return max(0, min(100, base + artifact_bonus + detector_bonus))
 
     @property
     def crit_chance(self) -> int:
@@ -432,7 +432,7 @@ class Player:
         base = 5 + (self.effective_luck - 1) * 2  # Базовый 5% + 2% за каждый пункт удачи свыше 1
         artifact_bonus = self._artifact_bonuses.get('crit', 0)
         passive_bonus = self._get_passive_bonuses().get('crit_chance', 0)
-        return min(100, base + artifact_bonus + passive_bonus)
+        return max(0, min(100, base + artifact_bonus + passive_bonus))
 
     @property
     def crit_damage(self) -> int:
@@ -446,7 +446,7 @@ class Player:
         base = self.effective_luck * 2  # 2% за каждый пункт удачи
         artifact_bonus = self._artifact_bonuses.get('rare_find_chance', 0)
         passive_bonus = self._get_passive_bonuses().get('rare_find_chance', 0)
-        return min(100, base + artifact_bonus + passive_bonus)
+        return max(0, min(100, base + artifact_bonus + passive_bonus))
 
     @property
     def melee_damage(self) -> int:
@@ -494,7 +494,7 @@ class Player:
         """Общая защита (броня + артефакты + пассивные навыки)"""
         artifact_def = self._get_artifact_bonuses().get('defense', 0)
         passive_bonus = self._get_passive_bonuses().get('defense', 0)
-        return self.armor_defense + artifact_def + passive_bonus
+        return max(0, self.armor_defense + artifact_def + passive_bonus)
 
     def _get_passive_bonuses(self) -> dict:
         """Получить бонусы от пассивных навыков класса"""
@@ -846,29 +846,45 @@ class Player:
         if passive_bonuses and self.player_class:
             bonus_parts = []
             if passive_bonuses.get('dodge'):
-                bonus_parts.append(f"уклон +{passive_bonuses['dodge']}%")
+                bonus_parts.append(f"уклон {passive_bonuses['dodge']:+d}%")
             if passive_bonuses.get('crit_chance'):
-                bonus_parts.append(f"крит +{passive_bonuses['crit_chance']}%")
+                bonus_parts.append(f"крит {passive_bonuses['crit_chance']:+d}%")
             if passive_bonuses.get('sell_bonus'):
-                bonus_parts.append(f"продажа +{passive_bonuses['sell_bonus']}%")
+                bonus_parts.append(f"продажа {passive_bonuses['sell_bonus']:+d}%")
             if passive_bonuses.get('weapon_damage'):
-                bonus_parts.append(f"урон +{passive_bonuses['weapon_damage']}%")
+                bonus_parts.append(f"урон {passive_bonuses['weapon_damage']:+d}%")
             if passive_bonuses.get('max_weight'):
-                bonus_parts.append(f"вес +{passive_bonuses['max_weight']}кг")
+                bonus_parts.append(f"вес {passive_bonuses['max_weight']:+d}кг")
             if passive_bonuses.get('defense'):
-                bonus_parts.append(f"защита +{passive_bonuses['defense']}")
+                bonus_parts.append(f"защита {passive_bonuses['defense']:+d}")
             if passive_bonuses.get('strength'):
-                bonus_parts.append(f"сила +{passive_bonuses['strength']}")
+                bonus_parts.append(f"сила {passive_bonuses['strength']:+d}")
             if passive_bonuses.get('stamina'):
-                bonus_parts.append(f"выносливость +{passive_bonuses['stamina']}")
+                bonus_parts.append(f"выносливость {passive_bonuses['stamina']:+d}")
             if passive_bonuses.get('perception'):
-                bonus_parts.append(f"восприятие +{passive_bonuses['perception']}")
+                bonus_parts.append(f"восприятие {passive_bonuses['perception']:+d}")
             if passive_bonuses.get('luck'):
-                bonus_parts.append(f"удача +{passive_bonuses['luck']}")
+                bonus_parts.append(f"удача {passive_bonuses['luck']:+d}")
             if passive_bonuses.get('rare_find_chance'):
-                bonus_parts.append(f"редкое +{passive_bonuses['rare_find_chance']}%")
+                bonus_parts.append(f"редкое {passive_bonuses['rare_find_chance']:+d}%")
             if passive_bonuses.get('crit_damage'):
-                bonus_parts.append(f"крит.урон +{passive_bonuses['crit_damage']}%")
+                bonus_parts.append(f"крит.урон {passive_bonuses['crit_damage']:+d}%")
+            if passive_bonuses.get('travel_time_reduction_pct'):
+                bonus_parts.append(f"путь -{passive_bonuses['travel_time_reduction_pct']}%")
+            if passive_bonuses.get('travel_scout_cooldown_reduction'):
+                bonus_parts.append(f"осмотр -{passive_bonuses['travel_scout_cooldown_reduction']}с")
+            if passive_bonuses.get('travel_acceleration_energy_reduction'):
+                bonus_parts.append(f"ускорение -{passive_bonuses['travel_acceleration_energy_reduction']}⚡")
+            if passive_bonuses.get('hospital_price_discount_pct'):
+                bonus_parts.append(f"больница -{passive_bonuses['hospital_price_discount_pct']}%")
+            if passive_bonuses.get('research_energy_discount_pct'):
+                bonus_parts.append(f"исследование -{passive_bonuses['research_energy_discount_pct']}% энергии")
+            if passive_bonuses.get('radiation_reduction_pct'):
+                bonus_parts.append(f"радиация -{passive_bonuses['radiation_reduction_pct']}%")
+            if passive_bonuses.get('self_heal_bonus_pct'):
+                bonus_parts.append(f"полевое лечение +{passive_bonuses['self_heal_bonus_pct']}%")
+            if passive_bonuses.get('flee_chance_bonus'):
+                bonus_parts.append(f"побег +{passive_bonuses['flee_chance_bonus']}%")
             if bonus_parts:
                 lines.append("")
                 lines.append(f"🎓 Бонусы {self.player_class}: {'  '.join(bonus_parts)}")
