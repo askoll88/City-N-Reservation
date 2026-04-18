@@ -921,7 +921,7 @@ def show_welcome(vk, user_id: int):
     from infra.state_manager import set_ui_screen
     from handlers.commands import get_welcome_message
     from models.locations import get_location
-    from infra import database
+    from infra import database, config
 
     # Проверяем, новый ли игрок
     user_data = database.get_user_by_vk(user_id)
