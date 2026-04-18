@@ -25,6 +25,7 @@ from handlers.inventory import (
     show_weapons,
     show_trader_shop_all,
     show_trader_sell_all,
+    handle_buy_artifact_slot,
     clear_shop_cache
 )
 
@@ -189,7 +190,52 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
     if dialog_id == "повысить":
         return _handle_rank_promotion(player, vk, user_id, npc_id)
 
+    if dialog_id == "слоты":
+        return _handle_trader_slot_info(player, vk, user_id, npc_id)
+
+    if dialog_id == "купитьслот":
+        handle_buy_artifact_slot(player, vk, user_id)
+        return True
+
     return False
+
+
+def _handle_trader_slot_info(player, vk, user_id: int, npc_id: str):
+    """Информация о прокачке слотов артефактов у Барыги."""
+    current_slots = int(getattr(player, "artifact_slots", 3) or 3)
+    max_slots = int(config.MAX_ARTIFACT_SLOTS)
+
+    lines = [
+        "💰Барыга:\n",
+        "Контейнер под артефакты расширяю поэтапно.",
+        f"Сейчас у тебя: {current_slots}/{max_slots} слотов.",
+    ]
+
+    if current_slots >= max_slots:
+        lines.append("\nТы уже на максимуме. Дальше расширять некуда.")
+    else:
+        next_slot = current_slots + 1
+        req = config.ARTIFACT_SLOT_REQUIREMENTS.get(next_slot, {})
+        need_level = int(req.get("level", config.MIN_LEVEL_FOR_ARTIFACT_SLOT))
+        need_money = int(req.get("cost", 0))
+
+        lines.extend([
+            "",
+            f"Следующий апгрейд: слот {next_slot}/{max_slots}",
+            f"• Уровень: {player.level}/{need_level}",
+            f"• Деньги: {player.money}/{need_money} руб.",
+            "",
+            "Покупка: напиши «купить слот».",
+            "Шкала апгрейдов растянута до 120 уровня.",
+        ])
+
+    vk.messages.send(
+        user_id=user_id,
+        message="\n".join(lines),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
 
 
 def _format_seconds_left(seconds: int) -> str:

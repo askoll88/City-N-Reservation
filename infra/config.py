@@ -71,16 +71,17 @@ MIN_LEVEL_FOR_CLASS = 10
 # === Артефакты ===
 BASE_ARTIFACT_SLOTS = 3
 MAX_ARTIFACT_SLOTS = 10
-MIN_LEVEL_FOR_ARTIFACT_SLOT = 25
-ARTIFACT_SLOT_COSTS = {
-    4:  500,
-    5:  750,
-    6:  1000,
-    7:  1500,
-    8:  2000,
-    9:  2500,
-    10: 3000,
+ARTIFACT_SLOT_REQUIREMENTS = {
+    4: {"level": 20, "cost": 12000},
+    5: {"level": 35, "cost": 22000},
+    6: {"level": 50, "cost": 36000},
+    7: {"level": 65, "cost": 56000},
+    8: {"level": 80, "cost": 84000},
+    9: {"level": 100, "cost": 120000},
+    10: {"level": 120, "cost": 170000},
 }
+MIN_LEVEL_FOR_ARTIFACT_SLOT = min(v["level"] for v in ARTIFACT_SLOT_REQUIREMENTS.values())
+ARTIFACT_SLOT_COSTS = {slot: int(req["cost"]) for slot, req in ARTIFACT_SLOT_REQUIREMENTS.items()}
 
 # === Кэш ===
 CACHE_TTL = 60  # секунд

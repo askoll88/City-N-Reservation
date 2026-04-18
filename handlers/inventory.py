@@ -664,25 +664,36 @@ def show_equipped_artifacts(player, vk, user_id: int):
 def show_artifact_slots(player, vk, user_id: int):
     """Показать слоты для артефактов"""
     from main import create_inventory_keyboard
+    from infra import config
 
     equipped = player.equipped_artifacts
-    max_slots = player.artifact_slots
+    current_slots = int(player.artifact_slots)
 
     msg = f"Слоты для артефактов:\n\n"
-    msg += f"Надето: {len(equipped)}/{max_slots}\n\n"
+    msg += f"Надето: {len(equipped)}/{current_slots}\n\n"
 
-    if len(equipped) >= max_slots:
-        msg += "МАКСИМУМ СЛОТОВ!\n\n"
-        msg += "Купи дополнительные слоты у Учёного на КПП."
+    if current_slots >= config.MAX_ARTIFACT_SLOTS:
+        msg += "МАКСИМУМ СЛОТОВ ДОСТИГНУТ.\n\n"
+        msg += "Ты полностью прокачал контейнер артефактов."
     else:
-        next_slot_cost = 500 + (max_slots - 3) * 250
-        msg += f"Следующий слот: {next_slot_cost} руб.\n"
-        msg += f"Твои деньги: {player.money} руб.\n\n"
+        next_slot = current_slots + 1
+        req = config.ARTIFACT_SLOT_REQUIREMENTS.get(next_slot, {})
+        need_level = int(req.get("level", config.MIN_LEVEL_FOR_ARTIFACT_SLOT))
+        need_money = int(req.get("cost", 0))
 
-        if player.money >= next_slot_cost:
-            msg += "Напиши 'купить слот' чтобы приобрести."
+        msg += f"Следующий слот: {next_slot}/10\n"
+        msg += f"Требуется уровень: {need_level}\n"
+        msg += f"Цена: {need_money} руб.\n"
+        msg += f"Твои деньги: {player.money} руб.\n\n"
+        msg += "Покупка доступна у Барыги на Черном рынке.\n"
+        msg += "Команда: купить слот\n\n"
+
+        if player.level < need_level:
+            msg += f"⛔ Не хватает уровня: {player.level}/{need_level}"
+        elif player.money < need_money:
+            msg += f"⛔ Не хватает денег: {player.money}/{need_money} руб."
         else:
-            msg += "НЕ ХВАТАЕТ ДЕНЕГ."
+            msg += "✅ Условия выполнены. Можно покупать."
 
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
@@ -709,7 +720,7 @@ def show_artifact_help(player, vk, user_id: int):
         "- Уклонение: шанс уклониться\n"
         "- Радиация: ВНИМАНИЕ! Отрицательное значение лечит, положительное — наносит урон!\n\n"
         "Слоты:\n"
-        "Базово 3 слота. Купи дополнительные у Учёного."
+        "Базово 3 слота. Дополнительные слоты покупаются у Барыги на Черном рынке."
     )
 
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
@@ -822,13 +833,11 @@ def handle_sell_item(player, item_name: str, vk, user_id: int):
 
 def handle_buy_artifact_slot(player, vk, user_id: int):
     """Купить слот для артефакта"""
-    from main import create_inventory_keyboard
     from infra import config
 
-    max_slots = player.artifact_slots
-    cost = config.ARTIFACT_SLOT_COSTS.get(max_slots + 1)
+    current_slots = int(player.artifact_slots)
 
-    if max_slots >= config.MAX_ARTIFACT_SLOTS:
+    if current_slots >= config.MAX_ARTIFACT_SLOTS:
         vk.messages.send(
             user_id=user_id,
             message=f"Нельзя купить больше слотов. Максимум: {config.MAX_ARTIFACT_SLOTS}.",
@@ -836,18 +845,23 @@ def handle_buy_artifact_slot(player, vk, user_id: int):
         )
         return
 
-    if not cost:
+    next_slot = current_slots + 1
+    req = config.ARTIFACT_SLOT_REQUIREMENTS.get(next_slot)
+    if not req:
         vk.messages.send(
             user_id=user_id,
-            message="Нельзя купить больше слотов.",
+            message="Для следующего слота нет настроек покупки. Обратись к администратору.",
             random_id=0
         )
         return
 
-    if player.level < config.MIN_LEVEL_FOR_ARTIFACT_SLOT:
+    need_level = int(req.get("level", config.MIN_LEVEL_FOR_ARTIFACT_SLOT))
+    cost = int(req.get("cost", 0))
+
+    if player.level < need_level:
         vk.messages.send(
             user_id=user_id,
-            message=f"Нужен {config.MIN_LEVEL_FOR_ARTIFACT_SLOT} уровень для покупки слотов.",
+            message=f"Для слота {next_slot}/10 нужен {need_level} уровень. Сейчас у тебя {player.level}.",
             random_id=0
         )
         return
@@ -861,7 +875,7 @@ def handle_buy_artifact_slot(player, vk, user_id: int):
         return
 
     player.money -= cost
-    player.artifact_slots += 1
+    player.artifact_slots = next_slot
 
     database.update_user_stats(
         user_id,
@@ -869,9 +883,21 @@ def handle_buy_artifact_slot(player, vk, user_id: int):
         artifact_slots=player.artifact_slots
     )
 
+    follow_req = config.ARTIFACT_SLOT_REQUIREMENTS.get(player.artifact_slots + 1)
+    next_hint = ""
+    if follow_req:
+        next_hint = (
+            f"\nСледующий апгрейд: слот {player.artifact_slots + 1}/10 "
+            f"(ур. {int(follow_req.get('level', 1))}, {int(follow_req.get('cost', 0))} руб.)"
+        )
+
     vk.messages.send(
         user_id=user_id,
-        message=f"Куплен слот для артефакта!\nТеперь у тебя {player.artifact_slots} слотов.\nПотрачено: {cost} руб.",
+        message=(
+            f"Куплен слот для артефакта у Барыги!\n"
+            f"Теперь у тебя {player.artifact_slots}/10 слотов.\n"
+            f"Потрачено: {cost} руб.{next_hint}"
+        ),
         random_id=0
     )
 
