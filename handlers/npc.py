@@ -197,6 +197,21 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
         handle_buy_artifact_slot(player, vk, user_id)
         return True
 
+    if dialog_id == "рынокигроков":
+        if player.current_location_id != "черный рынок":
+            vk.messages.send(
+                user_id=user_id,
+                message="📈 P2P рынок доступен только на локации «Черный рынок».",
+                keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+                random_id=0
+            )
+            return True
+
+        from handlers.market import show_market_menu
+        clear_dialog_state(user_id)
+        show_market_menu(player, vk, user_id)
+        return True
+
     return False
 
 

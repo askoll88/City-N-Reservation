@@ -119,7 +119,7 @@ def create_location_keyboard(location_id: str, player_level: int = None):
 
     # --- Чёрный рынок ---
     elif location_id == "черный рынок":
-        keyboard.add_button("Товары", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button("Поговорить", color=VkKeyboardColor.POSITIVE)
         keyboard.add_button("Рынок игроков", color=VkKeyboardColor.PRIMARY)
         keyboard.add_line()
         keyboard.add_button("В город", color=VkKeyboardColor.NEGATIVE)
@@ -266,13 +266,13 @@ def create_scientist_shop_keyboard():
 
 
 def create_blackmarket_keyboard():
-    """Магазин на Чёрном рынке"""
+    """Интерфейс Черного рынка (торговля + P2P)."""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Купить", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Продать", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_line()
+    keyboard.add_button("Поговорить", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("Рынок игроков", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Мои лоты", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Купить", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("Продать", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard

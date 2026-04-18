@@ -436,6 +436,15 @@ def handle_npc_selection(player, vk, user_id: int, text: str):
     
     npc_id = npc_map.get(text)
     if npc_id:
+        current_location_npcs = {npc.id for npc in get_npc_by_location(player.current_location_id)}
+        if npc_id not in current_location_npcs:
+            vk.messages.send(
+                user_id=user_id,
+                message="😶 Этого NPC нет на текущей локации. Нажми «Поговорить», чтобы увидеть доступных.",
+                keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+                random_id=0
+            )
+            return True
         show_npc_dialog(player, vk, user_id, npc_id)
         return True
     
@@ -522,15 +531,15 @@ def handle_trade_commands(player, vk, user_id: int, text: str):
         return True
     
     if location_id == 'черный рынок':
-        from handlers.keyboards import create_blackmarket_keyboard
+        from handlers.keyboards import create_npc_select_keyboard
         vk.messages.send(
             user_id=user_id,
             message=(
                 "🕴️Барыга:\n\n«Купля и продажа только через меня.\n"
                 "Покажу общую витрину и скуплю любые предметы.\n\n"
-                "📈 Рынок игроков — отдельно, через P2P.»"
+                "Сначала выбери, с кем говорить.»"
             ),
-            keyboard=create_blackmarket_keyboard().get_keyboard(),
+            keyboard=create_npc_select_keyboard(location_id).get_keyboard(),
             random_id=0
         )
         return True
@@ -565,7 +574,6 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
         return False
 
     from handlers.inventory import show_trader_shop_all, show_trader_sell_all
-    from handlers.keyboards import create_blackmarket_keyboard
     from handlers.market import (
         show_market_menu,
         handle_market_input,
