@@ -667,6 +667,10 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         handle_npc_back(player, vk, user_id)
         return True
 
+    if text == 'назад к наставнику':
+        show_npc_dialog(player, vk, user_id, npc_id, None)
+        return True
+
     if text == 'назад' and stage not in ("shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_food", "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts"):
         handle_npc_back(player, vk, user_id)
         return True
@@ -699,8 +703,13 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
     from models.npcs import get_npc
     npc = get_npc(npc_id)
     if npc:
-        menu = npc.get_menu()
-        for dialog_id in menu:
+        dialog_ids = list(npc.get_menu())
+        if npc_id == "наставник":
+            for hidden_dialog_id in getattr(npc, "data", {}).get("dialogs", {}).keys():
+                if hidden_dialog_id not in dialog_ids:
+                    dialog_ids.append(hidden_dialog_id)
+
+        for dialog_id in dialog_ids:
             question = npc.get_question_text(dialog_id)
             if question and (text == question.lower() or text == dialog_id):
                 show_npc_dialog(player, vk, user_id, npc_id, dialog_id)

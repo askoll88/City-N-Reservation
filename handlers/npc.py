@@ -17,6 +17,7 @@ from handlers.keyboards import (
     create_location_keyboard, 
     create_npc_dialog_keyboard,
     create_npc_select_keyboard,
+    create_class_selection_keyboard,
     create_kpp_shop_keyboard
 )
 from handlers.inventory import (
@@ -835,7 +836,7 @@ def _handle_class_selection_menu(player, vk, user_id: int, npc_id: str):
             f"{change_note}\n\n"
             "Выбери специализацию кнопкой ниже."
         ),
-        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        keyboard=create_class_selection_keyboard().get_keyboard(),
         random_id=0
     )
     return True

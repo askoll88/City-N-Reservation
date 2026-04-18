@@ -446,19 +446,35 @@ def create_npc_dialog_keyboard(npc_id: str):
         return create_location_keyboard("кпп")
 
     menu = npc.get_menu()
-    row_buttons = 0
     for dialog_id in menu:
         question = npc.get_question_text(dialog_id)
         if question:
             keyboard.add_button(question, color=VkKeyboardColor.SECONDARY)
-            row_buttons += 1
-            if row_buttons >= 2:
-                keyboard.add_line()
-                row_buttons = 0
+            keyboard.add_line()
+    keyboard.add_button("К выбору NPC", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_class_selection_keyboard():
+    """Отдельная клавиатура выбора класса у Наставника."""
+    keyboard = VkKeyboard(one_time=False)
+    from models.classes import get_all_classes
+
+    mentor = get_npc("наставник")
+    row_buttons = 0
+    for class_id in get_all_classes().keys():
+        label = mentor.get_question_text(class_id) if mentor else None
+        if not label:
+            label = class_id
+        keyboard.add_button(label, color=VkKeyboardColor.PRIMARY)
+        row_buttons += 1
+        if row_buttons >= 2:
+            keyboard.add_line()
+            row_buttons = 0
 
     if row_buttons:
         keyboard.add_line()
-    keyboard.add_button("К выбору NPC", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Назад к наставнику", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
