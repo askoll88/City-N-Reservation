@@ -915,38 +915,140 @@ def handle_sleep(player, vk, user_id: int):
         vk.messages.send(user_id=user_id, message="Небезопасно спать здесь. Найди убежище.", random_id=0)
 
 
+def _get_player_rank_info(player) -> tuple[int, str, int]:
+    """Вернуть тир, название и минимальный уровень текущего ранга."""
+    tier = 1
+    try:
+        getter = getattr(player, "_get_rank_tier", None)
+        if callable(getter):
+            tier = int(getter() or 1)
+    except Exception:
+        tier = 1
+
+    rank_tiers = getattr(player, "RANK_TIERS", []) or []
+    tier = max(1, min(len(rank_tiers) or 1, tier))
+    if not rank_tiers:
+        return tier, "Новичок", 1
+
+    rank = rank_tiers[tier - 1]
+    return tier, str(rank.get("name", "Новичок")), int(rank.get("min_level", 1) or 1)
+
+
+def calculate_hospital_treatment_price(
+    player_level: int,
+    rank_tier: int,
+    missing_hp: int,
+    missing_energy: int,
+    treatment_count: int,
+    rank_min_level: int = 1,
+) -> dict:
+    """
+    Посчитать цену лечения.
+
+    Цена зависит от фактически восстановленных HP/энергии, но не превышает
+    персональный потолок текущего ранга. Это защищает ранние уровни от
+    взрослой экономики и убирает одинаковую цену за лёгкую и тяжёлую травму.
+    """
+    from infra import config
+
+    level = max(1, int(player_level or 1))
+    rank = max(1, int(rank_tier or 1))
+    hp = max(0, int(missing_hp or 0))
+    energy = max(0, int(missing_energy or 0))
+    treatments = max(0, int(treatment_count or 0))
+    rank_floor = max(1, int(rank_min_level or 1))
+
+    absolute_cap = max(0, int(getattr(config, "HEAL_PRICE_CAP", 25000) or 25000))
+    if treatments == 0:
+        return {"price": 0, "raw_price": 0, "cap": absolute_cap, "capped": False, "free": True}
+
+    if hp <= 0 and energy <= 0:
+        return {"price": 0, "raw_price": 0, "cap": absolute_cap, "capped": False, "free": False}
+
+    base = max(0, int(getattr(config, "HEAL_BASE_PRICE", 80) or 80))
+    hp_price = max(0, int(getattr(config, "HEAL_HP_PRICE", 6) or 6))
+    energy_price = max(0, int(getattr(config, "HEAL_ENERGY_PRICE", 2) or 2))
+    level_fee = max(0, int(getattr(config, "HEAL_LEVEL_FEE", 8) or 8))
+    rank_fee = max(0, int(getattr(config, "HEAL_RANK_FEE", 25) or 25))
+
+    raw_price = (
+        base
+        + hp * hp_price
+        + energy * energy_price
+        + max(0, level - 1) * level_fee
+        + max(0, rank - 1) * rank_fee
+    )
+
+    rank_cap_base = max(0, int(getattr(config, "HEAL_RANK_CAP_BASE", 350) or 350))
+    rank_cap_step = max(0, int(getattr(config, "HEAL_RANK_CAP_STEP", 300) or 300))
+    rank_cap_level_step = max(0, int(getattr(config, "HEAL_RANK_CAP_LEVEL_STEP", 40) or 40))
+    rank_cap = (
+        rank_cap_base
+        + max(0, rank - 1) * rank_cap_step
+        + max(0, level - rank_floor) * rank_cap_level_step
+    )
+    cap = max(0, min(absolute_cap, rank_cap))
+    price = min(raw_price, cap)
+    return {
+        "price": int(price),
+        "raw_price": int(raw_price),
+        "cap": int(cap),
+        "capped": raw_price > cap,
+        "free": False,
+    }
+
+
 def handle_heal(player, vk, user_id: int):
     """Лечиться в больнице
 
     Ценообразование:
       - 1-е лечение: бесплатно (помощь новичкам)
-      - 2+ лечение: базовая цена + бонус за уровень, с потолком
-
-    Формула: min(HEAL_BASE_PRICE + (level - 1) * HEAL_LEVEL_MULTIPLIER, HEAL_PRICE_CAP)
-    При стартовых настройках: 100 + (level-1) * 50, максимум 3000
+      - 2+ лечение: фактический объём помощи + мягкие надбавки уровня/ранга
+      - цена ограничена персональным потолком текущего ранга
     """
     from main import create_location_keyboard
-    from infra import database, config
-    from infra import config
+    from infra import database
 
     if player.current_location_id == "больница":
         user_data = database.get_user_by_vk(user_id)
         treatment_count = user_data.get('hospital_treatments', 0) if user_data else 0
+        old_hp = int(player.health)
+        old_energy = int(player.energy)
+        missing_hp = max(0, int(player.max_health) - old_hp)
+        missing_energy = max(0, 100 - old_energy)
 
-        # Первое лечение всегда бесплатно
-        if treatment_count == 0:
-            price = 0
-        else:
-            base = getattr(config, 'HEAL_BASE_PRICE', 100)
-            multiplier = getattr(config, 'HEAL_LEVEL_MULTIPLIER', 50)
-            cap = getattr(config, 'HEAL_PRICE_CAP', 3000)
-            price = min(base + (player.level - 1) * multiplier, cap)
+        if missing_hp <= 0 and missing_energy <= 0:
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    "🏥 Врач осмотрел тебя и убрал инструменты.\n\n"
+                    "Серьёзной помощи не требуется: здоровье и энергия уже в норме."
+                ),
+                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0
+            )
+            return
+
+        rank_tier, rank_name, rank_min_level = _get_player_rank_info(player)
+        price_info = calculate_hospital_treatment_price(
+            player_level=player.level,
+            rank_tier=rank_tier,
+            missing_hp=missing_hp,
+            missing_energy=missing_energy,
+            treatment_count=treatment_count,
+            rank_min_level=rank_min_level,
+        )
+        price = int(price_info["price"])
 
         # Проверяем, хватает ли денег
         if player.money < price:
             vk.messages.send(
                 user_id=user_id,
-                message=f"💸 Лечение стоит {price:,} руб., а у тебя {player.money:,} руб.\n\nСначала заработай деньги!",
+                message=(
+                    f"💸 Лечение стоит {price:,} руб., а у тебя {player.money:,} руб.\n\n"
+                    f"Цена рассчитана по травмам: +{missing_hp} HP, +{missing_energy} энергии.\n"
+                    f"Потолок твоего ранга ({rank_name}): {price_info['cap']:,} руб."
+                ),
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )
@@ -963,18 +1065,23 @@ def handle_heal(player, vk, user_id: int):
         database.update_user_stats(user_id, money=new_money, hospital_treatments=new_treatment_count)
 
         # Формируем сообщение
-        if price == 0:
+        if bool(price_info.get("free")):
             price_text = "бесплатно (первое лечение)"
+        elif price_info.get("capped"):
+            price_text = (
+                f"{price:,} руб. (по потолку ранга {rank_name}; "
+                f"без потолка было бы {price_info['raw_price']:,} руб.)"
+            )
         else:
-            price_text = f"{price:,} руб. (лечение #{new_treatment_count}, уровень {player.level})"
+            price_text = f"{price:,} руб. (ранг {rank_name}, уровень {player.level})"
 
         message = (
             f"🏥ЛЕЧЕНИЕ В БОЛЬНИЦЕ\n\n"
             f"Врач осмотрел тебя, перевязал раны, сделал уколы.\n\n"
             f"✅ЗДОРОВЬЕ ПОЛНОСТЬЮ ВОССТАНОВЛЕНО!\n"
-            f"   HP: {player.health}/{player.max_health}\n\n"
+            f"   HP: {old_hp} → {player.health}/{player.max_health}\n\n"
             f"⚡ЭНЕРГИЯ ВОССТАНОВЛЕНА!\n"
-            f"   Энергия: {player.energy}/100\n\n"
+            f"   Энергия: {old_energy} → {player.energy}/100\n\n"
             f"💰 Оплата: {price_text}\n"
             f"   Осталось денег: {new_money:,} руб.\n\n"
             f"📊 Всего лечений: {new_treatment_count}"

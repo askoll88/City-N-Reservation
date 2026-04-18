@@ -3278,6 +3278,99 @@ def _calc_daily_xp_scale(level: int, rank_tier: int) -> float:
     return min(2.8, level_mult * rank_mult)
 
 
+def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None:
+    """Синхронизировать уровень после прямого SQL-начисления XP."""
+    try:
+        from models.player import Player as _PlayerModel
+    except Exception:
+        logger.exception("Не удалось импортировать Player для синхронизации уровня: vk_id=%s", vk_id)
+        return None
+
+    old_level = int(user_row.get("level", 1) or 1)
+    level = old_level
+    experience = int(user_row.get("experience", 0) or 0)
+    max_level = int(getattr(_PlayerModel, "MAX_LEVEL", 297) or 297)
+    levels = getattr(_PlayerModel, "LEVELS", {}) or {}
+    rank_tiers = getattr(_PlayerModel, "RANK_TIERS", []) or []
+    rank_tier = max(1, int(user_row.get("rank_tier", 1) or 1))
+
+    if rank_tiers and rank_tier < len(rank_tiers):
+        safe_tier = max(1, min(len(rank_tiers), rank_tier))
+        rank_level_cap = int(rank_tiers[safe_tier - 1].get("max_level", max_level) or max_level)
+    else:
+        rank_level_cap = max_level
+    rank_level_cap = max(1, min(max_level, rank_level_cap))
+
+    stat_changes = []
+    stats = {
+        "strength": int(user_row.get("strength", 1) or 1),
+        "stamina": int(user_row.get("stamina", 1) or 1),
+        "perception": int(user_row.get("perception", 1) or 1),
+        "luck": int(user_row.get("luck", 1) or 1),
+    }
+    max_weight = int(user_row.get("max_weight", 10) or 10)
+    max_health_bonus = int(user_row.get("max_health_bonus", 0) or 0)
+    hp_upgrade_level = int(user_row.get("hp_upgrade_level", 0) or 0)
+
+    while level < max_level and level < rank_level_cap:
+        exp_needed = int(levels.get(level + 1, levels.get(max_level, 0)) or 0)
+        if exp_needed <= 0 or experience < exp_needed:
+            break
+
+        level += 1
+        stat = random.choice(("strength", "stamina", "perception", "luck"))
+        old_value = stats[stat]
+        stats[stat] = old_value + 1
+        stat_changes.append({"stat": stat, "old": old_value, "new": stats[stat]})
+        if stat == "strength":
+            max_weight += 2
+
+    if level == old_level:
+        return None
+
+    max_health = (
+        stats["stamina"] * 25
+        + max_health_bonus
+        + hp_upgrade_level * int(getattr(config, "HP_UPGRADE_PER_LEVEL", 3) or 3)
+    )
+
+    cursor.execute(
+        """
+        UPDATE users
+        SET level = %s,
+            health = %s,
+            energy = 100,
+            strength = %s,
+            stamina = %s,
+            perception = %s,
+            luck = %s,
+            max_weight = %s
+        WHERE vk_id = %s
+        RETURNING id, money, experience, level, health, energy,
+                  strength, stamina, perception, luck, max_weight
+        """,
+        (
+            level,
+            max_health,
+            stats["strength"],
+            stats["stamina"],
+            stats["perception"],
+            stats["luck"],
+            max_weight,
+            vk_id,
+        ),
+    )
+    updated = cursor.fetchone()
+    return {
+        "old_level": old_level,
+        "new_level": level,
+        "rank_level_cap": rank_level_cap,
+        "stat_changes": stat_changes,
+        "rank_cap_reached": level >= rank_level_cap and level < max_level,
+        "user": updated,
+    }
+
+
 def claim_daily_rewards(vk_id: int) -> dict | None:
     """
     Забрать награду за ежедневные задания.
@@ -3298,7 +3391,9 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 return {"error": "already_claimed"}
 
             cursor.execute("""
-                SELECT id, level, rank_tier
+                SELECT id, level, rank_tier, experience,
+                       health, energy, strength, stamina, perception, luck,
+                       max_weight, max_health_bonus, hp_upgrade_level
                 FROM users
                 WHERE vk_id = %s
                 FOR UPDATE
@@ -3399,9 +3494,14 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 SET money = money + %s,
                     experience = experience + %s
                 WHERE vk_id = %s
-                RETURNING id, money, experience
+                RETURNING id, money, experience, level, rank_tier,
+                          health, energy, strength, stamina, perception, luck,
+                          max_weight, max_health_bonus, hp_upgrade_level
             """, (total_money, total_xp, vk_id))
             user_row = cursor.fetchone()
+            level_up = _apply_level_ups_after_xp(cursor, vk_id, user_row) if user_row else None
+            if level_up and level_up.get("user"):
+                user_row = level_up["user"]
 
             # Бонусные предметы выдаём здесь же, в той же транзакции.
             if user_internal_id:
@@ -3431,6 +3531,8 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 "new_streak": new_streak,
                 "new_money": user_row["money"] if user_row else 0,
                 "new_xp": user_row["experience"] if user_row else 0,
+                "new_level": user_row["level"] if user_row else user_level,
+                "level_up": level_up,
             }
     except Exception as e:
         logger.error("claim_daily_rewards ошибка для vk_id=%s: %s", vk_id, e)

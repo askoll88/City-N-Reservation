@@ -1,6 +1,8 @@
 """
 Классы игрока и инвентаря
 """
+from __future__ import annotations
+
 from infra import config as game_config
 from infra import database
 import logging
@@ -301,6 +303,7 @@ class Player:
 
         # Пересчитываем переносимый вес сразу с учетом всех источников.
         self._recalculate_max_weight()
+        self._last_level_up_message = self._check_level_up()
 
     def _get_artifact_bonuses(self) -> dict:
         """Получить бонусы от экипированных артефактов"""
@@ -626,12 +629,15 @@ class Player:
         Блокировать набор XP на потолке текущего ранга,
         пока ранг не повышен у НПС.
         """
+        return int(self.level) >= self._get_current_rank_level_cap()
+
+    def _get_current_rank_level_cap(self) -> int:
+        """Максимальный уровень, доступный на текущем ранге."""
         tier = self._get_rank_tier()
         if tier >= len(self.RANK_TIERS):
-            return False
+            return self.MAX_LEVEL
         current_rank = self.RANK_TIERS[tier - 1]
-        level_cap = int(current_rank.get("max_level", self.MAX_LEVEL) or self.MAX_LEVEL)
-        return int(self.level) >= level_cap
+        return min(self.MAX_LEVEL, int(current_rank.get("max_level", self.MAX_LEVEL) or self.MAX_LEVEL))
 
     @property
     def fire_defense(self) -> int:
@@ -876,7 +882,7 @@ class Player:
             self.level = max(1, min(self.MAX_LEVEL, level))
         if experience is not None:
             self.experience = max(0, experience)
-            self._check_level_up()
+            self._last_level_up_message = self._check_level_up(persist=False)
         if strength is not None:
             self.strength = max(1, min(20, strength))
         if stamina is not None:
@@ -905,6 +911,14 @@ class Player:
             update_fields["level"] = self.level
         if experience is not None:
             update_fields["experience"] = self.experience
+            update_fields["level"] = self.level
+            update_fields["health"] = self.health
+            update_fields["energy"] = self.energy
+            update_fields["strength"] = self.strength
+            update_fields["stamina"] = self.stamina
+            update_fields["perception"] = self.perception
+            update_fields["luck"] = self.luck
+            update_fields["max_weight"] = self.max_weight
         if strength is not None:
             update_fields["strength"] = self.strength
             update_fields["max_weight"] = self.max_weight
@@ -1024,29 +1038,42 @@ class Player:
 
         logger.info(f"Игрок {self.user_id} умер от радиации. Потеряно: денег={money_lost}, опыта={experience_lost}. HP={self.health}, Energy={self.energy}")
 
-    def _check_level_up(self) -> str | None:
-        """Проверить повышение уровня. Возвращает сообщение о повышении или None"""
-        exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
-        if self.experience >= exp_needed and self.level < self.MAX_LEVEL:
-            old_level = self.level
+    def _check_level_up(self, persist: bool = True) -> str | None:
+        """Проверить повышение уровня. Возвращает сообщение о повышении или None."""
+        if self.level >= self.MAX_LEVEL:
+            return None
+
+        old_level = int(self.level)
+        rank_level_cap = self._get_current_rank_level_cap()
+        stat_changes = []
+
+        import random
+        stat_names = {
+            'strength': 'Сила',
+            'stamina': 'Выносливость',
+            'perception': 'Восприятие',
+            'luck': 'Удача'
+        }
+
+        while self.level < self.MAX_LEVEL and self.level < rank_level_cap:
+            exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
+            if self.experience < exp_needed:
+                break
+
             self.level += 1
-
-            self.health = self.max_health
-            self.energy = 100
-
-            import random
             stat = random.choice(['strength', 'stamina', 'perception', 'luck'])
             old_value = getattr(self, stat)
             setattr(self, stat, old_value + 1)
-            self._recalculate_max_weight()
+            stat_changes.append((stat, old_value, old_value + 1))
 
-            stat_names = {
-                'strength': 'Сила',
-                'stamina': 'Выносливость',
-                'perception': 'Восприятие',
-                'luck': 'Удача'
-            }
+        if self.level == old_level:
+            return None
 
+        self.health = self.max_health
+        self.energy = 100
+        self._recalculate_max_weight()
+
+        if persist:
             database.update_user_stats(
                 self.user_id,
                 level=self.level,
@@ -1059,15 +1086,19 @@ class Player:
                 max_weight=self.max_weight
             )
 
-            return (
-                f"НОВЫЙ УРОВЕНЬ!\n\n"
-                f"Был уровень: {old_level} -> Стал: {self.level}\n"
-                f"Здоровье восстановлено: {self.health}\n\n"
-                f"+1 к характеристике {stat_names[stat]}!\n"
-                f"Было: {old_value} -> Стало: {old_value + 1}"
-            )
+        stat_lines = []
+        for stat, old_value, new_value in stat_changes:
+            stat_lines.append(f"+1 к характеристике {stat_names[stat]}: {old_value} -> {new_value}")
 
-        return None
+        message = (
+            f"НОВЫЙ УРОВЕНЬ!\n\n"
+            f"Был уровень: {old_level} -> Стал: {self.level}\n"
+            f"Здоровье восстановлено: {self.health}\n\n"
+            + "\n".join(stat_lines)
+        )
+        if self.level >= rank_level_cap and self.level < self.MAX_LEVEL:
+            message += "\n\nДостигнут потолок текущего ранга. Для дальнейшего роста повысь ранг у Куратора рангов."
+        return message
 
     def add_experience(self, amount: int) -> int:
         """Добавить опыт и проверить повышение уровня. Возвращает реально начисленный XP."""
