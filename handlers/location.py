@@ -28,6 +28,8 @@ TRAVEL_EVENT_CHANCE_FORCED = 28
 TRAVEL_ENEMY_CHANCE = 30
 TRAVEL_ENEMY_CHANCE_FORCED = 42
 TRAVEL_POST_EMISSION_ELITE_CHANCE = 0.12
+SHELTER_REGEN_TS_FLAG = "shelter_energy_regen_ts"
+SHELTER_REGEN_ACTIVE_FLAG = "shelter_energy_regen_active"
 
 
 def _should_use_travel_corridor(from_location: str, to_location: str) -> bool:
@@ -272,6 +274,10 @@ def _arrive_to_location(player, vk, user_id: int, location_id: str, from_locatio
 
     player.current_location_id = location_id
     database.update_user_location(user_id, location_id)
+    # Фиксируем якорь пассивного регена энергии по факту прибытия в локацию.
+    now_ts = int(time.time())
+    database.set_user_flag(user_id, SHELTER_REGEN_TS_FLAG, now_ts)
+    database.set_user_flag(user_id, SHELTER_REGEN_ACTIVE_FLAG, 1 if location_id == "убежище" else 0)
     set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
 
     track_quest_visit(user_id, location_id, vk=vk)

@@ -199,6 +199,7 @@ def init_db():
                 previous_location VARCHAR(50),
                 hospital_treatments INTEGER DEFAULT 0,
                 newbie_kit_received INTEGER DEFAULT 0,
+                rank_tier       INTEGER DEFAULT 1,
                 is_admin        INTEGER DEFAULT 0,
                 is_banned       INTEGER DEFAULT 0,
                 ban_reason      TEXT
@@ -461,6 +462,7 @@ def _migrate_legacy_schema():
             ("hp_upgrade_level",      "INTEGER DEFAULT 0"),
             ("artifact_slots",        "INTEGER DEFAULT 3"),
             ("shells",                "INTEGER DEFAULT 0"),
+            ("rank_tier",             "INTEGER DEFAULT 1"),
             ("is_admin",              "INTEGER DEFAULT 0"),
             ("is_banned",             "INTEGER DEFAULT 0"),
             ("ban_reason",            "TEXT"),
@@ -470,6 +472,28 @@ def _migrate_legacy_schema():
             if col not in existing:
                 cursor.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {definition}")
                 logger.info("Добавлена колонка users.%s", col)
+
+        # Перенос ранга из user_flags в users.rank_tier (если ранее хранили во флагах).
+        cursor.execute("""
+            UPDATE users u
+            SET rank_tier = GREATEST(1, COALESCE(uf.value, 1))
+            FROM user_flags uf
+            WHERE uf.user_id = u.id
+              AND uf.flag_name = 'rank_tier'
+              AND (
+                  u.rank_tier IS NULL
+                  OR u.rank_tier <> GREATEST(1, COALESCE(uf.value, 1))
+              )
+        """)
+
+        # Нормализация: ранг не может быть < 1 или NULL.
+        cursor.execute("""
+            UPDATE users
+            SET rank_tier = 1
+            WHERE rank_tier IS NULL OR rank_tier < 1
+        """)
+        cursor.execute("ALTER TABLE users ALTER COLUMN rank_tier SET DEFAULT 1")
+        cursor.execute("ALTER TABLE users ALTER COLUMN rank_tier SET NOT NULL")
 
 
 # ---------------------------------------------------------------------------
@@ -864,7 +888,11 @@ def _build_user_dict(user_row: dict, equipment_rows: list, flags_rows: list) -> 
 
     # Флаги
     for row in flags_rows:
-        result[row["flag_name"]] = row["value"]
+        flag_name = row["flag_name"]
+        # rank_tier хранится в users, не даём устаревшему флагу переопределять значение.
+        if flag_name == "rank_tier":
+            continue
+        result[flag_name] = row["value"]
 
     result.setdefault("newbie_kit_received", 0)
     # inventory_section хранится в основной таблице users
@@ -1806,7 +1834,7 @@ def admin_sync_ranks_by_level(rank_tiers: list[dict], overwrite_existing: bool =
     overwrite_existing=True:
         Перезаписывать существующий rank_tier по таблице рангов.
     overwrite_existing=False:
-        Выдавать ранг только тем, у кого флаг rank_tier отсутствует.
+        Выдавать ранг только тем, у кого rank_tier не задан/некорректен.
     """
     if not rank_tiers:
         return {"success": False, "message": "Список рангов пуст."}
@@ -1818,11 +1846,8 @@ def admin_sync_ranks_by_level(rank_tiers: list[dict], overwrite_existing: bool =
                 u.id AS user_id,
                 u.vk_id,
                 u.level,
-                uf.value AS current_rank_tier
+                u.rank_tier AS current_rank_tier
             FROM users u
-            LEFT JOIN user_flags uf
-              ON uf.user_id = u.id
-             AND uf.flag_name = 'rank_tier'
             ORDER BY u.id
             """
         )
@@ -1853,8 +1878,9 @@ def admin_sync_ranks_by_level(rank_tiers: list[dict], overwrite_existing: bool =
 
             current_raw = row.get("current_rank_tier")
             current_tier = int(current_raw) if current_raw is not None else None
+            has_rank = current_tier is not None and current_tier > 0
 
-            if (not overwrite_existing) and (current_tier is not None):
+            if (not overwrite_existing) and has_rank:
                 skipped_existing += 1
                 continue
 
@@ -1862,7 +1888,7 @@ def admin_sync_ranks_by_level(rank_tiers: list[dict], overwrite_existing: bool =
                 unchanged += 1
                 continue
 
-            if current_tier is None:
+            if not has_rank:
                 new_assignments += 1
             else:
                 reassigned += 1
@@ -1872,12 +1898,11 @@ def admin_sync_ranks_by_level(rank_tiers: list[dict], overwrite_existing: bool =
         if updates:
             cursor.executemany(
                 """
-                INSERT INTO user_flags (user_id, flag_name, value)
-                VALUES (%s, 'rank_tier', %s)
-                ON CONFLICT (user_id, flag_name) DO UPDATE
-                SET value = EXCLUDED.value
+                UPDATE users
+                SET rank_tier = %s
+                WHERE id = %s
                 """,
-                updates,
+                [(tier, uid) for uid, tier in updates],
             )
 
     return {
@@ -2976,6 +3001,34 @@ def get_user_flag(vk_id: int, flag_name: str, default: int = 0) -> int:
         return row['value'] if row else default
 
 
+def get_user_rank_tier(vk_id: int, default: int = 1) -> int:
+    """Получить ранг пользователя из users.rank_tier (с fallback на legacy flag)."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT rank_tier FROM users WHERE vk_id = %s", (vk_id,))
+        row = cursor.fetchone()
+        if row and row.get("rank_tier") is not None:
+            try:
+                return max(1, int(row["rank_tier"]))
+            except (TypeError, ValueError):
+                return max(1, int(default or 1))
+    # Fallback для старых данных до миграции.
+    legacy = get_user_flag(vk_id, "rank_tier", default=default)
+    try:
+        return max(1, int(legacy))
+    except (TypeError, ValueError):
+        return max(1, int(default or 1))
+
+
+def set_user_rank_tier(vk_id: int, value: int):
+    """Сохранить ранг пользователя в users.rank_tier."""
+    safe_value = max(1, int(value or 1))
+    with db_cursor() as (cursor, _):
+        cursor.execute(
+            "UPDATE users SET rank_tier = %s WHERE vk_id = %s",
+            (safe_value, vk_id),
+        )
+
+
 def set_user_flag(vk_id: int, flag_name: str, value: int):
     """Установить значение флага пользователя."""
     with db_cursor() as (cursor, _):
@@ -3245,7 +3298,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 return {"error": "already_claimed"}
 
             cursor.execute("""
-                SELECT id, level
+                SELECT id, level, rank_tier
                 FROM users
                 WHERE vk_id = %s
                 FOR UPDATE
@@ -3256,12 +3309,18 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
 
             user_internal_id = int(user_meta["id"])
             user_level = int(user_meta.get("level", 1) or 1)
-            cursor.execute(
-                "SELECT value FROM user_flags WHERE user_id = %s AND flag_name = 'rank_tier'",
-                (user_internal_id,),
-            )
-            rank_row = cursor.fetchone()
-            user_rank_tier = int(rank_row["value"]) if rank_row and rank_row.get("value") is not None else 1
+            user_rank_tier = max(1, int(user_meta.get("rank_tier", 1) or 1))
+            rank_locked_xp = False
+            try:
+                from models.player import Player as _PlayerModel
+                tiers_total = len(_PlayerModel.RANK_TIERS)
+                safe_tier = max(1, min(tiers_total, user_rank_tier))
+                if safe_tier < tiers_total:
+                    current_rank = _PlayerModel.RANK_TIERS[safe_tier - 1]
+                    rank_level_cap = int(current_rank.get("max_level", 1) or 1)
+                    rank_locked_xp = user_level >= rank_level_cap
+            except Exception:
+                rank_locked_xp = False
 
             quests = row["quest_json"] or []
             progress = row["progress_json"] or {}
@@ -3315,6 +3374,8 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             total_xp = int(total_xp * mult)
             total_money = int(total_money * mult)
             total_xp = int(total_xp * _calc_daily_xp_scale(user_level, user_rank_tier))
+            if rank_locked_xp:
+                total_xp = 0
 
             # Бонусный предмет выдаём только на пороговых значениях.
             from game.daily_quests import resolve_streak_bonus_item

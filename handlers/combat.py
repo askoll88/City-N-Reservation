@@ -1550,15 +1550,12 @@ def _handle_shell_cache(player, vk, user_id: int):
 def _handle_intel_find(player, vk, user_id: int):
     """Находка данных/документов: деньги + опыт."""
     _, create_location_keyboard, _, _ = _get_main_imports()
-    user = database.get_user_by_vk(user_id)
-    if not user:
-        return
 
     money_gain = random.randint(90, 240)
     exp_gain = _scale_xp_reward(random.randint(8, 20), player, source="research")
-    new_money = int(user.get("money", 0)) + money_gain
-    new_exp = int(user.get("experience", 0)) + exp_gain
-    database.update_user_stats(user_id, money=new_money, experience=new_exp)
+    player.money = int(player.money) + money_gain
+    gained_xp = int(player.add_experience(exp_gain))
+    database.update_user_stats(user_id, money=player.money)
 
     vk.messages.send(
         user_id=user_id,
@@ -1567,7 +1564,7 @@ def _handle_intel_find(player, vk, user_id: int):
             "Ты нашёл планшет с маршрутами патрулей и координатами схронов.\n"
             "Информация ушла перекупщику по защищённому каналу.\n\n"
             f"💰 Деньги: +{money_gain}\n"
-            f"📘 Опыт: +{exp_gain}"
+            f"📘 Опыт: +{gained_xp}"
         ),
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
         random_id=0
@@ -2851,7 +2848,7 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     money = max(3, int(random.randint(5, 25) * reward_mult))
     shells_drop = max(1, int(round(random.randint(1, 3) * min(2.0, 0.8 + reward_mult * 0.4))))
 
-    player.experience += experience
+    gained_xp = int(player.add_experience(experience))
     player.money += money
     
     # Добавляем гильзы с учетом вместимости мешочка
@@ -2867,9 +2864,9 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     if added_shells > 0:
         track_quest_shells(user_id, count=added_shells, vk=vk)
 
-    database.update_user_stats(user_id, experience=player.experience, money=player.money)
+    database.update_user_stats(user_id, money=player.money)
     
-    level_up = player._check_level_up()
+    level_up = getattr(player, "_last_level_up_message", None)
     
     player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
 
@@ -2878,7 +2875,7 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
         f"Ты победил {combat['enemy_name']}.\n\n"
         f"{ui.section('Награда')}\n"
         f"💰 Деньги: +{money} руб.\n"
-        f"⭐ Опыт: +{experience}\n"
+        f"⭐ Опыт: +{gained_xp}\n"
         f"🎯 Гильзы: {current_shells}/{capacity}\n"
     )
     if reward_mult > 1.0:

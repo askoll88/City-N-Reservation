@@ -90,6 +90,8 @@ _user_locks_guard = threading.Lock()
 _state_cleanup_lock = threading.Lock()
 _last_state_cleanup_ts = 0.0
 _STATE_CLEANUP_INTERVAL_SEC = 60
+_SHELTER_REGEN_TS_FLAG = "shelter_energy_regen_ts"
+_SHELTER_REGEN_ACTIVE_FLAG = "shelter_energy_regen_active"
 
 
 def _maybe_cleanup_inactive_states():
@@ -108,6 +110,65 @@ def _maybe_cleanup_inactive_states():
         _last_state_cleanup_ts = now
         if removed:
             logger.debug("cleanup_inactive_states: removed=%s", removed)
+
+
+def _set_shelter_regen_anchor(user_id: int, in_shelter: bool, now_ts: int | None = None):
+    """Обновить якорь времени для пассивного регена энергии в убежище."""
+    if now_ts is None:
+        now_ts = int(time.time())
+    database.set_user_flag(user_id, _SHELTER_REGEN_TS_FLAG, int(now_ts))
+    database.set_user_flag(user_id, _SHELTER_REGEN_ACTIVE_FLAG, 1 if in_shelter else 0)
+
+
+def _apply_shelter_passive_energy_regen(player, user_id: int):
+    """
+    Применить пассивный реген энергии, если игрок находится в убежище.
+    Реген учитывает только время, проведённое в убежище.
+    """
+    if not getattr(config, "SHELTER_PASSIVE_ENERGY_REGEN_ENABLED", True):
+        return
+
+    now_ts = int(time.time())
+    in_shelter = player.current_location_id == "убежище"
+    last_ts = int(database.get_user_flag(user_id, _SHELTER_REGEN_TS_FLAG, 0) or 0)
+    was_shelter = int(database.get_user_flag(user_id, _SHELTER_REGEN_ACTIVE_FLAG, 0) or 0)
+
+    if not in_shelter:
+        # При выходе из убежища сбрасываем активный режим регена.
+        # Повторно в БД не пишем, чтобы не нагружать запросами каждый апдейт.
+        if was_shelter != 0:
+            _set_shelter_regen_anchor(user_id, in_shelter=False, now_ts=now_ts)
+        return
+
+    if was_shelter != 1 or last_ts <= 0 or now_ts <= last_ts:
+        _set_shelter_regen_anchor(user_id, in_shelter=True, now_ts=now_ts)
+        return
+
+    if int(player.energy) >= 100:
+        # На полном заряде не накапливаем будущий реген.
+        if last_ts != now_ts:
+            database.set_user_flag(user_id, _SHELTER_REGEN_TS_FLAG, now_ts)
+        return
+
+    interval = max(30, int(getattr(config, "SHELTER_PASSIVE_ENERGY_REGEN_INTERVAL_SEC", 300) or 300))
+    amount = max(1, int(getattr(config, "SHELTER_PASSIVE_ENERGY_REGEN_AMOUNT", 1) or 1))
+    elapsed = now_ts - last_ts
+    ticks = elapsed // interval
+    if ticks <= 0:
+        return
+
+    old_energy = int(player.energy)
+    gained = int(ticks * amount)
+    new_energy = min(100, old_energy + gained)
+
+    if new_energy > old_energy:
+        player.energy = new_energy
+        database.update_user_stats(user_id, energy=new_energy)
+
+    # Сохраняем остаток времени до следующего тика; при полном заряде якорь сбрасываем на now.
+    new_anchor = now_ts if new_energy >= 100 else int(last_ts + ticks * interval)
+    if new_anchor != last_ts:
+        database.set_user_flag(user_id, _SHELTER_REGEN_TS_FLAG, new_anchor)
 
 
 def _get_user_lock(user_id: int) -> threading.Lock:
@@ -142,6 +203,10 @@ def handle_message(event, vk):
     # Получаем игрока
     player = get_player(user_id)
     ensure_runtime_state_loaded(user_id)
+    try:
+        _apply_shelter_passive_energy_regen(player, user_id)
+    except Exception:
+        logger.exception("Ошибка пассивного регена энергии (user_id=%s)", user_id)
 
     # Админские команды доступны в любой локации/состоянии
     if handle_admin_commands(player, vk, user_id, text, original_text):
@@ -835,6 +900,10 @@ def _do_callback_processing(event, vk):
     if payload and payload.get("command") == "back":
         user_id = getattr(event.obj, "user_id", 0)
         player = get_player(user_id)
+        try:
+            _apply_shelter_passive_energy_regen(player, user_id)
+        except Exception:
+            logger.exception("Ошибка пассивного регена энергии в callback (user_id=%s)", user_id)
         return_location = payload.get("location") or player.previous_location or 'город'
 
         vk.messages.send(
@@ -846,6 +915,7 @@ def _do_callback_processing(event, vk):
 
         player.current_location_id = return_location
         database.update_user_location(user_id, return_location)
+        _set_shelter_regen_anchor(user_id, in_shelter=(return_location == "убежище"))
 
     vk.messages.send_message_event_answer(
         event_id=event.obj.event_id,

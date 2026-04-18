@@ -211,7 +211,6 @@ class Player:
     # Опыт для каждого уровня
     MAX_LEVEL = MAX_PLAYER_LEVEL
     LEVELS = build_level_thresholds(MAX_LEVEL)
-    RANK_FLAG_NAME = "rank_tier"
     RANK_TIERS = [
         {"name": "Новичок", "min_level": 1, "max_level": 4},
         {"name": "Салага", "min_level": 5, "max_level": 8},
@@ -298,6 +297,7 @@ class Player:
 
         # Инициализируем инвентарь
         self.inventory = Inventory(user_id)
+        self._last_level_up_message = None
 
         # Пересчитываем переносимый вес сразу с учетом всех источников.
         self._recalculate_max_weight()
@@ -506,14 +506,14 @@ class Player:
     def _get_rank_tier(self) -> int:
         """Текущий тир ранга (1..N)."""
         tiers_total = len(self.RANK_TIERS)
-        value = int(database.get_user_flag(self.user_id, self.RANK_FLAG_NAME, 1) or 1)
+        value = int(database.get_user_rank_tier(self.user_id, 1) or 1)
         return max(1, min(tiers_total, value))
 
     def _set_rank_tier(self, tier: int):
         """Сохранить тир ранга."""
         tiers_total = len(self.RANK_TIERS)
         value = max(1, min(tiers_total, int(tier or 1)))
-        database.set_user_flag(self.user_id, self.RANK_FLAG_NAME, value)
+        database.set_user_rank_tier(self.user_id, value)
 
     def get_rank_name(self) -> str:
         """Название текущего ранга игрока."""
@@ -610,7 +610,7 @@ class Player:
         return promoted
 
     def get_rank_progress_block(self) -> str:
-        """Текстовый блок ранга и требований до следующего."""
+        """Краткий текстовый блок текущего ранга без требований."""
         tier = self._get_rank_tier()
         current = self.RANK_TIERS[tier - 1]
         header = f"🏅 Ранг: {current['name']} ({current['min_level']}-{current['max_level']} ур.)"
@@ -619,13 +619,19 @@ class Player:
 
         next_tier = tier + 1
         next_rank = self.RANK_TIERS[next_tier - 1]
-        lines = self._rank_requirements_lines(next_tier)
-        return (
-            f"{header}\n"
-            f"➡️ Следующий: {next_rank['name']} (c {next_rank['min_level']} ур.)\n"
-            f"🧭 Повышение ранга: у Куратора рангов в Убежище.\n"
-            + "\n".join(lines)
-        )
+        return f"{header}\n➡️ Следующий: {next_rank['name']} (c {next_rank['min_level']} ур.)"
+
+    def _is_rank_xp_locked(self) -> bool:
+        """
+        Блокировать набор XP на потолке текущего ранга,
+        пока ранг не повышен у НПС.
+        """
+        tier = self._get_rank_tier()
+        if tier >= len(self.RANK_TIERS):
+            return False
+        current_rank = self.RANK_TIERS[tier - 1]
+        level_cap = int(current_rank.get("max_level", self.MAX_LEVEL) or self.MAX_LEVEL)
+        return int(self.level) >= level_cap
 
     @property
     def fire_defense(self) -> int:
@@ -1063,11 +1069,20 @@ class Player:
 
         return None
 
-    def add_experience(self, amount: int):
-        """Добавить опыт и проверить повышение уровня"""
-        self.experience += amount
-        self._check_level_up()
+    def add_experience(self, amount: int) -> int:
+        """Добавить опыт и проверить повышение уровня. Возвращает реально начисленный XP."""
+        gain = max(0, int(amount or 0))
+        if gain <= 0:
+            self._last_level_up_message = None
+            return 0
+        if self._is_rank_xp_locked():
+            self._last_level_up_message = None
+            return 0
+        before = int(self.experience)
+        self.experience += gain
+        self._last_level_up_message = self._check_level_up()
         database.update_user_stats(self.user_id, experience=self.experience)
+        return max(0, int(self.experience) - before)
 
     def equip_backpack(self, backpack_name: str = None) -> tuple[bool, str]:
         """Надеть или снять рюкзак"""

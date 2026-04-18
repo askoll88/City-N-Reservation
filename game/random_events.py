@@ -1864,6 +1864,21 @@ def format_event_message(event: dict, stage_index: int = 0) -> str:
     return msg
 
 
+def _add_player_xp(player, amount: int) -> int:
+    """Начислить XP игроку с учётом ограничений ранга."""
+    gain = int(amount or 0)
+    if gain <= 0:
+        return 0
+    add_fn = getattr(player, "add_experience", None)
+    if callable(add_fn):
+        try:
+            return int(add_fn(gain) or 0)
+        except Exception:
+            pass
+    player.experience += gain
+    return gain
+
+
 def apply_event_choice(event: dict, choice_index: int, player, user_id: int = None, stage_index: int = 0) -> dict:
     """
     Применить выбор игрока к событию.
@@ -1894,7 +1909,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         if "effect" in choice:
             eff = choice["effect"]
             if "xp" in eff:
-                player.experience += eff["xp"]
+                _add_player_xp(player, eff["xp"])
             if "money" in eff:
                 player.money += eff.get("money", 0)
             if "energy" in eff:
@@ -1917,7 +1932,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
             # Применяем финальные эффекты
             final_effect = stage.get("final_effect", {})
             if "xp" in final_effect:
-                player.experience += final_effect["xp"]
+                _add_player_xp(player, final_effect["xp"])
             if "money" in final_effect:
                 player.money += final_effect.get("money", 0)
             if "energy" in final_effect:
@@ -1947,7 +1962,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     # Простое сообщение
     if "message" in effect and not any(k in effect for k in ["risk_damage", "risk_combat", "random_loot", "artifact_chance", "random_artifact", "random_dialog", "need_item", "shop_discount", "money_loss"]):
         if "xp" in effect:
-            player.experience += effect["xp"]
+            _add_player_xp(player, effect["xp"])
         if "money" in effect:
             player.money += effect["money"]
         if "energy" in effect:
@@ -1996,10 +2011,10 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     # Случайный диалог
     if effect.get("random_dialog"):
         dialog_xp = int(effect.get("xp", 30))
-        player.experience += dialog_xp
+        gained_xp = _add_player_xp(player, dialog_xp)
         msg_tpl = effect.get("message", "Разговор в Зоне не прошёл зря.")
         return {
-            "message": _render_event_message(msg_tpl, {"xp": dialog_xp}),
+            "message": _render_event_message(msg_tpl, {"xp": gained_xp}),
             "next_stage": None,
             "is_final": True,
         }
@@ -2011,7 +2026,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
     # Скидка
     if effect.get("shop_discount"):
-        player.experience += effect.get("xp", 0)
+        _add_player_xp(player, effect.get("xp", 0))
         return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # Потеря денег
@@ -2022,7 +2037,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
     # XP + money
     if "xp" in effect:
-        player.experience += effect["xp"]
+        _add_player_xp(player, effect["xp"])
     if "money" in effect:
         player.money += effect["money"]
     if "energy" in effect:
@@ -2150,7 +2165,7 @@ def _apply_need_item(player, effect):
     if has_item and player_id is not None:
         from infra import database
         database.remove_item_from_inventory(player_id, item_name, 1)
-        player.experience += effect.get("xp", 0)
+        _add_player_xp(player, effect.get("xp", 0))
         return effect.get("message", f"Ты использовал {item_name}.")
     else:
         return f"У тебя нет {item_name}. Ты не можешь помочь."
