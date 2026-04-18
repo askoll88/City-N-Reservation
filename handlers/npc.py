@@ -858,15 +858,18 @@ def _format_class_preview(player, class_id: str) -> str:
 
     lines = [
         f"{selected.name}",
+        "",
+        "Кто это:",
         selected.description,
         "",
-        "Что даёт класс:",
-        "• Оружие: любое экипированное",
+        "Стиль:",
+        "• Оружие можно менять под рейд — класс остаётся твоей школой выживания.",
+        "• Активный навык даёт заметный боевой приём, пассивки раскрываются с уровнем.",
     ]
 
     if selected.active_skills:
         lines.append("")
-        lines.append("Активные навыки:")
+        lines.append("Активный навык:")
         for skill in selected.active_skills:
             lines.append(
                 f"• {skill['name']} — {skill['description']} "
@@ -890,11 +893,12 @@ def _format_class_preview(player, class_id: str) -> str:
     elif is_change:
         lines.extend([
             "",
-            f"Смена с текущего класса стоит {CLASS_CHANGE_COST:,} руб.",
+            "Цена выбора:",
+            f"• Смена с текущего класса стоит {CLASS_CHANGE_COST:,} руб.",
             f"Твои деньги: {int(player.money):,} руб.",
         ])
     else:
-        lines.extend(["", "Первый выбор класса бесплатный."])
+        lines.extend(["", "Цена выбора:", "• Первый выбор класса бесплатный."])
 
     return "\n".join(lines)
 
