@@ -235,14 +235,34 @@ def _get_best_streak_bonus(streak: int) -> dict:
     return best
 
 
-def generate_daily_quests(seed: str = None) -> list:
+def _is_quest_available_for_player(quest: dict, player_level: int | None, current_location: str | None = None) -> bool:
+    """
+    Проверить, доступно ли задание игроку на момент генерации.
+    Сейчас критично фильтруем P2P задания по уровню доступа к рынку.
+    """
+    if player_level is None:
+        return True
+
+    qtype = (quest or {}).get("type")
+    if qtype in {"market_list", "market_buy"}:
+        from infra import config as game_config
+        return int(player_level) >= int(game_config.MARKET_MIN_LEVEL)
+    return True
+
+
+def generate_daily_quests(seed: str = None, player_level: int | None = None, current_location: str | None = None) -> list:
     if seed is None:
         seed = _today_key()
 
     rng = random.Random(seed)
     quest_types = set()
     selected = []
-    pool_copy = list(QUEST_POOL)
+    pool_copy = [
+        q for q in QUEST_POOL
+        if _is_quest_available_for_player(q, player_level=player_level, current_location=current_location)
+    ]
+    if not pool_copy:
+        pool_copy = list(QUEST_POOL)
     rng.shuffle(pool_copy)
 
     for quest in pool_copy:

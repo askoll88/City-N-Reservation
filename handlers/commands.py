@@ -3,6 +3,7 @@
 Централизованная обработка всех команд и сообщений
 """
 import sys
+from infra import config
 
 from models import player as player_module
 from models.player import get_player as get_player_cached
@@ -54,8 +55,8 @@ def get_welcome_message():
         "Используй кнопки для навигации по локациям.\n\n"
         "Подсказки:\n"
         "• Начни с КПП: там военный и учёный\n"
-        "• Черный рынок откроется с 25 уровня\n"
-        "• P2P рынок игроков находится внутри Черного рынка"
+        f"• Черный рынок откроется с {config.BLACK_MARKET_MIN_LEVEL} уровня\n"
+        f"• P2P рынок игроков откроется с {config.MARKET_MIN_LEVEL} уровня"
     )
 
 
@@ -114,10 +115,15 @@ def handle_navigation(player, vk, user_id: int, text: str):
     if not requested:
         return False
 
-    if requested == 'черный рынок' and player.level < 25:
+    if requested == 'черный рынок' and player.level < config.BLACK_MARKET_MIN_LEVEL:
         vk.messages.send(
             user_id=user_id,
-            message=f"🚫Доступ запрещён!\n\nЧёрный рынок открыт только для сталкеров 25+ уровня.\n\nТвоё текущее положение: {player.level} уровень\n\nПодними уровень, чтобы получить доступ.",
+            message=(
+                "🚫Доступ запрещён!\n\n"
+                f"Чёрный рынок открыт только для сталкеров {config.BLACK_MARKET_MIN_LEVEL}+ уровня.\n\n"
+                f"Твоё текущее положение: {player.level} уровень\n\n"
+                "Подними уровень, чтобы получить доступ."
+            ),
             random_id=0
         )
         return True

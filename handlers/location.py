@@ -837,7 +837,7 @@ def handle_heal(player, vk, user_id: int):
     При стартовых настройках: 100 + (level-1) * 50, максимум 3000
     """
     from main import create_location_keyboard
-    from infra import database
+    from infra import database, config
     from infra import config
 
     if player.current_location_id == "больница":
@@ -935,8 +935,8 @@ def show_welcome(vk, user_id: int):
             user_id=user_id,
             message=(
                 f"{loc.name}\n\n{loc.description}\n\n"
-                "P2P рынок игроков находится на Черном рынке "
-                "(доступ с 25 уровня)."
+                f"Черный рынок доступен с {config.BLACK_MARKET_MIN_LEVEL} уровня.\n"
+                f"P2P рынок игроков на Черном рынке доступен с {config.MARKET_MIN_LEVEL} уровня."
             ),
             keyboard=create_location_keyboard(current_location, player_level).get_keyboard(),
             random_id=0

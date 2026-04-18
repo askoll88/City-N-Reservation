@@ -26,6 +26,7 @@ from handlers.inventory import (
     show_trader_shop_all,
     show_trader_sell_all,
     handle_buy_artifact_slot,
+    handle_buy_shells_bag,
     clear_shop_cache
 )
 
@@ -197,6 +198,13 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
         handle_buy_artifact_slot(player, vk, user_id)
         return True
 
+    if dialog_id == "мешочки":
+        return _handle_soldier_shells_bag_info(player, vk, user_id, npc_id)
+
+    if dialog_id == "купитьмешочек":
+        handle_buy_shells_bag(player, vk, user_id)
+        return True
+
     if dialog_id == "рынокигроков":
         if player.current_location_id != "черный рынок":
             vk.messages.send(
@@ -242,6 +250,74 @@ def _handle_trader_slot_info(player, vk, user_id: int, npc_id: str):
             "",
             "Покупка: напиши «купить слот».",
             "Шкала апгрейдов растянута до 120 уровня.",
+        ])
+
+    vk.messages.send(
+        user_id=user_id,
+        message="\n".join(lines),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def _handle_soldier_shells_bag_info(player, vk, user_id: int, npc_id: str):
+    """Информация о прогрессии мешочков для гильз у Военного на КПП."""
+    bag_order = list(getattr(config, "SHELLS_BAG_ORDER", ()) or ())
+    requirements = dict(getattr(config, "SHELLS_BAG_REQUIREMENTS", {}) or {})
+
+    if not bag_order:
+        vk.messages.send(
+            user_id=user_id,
+            message="🎖️Военный:\n\nДля мешочков пока нет настроек. Подойди позже.",
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    player.inventory.reload()
+    user_data = database.get_user_by_vk(user_id) or {}
+    equipped_bag = user_data.get("equipped_shells_bag")
+    shells_info = database.get_shells_info(user_id)
+    capacity = int(shells_info.get("capacity", 0) or 0)
+
+    owned_names = {item.get("name") for item in player.inventory.shells_bags}
+    if equipped_bag:
+        owned_names.add(equipped_bag)
+
+    highest_owned_index = -1
+    for idx, bag_name in enumerate(bag_order):
+        if bag_name in owned_names:
+            highest_owned_index = idx
+
+    lines = [
+        "🎖️Военный:\n",
+        "Мешочки для гильз выдаю по допуску, не всем подряд.",
+        f"Текущий ранг мешочка: {equipped_bag or 'не экипирован'}",
+        f"Вместимость сейчас: {capacity} гильз.",
+    ]
+
+    if highest_owned_index >= len(bag_order) - 1:
+        lines.append("\nТы уже получил максимальный мешочек.")
+    else:
+        next_index = highest_owned_index + 1
+        next_bag = bag_order[next_index]
+        req = requirements.get(next_bag, {})
+        need_level = int(req.get("level", getattr(config, "MIN_LEVEL_FOR_SHELLS_BAG", 1)))
+        need_money = int(req.get("cost", 0))
+
+        bag_item = database.get_item_by_name(next_bag) or {}
+        next_capacity = int(bag_item.get("backpack_bonus", 0) or 0)
+
+        lines.extend([
+            "",
+            f"Следующий мешочек: {next_bag}",
+            f"• Вместимость: до {next_capacity} гильз",
+            f"• Уровень: {player.level}/{need_level}",
+            f"• Деньги: {player.money}/{need_money} руб.",
+            "",
+            "Покупка: напиши «купить мешочек».",
+            "Прогрессия растянута до 120 уровня.",
         ])
 
     vk.messages.send(

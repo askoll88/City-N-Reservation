@@ -2888,7 +2888,7 @@ def equip_shells_bag(vk_id: int, bag_name: str) -> dict:
 
         user_id = user['id']
         cursor.execute("""
-            SELECT ui.quantity, i.name 
+            SELECT ui.quantity, i.name, i.backpack_bonus
             FROM user_inventory ui
             JOIN items i ON ui.item_id = i.id
             WHERE ui.user_id = %s AND i.name = %s AND ui.quantity > 0
@@ -3465,7 +3465,14 @@ def reset_daily_quests_if_needed(vk_id: int):
         if prev and prev["claimed"] and prev["quest_date"] == yesterday:
             streak_seed = int(prev["streak"] or 0)
 
-    quests = generate_daily_quests(today.strftime("%Y-%m-%d"))
+    user_row = get_user_by_vk(vk_id) or {}
+    user_level = int(user_row.get("level", 1) or 1)
+    user_location = user_row.get("location")
+    quests = generate_daily_quests(
+        today.strftime("%Y-%m-%d"),
+        player_level=user_level,
+        current_location=user_location,
+    )
     save_daily_quests(vk_id, quests, progress={}, streak=streak_seed)
     return quests, {}, streak_seed
 

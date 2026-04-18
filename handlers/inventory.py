@@ -902,6 +902,98 @@ def handle_buy_artifact_slot(player, vk, user_id: int):
     )
 
 
+def handle_buy_shells_bag(player, vk, user_id: int):
+    """Купить следующий мешочек для гильз у Военного (линейная прогрессия)."""
+    from infra import config
+
+    bag_order = list(getattr(config, "SHELLS_BAG_ORDER", ()) or ())
+    requirements = dict(getattr(config, "SHELLS_BAG_REQUIREMENTS", {}) or {})
+    if not bag_order:
+        vk.messages.send(
+            user_id=user_id,
+            message="Для мешочков не настроена прогрессия покупки. Обратись к администратору.",
+            random_id=0
+        )
+        return
+
+    player.inventory.reload()
+    user_data = database.get_user_by_vk(user_id) or {}
+    equipped_bag = user_data.get("equipped_shells_bag")
+    owned_names = {item.get("name") for item in player.inventory.shells_bags}
+    if equipped_bag:
+        owned_names.add(equipped_bag)
+
+    highest_owned_index = -1
+    for idx, bag_name in enumerate(bag_order):
+        if bag_name in owned_names:
+            highest_owned_index = idx
+
+    if highest_owned_index >= len(bag_order) - 1:
+        vk.messages.send(
+            user_id=user_id,
+            message="У тебя уже максимальный мешочек для гильз. Дальше апгрейдов нет.",
+            random_id=0
+        )
+        return
+
+    next_index = highest_owned_index + 1
+    next_bag_name = bag_order[next_index]
+    req = requirements.get(next_bag_name, {})
+    need_level = int(req.get("level", getattr(config, "MIN_LEVEL_FOR_SHELLS_BAG", 1)))
+    cost = int(req.get("cost", 0))
+
+    if player.level < need_level:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"Для мешочка «{next_bag_name}» нужен {need_level} уровень. Сейчас у тебя {player.level}.",
+            random_id=0
+        )
+        return
+
+    if player.money < cost:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"Не хватает денег! Нужно: {cost} руб., у тебя: {player.money} руб.",
+            random_id=0
+        )
+        return
+
+    if not database.add_item_to_inventory(user_id, next_bag_name, quantity=1):
+        vk.messages.send(
+            user_id=user_id,
+            message=f"Не удалось выдать мешочек «{next_bag_name}». Попробуй позже.",
+            random_id=0
+        )
+        return
+
+    player.money -= cost
+    database.update_user_stats(user_id, money=player.money)
+    equip_result = database.equip_shells_bag(user_id, next_bag_name)
+    player.inventory.reload()
+
+    next_hint = ""
+    if next_index + 1 < len(bag_order):
+        follow_bag = bag_order[next_index + 1]
+        follow_req = requirements.get(follow_bag, {})
+        next_hint = (
+            f"\nСледующий апгрейд: {follow_bag} "
+            f"(ур. {int(follow_req.get('level', 1))}, {int(follow_req.get('cost', 0))} руб.)"
+        )
+
+    equipped_msg = ""
+    if equip_result.get("success"):
+        equipped_msg = f"\n{equip_result.get('message', '')}"
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            f"Военный выдал мешочек: {next_bag_name}.\n"
+            f"Потрачено: {cost} руб.{equipped_msg}{next_hint}"
+        ),
+        random_id=0
+    )
+
+
 def handle_use_item(player, item_name: str, vk, user_id: int):
     """Использовать предмет"""
     from main import create_location_keyboard

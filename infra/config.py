@@ -83,6 +83,18 @@ ARTIFACT_SLOT_REQUIREMENTS = {
 MIN_LEVEL_FOR_ARTIFACT_SLOT = min(v["level"] for v in ARTIFACT_SLOT_REQUIREMENTS.values())
 ARTIFACT_SLOT_COSTS = {slot: int(req["cost"]) for slot, req in ARTIFACT_SLOT_REQUIREMENTS.items()}
 
+# === Мешочки для гильз ===
+# Линейная прогрессия у Военного на КПП: от стартового до эндгейм-варианта к 120 уровню.
+SHELLS_BAG_REQUIREMENTS = {
+    "Маленький мешочек": {"level": 8, "cost": 6000},
+    "Средний мешочек": {"level": 24, "cost": 18000},
+    "Большой мешочек": {"level": 50, "cost": 42000},
+    "Профессиональный мешочек": {"level": 85, "cost": 90000},
+    "Легендарный мешочек": {"level": 120, "cost": 180000},
+}
+SHELLS_BAG_ORDER = tuple(SHELLS_BAG_REQUIREMENTS.keys())
+MIN_LEVEL_FOR_SHELLS_BAG = min(v["level"] for v in SHELLS_BAG_REQUIREMENTS.values())
+
 # === Кэш ===
 CACHE_TTL = 60  # секунд
 MAX_CACHED_PLAYERS = 100
@@ -127,7 +139,8 @@ EMISSION_QUIET_HOUR_START = int(os.getenv('EMISSION_QUIET_HOUR_START', '2'))
 EMISSION_QUIET_HOUR_END = int(os.getenv('EMISSION_QUIET_HOUR_END', '7'))
 
 # === P2P Рынок игроков ===
-MARKET_MIN_LEVEL = int(os.getenv('MARKET_MIN_LEVEL', '10'))
+MARKET_MIN_LEVEL = int(os.getenv('MARKET_MIN_LEVEL', '25'))
+BLACK_MARKET_MIN_LEVEL = int(os.getenv('BLACK_MARKET_MIN_LEVEL', '10'))
 MARKET_MAX_LISTINGS_PER_USER = int(os.getenv('MARKET_MAX_LISTINGS_PER_USER', '5'))
 MARKET_LISTING_FEE_PCT = float(os.getenv('MARKET_LISTING_FEE_PCT', '1.5'))
 MARKET_SALE_FEE_PCT = float(os.getenv('MARKET_SALE_FEE_PCT', '8.0'))
