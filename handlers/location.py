@@ -1,7 +1,10 @@
 """
 Обработчики локаций и навигации
 """
+from __future__ import annotations
+
 import logging
+from pathlib import Path
 import random
 import time
 from typing import Optional
@@ -30,6 +33,89 @@ TRAVEL_ENEMY_CHANCE_FORCED = 42
 TRAVEL_POST_EMISSION_ELITE_CHANCE = 0.12
 SHELTER_REGEN_TS_FLAG = "shelter_energy_regen_ts"
 SHELTER_REGEN_ACTIVE_FLAG = "shelter_energy_regen_active"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_LOCATION_IMAGE_ATTACHMENT_CACHE: dict[str, str] = {}
+
+
+def _get_location_image_path(image_name: str) -> Path:
+    for directory in ("img", "Img"):
+        image_path = PROJECT_ROOT / directory / image_name
+        if image_path.exists():
+            return image_path
+    return PROJECT_ROOT / "img" / image_name
+
+
+def _upload_location_image(vk, user_id: int, location_id: str) -> str | None:
+    """Загрузить картинку локации в VK и вернуть attachment."""
+    if location_id in _LOCATION_IMAGE_ATTACHMENT_CACHE:
+        return _LOCATION_IMAGE_ATTACHMENT_CACHE[location_id]
+
+    from models.locations import get_location
+
+    loc = get_location(location_id)
+    image_name = loc.image if loc else None
+    if not image_name:
+        return None
+
+    image_path = _get_location_image_path(image_name)
+    if not image_path.exists():
+        logger.warning("Картинка локации не найдена: location=%s path=%s", location_id, image_path)
+        return None
+
+    try:
+        import requests
+
+        upload_server = vk.photos.getMessagesUploadServer(peer_id=user_id)
+        with image_path.open("rb") as image_file:
+            upload_response = requests.post(
+                upload_server["upload_url"],
+                files={"photo": image_file},
+                timeout=20,
+            )
+        upload_response.raise_for_status()
+        uploaded = upload_response.json()
+        saved = vk.photos.saveMessagesPhoto(
+            photo=uploaded["photo"],
+            server=uploaded["server"],
+            hash=uploaded["hash"],
+        )
+        if not saved:
+            return None
+
+        photo = saved[0]
+        attachment = f"photo{photo['owner_id']}_{photo['id']}"
+        access_key = photo.get("access_key")
+        if access_key:
+            attachment = f"{attachment}_{access_key}"
+
+        _LOCATION_IMAGE_ATTACHMENT_CACHE[location_id] = attachment
+        return attachment
+    except Exception:
+        logger.exception("Не удалось загрузить картинку локации: user_id=%s location=%s", user_id, location_id)
+        return None
+
+
+def _send_location_message(vk, user_id: int, location_id: str, message: str, keyboard):
+    """Отправить описание локации с картинкой, если она есть."""
+    send_kwargs = {
+        "user_id": user_id,
+        "message": message,
+        "keyboard": keyboard,
+        "random_id": 0,
+    }
+
+    attachment = _upload_location_image(vk, user_id, location_id)
+    if attachment:
+        send_kwargs["attachment"] = attachment
+
+    try:
+        vk.messages.send(**send_kwargs)
+    except Exception:
+        if "attachment" not in send_kwargs:
+            raise
+        logger.exception("Не удалось отправить локацию с картинкой, повторяю без attachment")
+        send_kwargs.pop("attachment", None)
+        vk.messages.send(**send_kwargs)
 
 
 def _should_use_travel_corridor(from_location: str, to_location: str) -> bool:
@@ -253,11 +339,12 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
         if parts:
             location_info = f"\n\n📊 **Активные модификаторы:**\n" + "\n".join(f"• {p}" for p in parts)
 
-    vk.messages.send(
-        user_id=user_id,
-        message=f"{loc.name}\n\n{loc.description}{npc_message}{location_info}",
-        keyboard=create_location_keyboard(location_id, player_level).get_keyboard(),
-        random_id=0,
+    _send_location_message(
+        vk,
+        user_id,
+        location_id,
+        f"{loc.name}\n\n{loc.description}{npc_message}{location_info}",
+        create_location_keyboard(location_id, player_level).get_keyboard(),
     )
 
 
@@ -725,11 +812,12 @@ def go_back(player, vk, user_id: int):
             target_location = player.previous_location or "кпп"
             player.current_location_id = target_location
             database.update_user_location(user_id, target_location)
-        vk.messages.send(
-            user_id=user_id,
-            message=f"📍 {player.location.name}\n\n{player.location.description}",
-            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
-            random_id=0
+        _send_location_message(
+            vk,
+            user_id,
+            player.current_location_id,
+            f"📍 {player.location.name}\n\n{player.location.description}",
+            create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
         )
         return
 
@@ -742,11 +830,12 @@ def go_back(player, vk, user_id: int):
     elif player.previous_location and player.previous_location != player.current_location_id:
         player.current_location_id = player.previous_location
         database.update_user_location(user_id, player.previous_location)
-    vk.messages.send(
-        user_id=user_id,
-        message=f"📍 {player.location.name}\n\n{player.location.description}",
-        keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
-        random_id=0
+    _send_location_message(
+        vk,
+        user_id,
+        player.current_location_id,
+        f"📍 {player.location.name}\n\n{player.location.description}",
+        create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
     )
 
 
@@ -931,15 +1020,16 @@ def show_welcome(vk, user_id: int):
         current_location = user_data.get("location") or "город"
         loc = get_location(current_location) or get_location("город")
         player_level = user_data.get('level', 0)
-        vk.messages.send(
-            user_id=user_id,
-            message=(
+        _send_location_message(
+            vk,
+            user_id,
+            loc.id,
+            (
                 f"{loc.name}\n\n{loc.description}\n\n"
                 f"Черный рынок доступен с {config.BLACK_MARKET_MIN_LEVEL} уровня.\n"
                 f"P2P рынок игроков на Черном рынке доступен с {config.MARKET_MIN_LEVEL} уровня."
             ),
-            keyboard=create_location_keyboard(current_location, player_level).get_keyboard(),
-            random_id=0
+            create_location_keyboard(current_location, player_level).get_keyboard(),
         )
         set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
     else:
