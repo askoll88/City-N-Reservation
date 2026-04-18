@@ -667,6 +667,16 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         handle_npc_back(player, vk, user_id)
         return True
 
+    if npc_id == "наставник" and isinstance(stage, str) and stage.startswith("class_confirm:"):
+        class_id = stage.split(":", 1)[1]
+        if text == "подтвердить выбор":
+            from handlers.npc import _handle_select_class
+            return _handle_select_class(player, vk, user_id, npc_id, class_id)
+
+        if text == "отмена":
+            from handlers.npc import _handle_class_selection_menu
+            return _handle_class_selection_menu(player, vk, user_id, npc_id)
+
     if text == 'назад к наставнику':
         show_npc_dialog(player, vk, user_id, npc_id, None)
         return True

@@ -478,6 +478,14 @@ def create_class_selection_keyboard():
     return keyboard
 
 
+def create_class_confirm_keyboard():
+    """Клавиатура подтверждения выбранного класса."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Подтвердить выбор", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("Отмена", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
 # ============================================================
 # Ежедневные задания
 # ============================================================

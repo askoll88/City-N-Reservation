@@ -18,6 +18,7 @@ from handlers.keyboards import (
     create_npc_dialog_keyboard,
     create_npc_select_keyboard,
     create_class_selection_keyboard,
+    create_class_confirm_keyboard,
     create_kpp_shop_keyboard
 )
 from handlers.inventory import (
@@ -182,7 +183,7 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
     if isinstance(special_id, str) and special_id.startswith("select_class:"):
         class_id = normalize_class_id(special_id.split(":", 1)[1])
         if class_id in get_all_classes():
-            return _handle_select_class(player, vk, user_id, npc_id, class_id)
+            return _handle_class_preview(player, vk, user_id, npc_id, class_id)
 
     # Сервисы медика
     if dialog_id == "осмотр":
@@ -834,7 +835,7 @@ def _handle_class_selection_menu(player, vk, user_id: int, npc_id: str):
             f"{format_all_classes()}"
             f"{current}"
             f"{change_note}\n\n"
-            "Выбери специализацию кнопкой ниже."
+            "Нажми на специализацию ниже — покажу лор, навыки и пассивки перед подтверждением."
         ),
         keyboard=create_class_selection_keyboard().get_keyboard(),
         random_id=0
@@ -847,9 +848,99 @@ def _handle_change_class(player, vk, user_id: int, npc_id: str):
     return _handle_class_selection_menu(player, vk, user_id, npc_id)
 
 
+def _format_class_preview(player, class_id: str) -> str:
+    """Собрать подробный предпросмотр класса перед подтверждением."""
+    from models.classes import get_class
+
+    selected = get_class(class_id)
+    if not selected:
+        return "Класс не найден."
+
+    lines = [
+        f"{selected.name}",
+        selected.description,
+        "",
+        "Что даёт класс:",
+        "• Оружие: любое экипированное",
+    ]
+
+    if selected.active_skills:
+        lines.append("")
+        lines.append("Активные навыки:")
+        for skill in selected.active_skills:
+            lines.append(
+                f"• {skill['name']} — {skill['description']} "
+                f"({skill['energy_cost']} энергии, перезарядка {skill['cooldown']} ход.)"
+            )
+
+    if selected.passive_skills:
+        lines.append("")
+        lines.append("Пассивные навыки:")
+        for passive in selected.passive_skills:
+            required = int(passive.get("required_level", 10) or 10)
+            status = "доступно" if int(player.level) >= required else "откроется"
+            lines.append(
+                f"• {passive['name']} — {passive['description']} "
+                f"(ур. {required}, {status})"
+            )
+
+    is_change = bool(player.player_class and player.player_class != class_id)
+    if player.player_class == class_id:
+        lines.extend(["", "Это уже твоя текущая специализация."])
+    elif is_change:
+        lines.extend([
+            "",
+            f"Смена с текущего класса стоит {CLASS_CHANGE_COST:,} руб.",
+            f"Твои деньги: {int(player.money):,} руб.",
+        ])
+    else:
+        lines.extend(["", "Первый выбор класса бесплатный."])
+
+    return "\n".join(lines)
+
+
+def _handle_class_preview(player, vk, user_id: int, npc_id: str, class_id: str):
+    """Показать лор и бонусы класса перед подтверждением."""
+    from models.classes import get_class
+    from infra.state_manager import set_dialog_state
+
+    if player.level < 10:
+        vk.messages.send(
+            user_id=user_id,
+            message="🎓Наставник:\n\n«Сначала 10 уровень. До этого специализация только навредит: будешь копировать форму без понимания.»",
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    selected = get_class(class_id)
+    if not selected:
+        vk.messages.send(
+            user_id=user_id,
+            message="🎓Наставник:\n\n«Такой школы у меня нет. Выбери нормальную специализацию из списка.»",
+            keyboard=create_class_selection_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    set_dialog_state(user_id, npc_id, f"class_confirm:{class_id}")
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🎓Наставник:\n\n"
+            "«Сначала слушай, потом решай. Класс меняет привычки, а не только строчку в досье.»\n\n"
+            f"{_format_class_preview(player, class_id)}"
+        ),
+        keyboard=create_class_confirm_keyboard().get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
 def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
     """Выбрать или сменить специализацию."""
     from models.classes import format_class_info, get_class
+    from infra.state_manager import set_dialog_state
 
     if player.level < 10:
         vk.messages.send(
@@ -871,6 +962,7 @@ def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
         return True
 
     if class_id == player.player_class:
+        set_dialog_state(user_id, npc_id, "menu")
         vk.messages.send(
             user_id=user_id,
             message=f"🎓Наставник:\n\n«Ты уже идёшь школой {selected.name}. Тренируй её в поле, а не на кнопках.»",
@@ -881,6 +973,7 @@ def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
 
     is_change = bool(player.player_class)
     if is_change and player.money < CLASS_CHANGE_COST:
+        set_dialog_state(user_id, npc_id, "menu")
         vk.messages.send(
             user_id=user_id,
             message=(
@@ -896,6 +989,7 @@ def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
     old_money = int(player.money)
     new_money = old_money - CLASS_CHANGE_COST if is_change else old_money
     database.update_user_stats(user_id, money=new_money, player_class=class_id)
+    set_dialog_state(user_id, npc_id, "menu")
     from handlers.quests import track_quest_change_class
     track_quest_change_class(user_id, vk=vk)
     invalidate_player_cache(user_id)
