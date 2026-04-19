@@ -38,7 +38,7 @@ from handlers.inventory import (
 # === Константы ===
 CLASS_CHANGE_COST = 500000  # Цена смены класса
 MEDIC_FIELD_CHECK_COOLDOWN = 6 * 60 * 60
-MEDIC_SUPPLY_COOLDOWN = 12 * 60 * 60
+MEDIC_SUPPLY_COOLDOWN = 6 * 60 * 60
 MEDIC_FIELD_HEAL = 40
 MEDIC_FIELD_RAD_REDUCE = 10
 MEDIC_DETOX_COST = 150
@@ -672,7 +672,7 @@ def _handle_medic_supply(player, vk, user_id: int, npc_id: str):
             user_id=user_id,
             message=(
                 "🩺Медик:\n\n"
-                f"Паёк выдается раз в 12 часов. Осталось: {_format_seconds_left(wait_left)}."
+                f"Паёк выдается раз в 6 часов. Осталось: {_format_seconds_left(wait_left)}."
             ),
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
@@ -682,9 +682,12 @@ def _handle_medic_supply(player, vk, user_id: int, npc_id: str):
     old_energy = int(player.energy)
     new_energy = min(100, old_energy + MEDIC_SUPPLY_ENERGY)
     database.update_user_stats(user_id, energy=new_energy)
-    database.add_item_to_inventory(user_id, "Бинт", 1)
-    database.add_item_to_inventory(user_id, "Антирад", 1)
-    database.add_item_to_inventory(user_id, "Вода", 1)
+    lvl = max(1, int(getattr(player, "level", 1) or 1))
+    supply_items = [("Бинт", 1), ("Антирад", 1), ("Вода", 1)]
+    if lvl <= 10:
+        supply_items = [("Бинт", 2), ("Аптечка", 1), ("Антирад", 1), ("Вода", 1)]
+    for item_name, qty in supply_items:
+        database.add_item_to_inventory(user_id, item_name, qty)
     database.set_user_flag(user_id, "medic_supply_last", now)
 
     player.energy = new_energy
@@ -699,7 +702,8 @@ def _handle_medic_supply(player, vk, user_id: int, npc_id: str):
             "🩺Медик:\n\n"
             "Держи паёк перед выходом.\n\n"
             f"⚡ Энергия: {old_energy} → {new_energy}\n"
-            "📦 Выдано: Бинт x1, Антирад x1, Вода x1"
+            "📦 Выдано: "
+            + ", ".join(f"{name} x{qty}" for name, qty in supply_items)
         ),
         keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
         random_id=0

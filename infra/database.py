@@ -750,10 +750,37 @@ def _seed_items():
     logger.info("Справочник предметов заполнен")
 
 
+def _balanced_item_price(category: str, price: int, attack: int = 0, defense: int = 0, rarity: str = "common") -> int:
+    """Нормализовать цены боевого снаряжения, чтобы стартовые деньги не покупали mid-game комплект."""
+    category = (category or "").lower()
+    rarity = (rarity or "common").lower()
+    price = int(price or 0)
+    attack = int(attack or 0)
+    defense = int(defense or 0)
+
+    rarity_mult = {
+        "common": 1.0,
+        "rare": 1.25,
+        "unique": 1.6,
+        "legendary": 2.2,
+    }.get(rarity, 1.0)
+
+    if category in {"weapons", "rare_weapons"} and attack > 0:
+        base = attack * (55 if category == "weapons" else 65)
+        return max(price, int(base * rarity_mult))
+
+    if category in {"armor", "rare_armor"} and defense > 0:
+        base = defense * (45 if category == "armor" else 55)
+        return max(price, int(base * rarity_mult))
+
+    return price
+
+
 def _insert_item(cursor, item: tuple):
     """Вставить один предмет. ON CONFLICT DO UPDATE обновляет всё кроме id."""
     if len(item) == 7:
         name, category, description, price, attack, defense, weight = item
+        price = _balanced_item_price(category, price, attack, defense)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
                                rarity, anomaly_type, bonus_type, bonus_value)
@@ -766,6 +793,7 @@ def _insert_item(cursor, item: tuple):
 
     elif len(item) == 8:
         name, category, description, price, attack, defense, weight, backpack_bonus = item
+        price = _balanced_item_price(category, price, attack, defense)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
                                backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
@@ -786,6 +814,7 @@ def _insert_item(cursor, item: tuple):
     elif len(item) == 12:
         name, category, description, price, attack, defense, weight, \
             backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value = item
+        price = _balanced_item_price(category, price, attack, defense, rarity)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
                                backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)

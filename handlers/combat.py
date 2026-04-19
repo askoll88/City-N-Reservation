@@ -193,6 +193,12 @@ ENEMY_ROLE_PROFILES = {
     },
 }
 
+# Ранняя игра: дорогое оружие не должно превращать персонажа 1-15 уровня
+# в убийцу всей зоны, пока игрок ещё не умеет с ним работать.
+EARLY_WEAPON_MASTERY_CAP_LEVEL = 15
+EARLY_WEAPON_MASTERY_CAP_BASE = 26
+EARLY_WEAPON_MASTERY_CAP_PER_LEVEL = 5
+
 
 def _get_main_imports():
     """Ленивый импорт для избежания циклической зависимости"""
@@ -203,6 +209,31 @@ def _get_main_imports():
 
 def _clamp(value: int, min_val: int, max_val: int) -> int:
     return max(min_val, min(max_val, value))
+
+
+def _apply_early_weapon_mastery_cap(player, damage: int, weapon_is_knife: bool = False) -> tuple[int, int]:
+    """Ограничить урон дорогого оружия на ранних уровнях, не трогая ножи и кулаки."""
+    lvl = max(1, int(getattr(player, "level", 1) or 1))
+    if weapon_is_knife or lvl > EARLY_WEAPON_MASTERY_CAP_LEVEL:
+        return int(damage), 0
+
+    cap = EARLY_WEAPON_MASTERY_CAP_BASE + lvl * EARLY_WEAPON_MASTERY_CAP_PER_LEVEL
+    damage = int(damage)
+    if damage <= cap:
+        return damage, 0
+    return cap, cap
+
+
+def _calculate_incoming_damage(player, enemy_damage: int, total_defense: int) -> tuple[int, int]:
+    """Посчитать входящий урон с мягкой защитой от резких просадок в ранней игре."""
+    final_damage = max(1, int(enemy_damage) - int(total_defense))
+    lvl = max(1, int(getattr(player, "level", 1) or 1))
+    if lvl <= 10:
+        max_health = max(1, int(getattr(player, "max_health", 100) or 100))
+        per_hit_cap = max(8, int(max_health * (0.18 + lvl * 0.01)))
+        if final_damage > per_hit_cap:
+            return per_hit_cap, per_hit_cap
+    return final_damage, 0
 
 
 def _get_player_rank_tier(player) -> int:
@@ -1492,7 +1523,21 @@ def _handle_stash(player, vk, user_id: int):
     money = random.randint(50, 200)
     new_money = user['money'] + money
     database.update_user_stats(user_id, money=new_money)
+    lvl = max(1, int(getattr(player, "level", 1) or 1))
+    supply_item = None
+    supply_chance = 100 if lvl <= 10 else 55
+    if random.randint(1, 100) <= supply_chance:
+        supply_pool = ["Бинт", "Лечебная трава", "Вода"]
+        if lvl <= 10:
+            supply_pool += ["Бинт", "Аптечка"]
+        supply_item = random.choice(supply_pool)
+        database.add_item_to_inventory(user_id, supply_item, 1)
+        try:
+            player.inventory.reload()
+        except Exception:
+            pass
 
+    supply_text = f"\nПрипасы: {supply_item} x1" if supply_item else ""
     vk.messages.send(
         user_id=user_id,
         message=(
@@ -1500,6 +1545,7 @@ def _handle_stash(player, vk, user_id: int):
             f"Ты нашёл спрятанный тайник с припасами!\n\n"
             f"Найдено: {money} руб.\n"
             f"Твой баланс: {new_money} руб."
+            f"{supply_text}"
         ),
         keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
         random_id=0
@@ -1848,7 +1894,7 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
         if is_dodged:
             message += "\n⚡ Враг начал первым, но ты уклонился от стартового удара!\n"
         else:
-            final_damage = max(1, enemy_damage - total_defense)
+            final_damage, hit_cap = _calculate_incoming_damage(player, enemy_damage, total_defense)
             # Открывающий удар не убивает мгновенно: оставляем минимум 1 HP.
             player.health = max(1, current_hp - final_damage)
             database.update_user_stats(user_id, health=player.health)
@@ -1857,6 +1903,8 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
                 f"Получен урон: {final_damage} (защита: {total_defense})\n"
                 f"Текущее HP: {player.health}/{max_hp}\n"
             )
+            if hit_cap:
+                message += "Ранняя осторожность снижает тяжесть первого удара.\n"
     else:
         message += "\n✅ Ты выиграл инициативу и действуешь первым!\n"
 
@@ -1886,7 +1934,14 @@ def _spawn_item(player, vk, user_id: int):
     bias_items = get_location_loot_bias(player.current_location_id)
     bias_chance = get_location_loot_bias_chance(player.current_location_id)
 
-    category = random.choice(['weapons', 'armor', 'artifacts', 'other'])
+    lvl = max(1, int(getattr(player, "level", 1) or 1))
+    if lvl <= 10:
+        categories = ['meds', 'consumables', 'food', 'other', 'weapons', 'armor', 'artifacts']
+        weights = [24, 20, 12, 18, 10, 10, 6]
+    else:
+        categories = ['weapons', 'armor', 'artifacts', 'other', 'meds', 'consumables', 'food']
+        weights = [20, 20, 18, 18, 10, 8, 6]
+    category = random.choices(categories, weights=weights, k=1)[0]
     items_in_category = database.get_items_by_category(category)
 
     if not items_in_category:
@@ -2609,6 +2664,7 @@ def handle_combat_attack(player, vk, user_id: int):
         enemy_evaded = True
         total_damage = 0
 
+    total_damage, mastery_cap = _apply_early_weapon_mastery_cap(player, total_damage, weapon_is_knife)
     combat['enemy_hp'] -= total_damage
     
     # Проверка кровотечения при атаке ножом
@@ -2636,6 +2692,8 @@ def handle_combat_attack(player, vk, user_id: int):
     if weapon_bonus_pct:
         sign = "+" if weapon_bonus_pct > 0 else ""
         damage_details.append(f"Модификатор класса: {sign}{weapon_bonus_pct}%")
+    if mastery_cap:
+        damage_details.append(f"Контроль оружия до L{EARLY_WEAPON_MASTERY_CAP_LEVEL}: потолок {mastery_cap}")
 
     # Добавляем информацию о характеристиках
     crit_chance = player.crit_chance
@@ -2716,10 +2774,12 @@ def handle_combat_attack(player, vk, user_id: int):
                     message += f"🔥ПОДАВЛЕНИЕ: враг ослаблен на {int(reduction*100)}%!\n"
                     del _active_skill_effects[user_id]["enemy_damage_reduction"]
 
-                final_damage = max(1, enemy_damage - total_defense)
+                final_damage, hit_cap = _calculate_incoming_damage(player, enemy_damage, total_defense)
                 player.health -= final_damage
                 message += f"\n⚔️{combat['enemy_name']} АТАКУЕТ!\n"
                 message += f"Урон врага: {enemy_damage} → Получено:{final_damage} (защита: {total_defense})\n"
+                if hit_cap:
+                    message += "Ранняя осторожность снижает тяжесть удара.\n"
 
                 # Роль "Контролёр": дренаж энергии при попадании.
                 if combat.get("enemy_role") == "controller":
@@ -2910,6 +2970,17 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
 
     if not success:
         message += f"⚠️ Мешочек переполнен! {msg}\n"
+
+    lvl = max(1, int(getattr(player, "level", 1) or 1))
+    hp_ratio = int(getattr(player, "health", 0) or 0) / max(1, int(getattr(player, "max_health", 100) or 100))
+    if lvl <= 12 and hp_ratio <= 0.80 and random.randint(1, 100) <= 35:
+        field_supply = random.choice(["Бинт", "Лечебная трава"])
+        database.add_item_to_inventory(user_id, field_supply, 1)
+        try:
+            player.inventory.reload()
+        except Exception:
+            pass
+        message += f"🧰 После боя найдено: {field_supply} x1\n"
 
     message += (
         f"\n{ui.section('Состояние')}\n"
