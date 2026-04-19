@@ -1190,6 +1190,16 @@ def _handle_anomaly(player, vk, user_id: int):
         database.update_user_stats(user_id, health=new_health)
         player.health = new_health
         lost_text = _apply_blind_anomaly_loss(user_id, player)
+        if new_health <= 0:
+            _handle_death(
+                player,
+                vk,
+                user_id,
+                cause=f"Смертельный контакт с аномалией ({anomaly_name})",
+                killer_name=anomaly_name,
+                final_damage=blind_damage,
+            )
+            return
         blind_intro = (
             "☠️ ВСЛЕПУЮ В АНОМАЛИЮ\n\n"
             "Ты поздно заметил аномальный контур и угодил прямо в активную зону.\n"
@@ -1301,6 +1311,17 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
             damage = random.randint(damage_min, damage_max)
             new_health = max(0, user['health'] - damage)
             database.update_user_stats(user_id, health=new_health)
+            player.health = new_health
+            if new_health <= 0:
+                _handle_death(
+                    player,
+                    vk,
+                    user_id,
+                    cause=f"Неудачный обход аномалии ({anomaly_name})",
+                    killer_name=anomaly_name,
+                    final_damage=damage,
+                )
+                return
 
             max_hp = int(getattr(player, "max_health", 100) or 100)
             vk.messages.send(
@@ -1420,6 +1441,17 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
         damage = random.randint(damage_min, damage_max)
         new_health = max(0, user['health'] - damage)
         database.update_user_stats(user_id, health=new_health)
+        player.health = new_health
+        if new_health <= 0:
+            _handle_death(
+                player,
+                vk,
+                user_id,
+                cause=f"Отступление из аномалии ({anomaly_name})",
+                killer_name=anomaly_name,
+                final_damage=damage,
+            )
+            return
 
         max_hp = int(getattr(player, "max_health", 100) or 100)
         vk.messages.send(
@@ -1461,6 +1493,18 @@ def _handle_radiation(player, vk, user_id: int):
     new_health = max(0, user['health'] - total_rad_damage)
 
     database.update_user_stats(user_id, health=new_health, radiation=new_radiation)
+    player.health = new_health
+    player.radiation = new_radiation
+    if new_health <= 0:
+        _handle_death(
+            player,
+            vk,
+            user_id,
+            cause="Критическое радиационное поражение",
+            killer_name="радиация",
+            final_damage=total_rad_damage,
+        )
+        return
 
     rad_mult_text = f" (x{rad_mult:.1f} зона)" if rad_mult != 1.0 else ""
     rad_reduction_text = f"\nСопротивление класса: -{rad_reduction_pct}%" if rad_reduction_pct > 0 else ""
@@ -1497,6 +1541,17 @@ def _handle_trap(player, vk, user_id: int):
     damage = random.randint(15, 30)
     new_health = max(0, user['health'] - damage)
     database.update_user_stats(user_id, health=new_health)
+    player.health = new_health
+    if new_health <= 0:
+        _handle_death(
+            player,
+            vk,
+            user_id,
+            cause="Смертельная ловушка",
+            killer_name="ловушка",
+            final_damage=damage,
+        )
+        return
 
     max_hp = int(getattr(player, "max_health", 100) or 100)
     vk.messages.send(

@@ -1900,17 +1900,14 @@ def admin_give_item(vk_id: int, item_name: str, quantity: int = 1) -> dict:
         if not user:
             return {"success": False, "message": "Пользователь не найден."}
 
-        cursor.execute("SELECT id, name FROM items WHERE LOWER(name) = LOWER(%s)", (item_name,))
+        cursor.execute("SELECT name FROM items WHERE LOWER(name) = LOWER(%s)", (item_name,))
         item = cursor.fetchone()
         if not item:
             return {"success": False, "message": f"Предмет '{item_name}' не найден."}
 
-        cursor.execute("""
-            INSERT INTO user_inventory (user_id, item_id, quantity)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (user_id, item_id)
-            DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
-        """, (user["id"], item["id"], quantity))
+    if not add_item_to_inventory(vk_id, item["name"], quantity):
+        return {"success": False, "message": f"Не удалось выдать '{item['name']}'."}
+
     return {
         "success": True,
         "message": f"Выдано: {item['name']} x{quantity} пользователю {vk_id}.",
@@ -3725,6 +3722,32 @@ def reset_daily_quests_if_needed(vk_id: int):
 
     existing = get_daily_quests_for_user(vk_id)
     if existing is not None:
+        user_row = get_user_by_vk(vk_id) or {}
+        user_level = int(user_row.get("level", 1) or 1)
+        user_location = user_row.get("location")
+        from game.daily_quests import _is_quest_available_for_player
+        needs_repair = (
+            not bool(existing.get("claimed"))
+            and any(
+                not _is_quest_available_for_player(q, player_level=user_level, current_location=user_location)
+                for q in existing.get("quests", [])
+            )
+        )
+        if needs_repair:
+            today_seed = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
+            new_quests = generate_daily_quests(
+                today_seed,
+                player_level=user_level,
+                current_location=user_location,
+            )
+            old_progress = existing.get("progress", {}) or {}
+            new_ids = {q.get("id") for q in new_quests}
+            repaired_progress = {
+                qid: value for qid, value in old_progress.items()
+                if qid in new_ids
+            }
+            save_daily_quests(vk_id, new_quests, progress=repaired_progress, streak=int(existing.get("streak", 0) or 0))
+            return new_quests, repaired_progress, int(existing.get("streak", 0) or 0)
         return existing["quests"], existing["progress"], existing["streak"]
 
     today = datetime.now(timezone.utc).date()

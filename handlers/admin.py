@@ -375,7 +375,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
 
     m = re.match(r"^админ\s+выдать\s+(\d+)\s+(\d+)\s+(.+)$", original_text, flags=re.IGNORECASE)
     if m:
-        result = database.admin_give_item(int(m.group(1)), int(m.group(2)), m.group(3).strip())
+        result = database.admin_give_item(int(m.group(1)), m.group(3).strip(), int(m.group(2)))
         _send(vk, user_id, result["message"]); return True
 
     m = re.match(r"^админ\s+set\s+(\d+)\s+([a-z_]+)\s+(-?\d+)$", text)

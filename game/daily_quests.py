@@ -240,12 +240,17 @@ def _get_best_streak_bonus(streak: int) -> dict:
 def _is_quest_available_for_player(quest: dict, player_level: int | None, current_location: str | None = None) -> bool:
     """
     Проверить, доступно ли задание игроку на момент генерации.
-    Сейчас критично фильтруем P2P задания по уровню доступа к рынку.
+    Фильтруем задания, которые могут стать невыполнимыми из-за доступа к рынку/магазинам.
     """
+    qtype = (quest or {}).get("type")
+    if qtype in {"shop_buy", "shop_sell"}:
+        # NPC-магазины сейчас завязаны на ротацию/доступность витрины и могут быть закрыты.
+        # Не выдаём дейлики, которые игрок не может гарантированно выполнить в течение дня.
+        return False
+
     if player_level is None:
         return True
 
-    qtype = (quest or {}).get("type")
     if qtype in {"market_list", "market_buy"}:
         from infra import config as game_config
         return int(player_level) >= int(game_config.MARKET_MIN_LEVEL)
