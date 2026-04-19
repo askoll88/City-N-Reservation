@@ -55,8 +55,7 @@ def create_main_keyboard(player_level: int = None):
     keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("Больница", color=VkKeyboardColor.PRIMARY)
-    if player_level is not None and player_level >= 25:
-        keyboard.add_button("Черный рынок", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Черный рынок", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("Убежище", color=VkKeyboardColor.SECONDARY)
 
@@ -82,8 +81,7 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_button("Больница", color=VkKeyboardColor.PRIMARY)
         keyboard.add_line()
         keyboard.add_button("Убежище", color=VkKeyboardColor.PRIMARY)
-        if player_level is not None and player_level >= 25:
-            keyboard.add_button("Черный рынок", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Черный рынок", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
         _add_meta_row(keyboard)
 

@@ -411,6 +411,12 @@ def _load_classes_from_db():
                 "passive_skills": formatted_passive,
                 "drawbacks": [],
             }
+
+        # Каноничные классы живут в коде: так новые пассивки/уязвимости сразу
+        # работают даже если в БД остались старые или неполные записи классов.
+        default_classes = _load_default_classes()
+        for class_id, default_data in default_classes.items():
+            _classes_cache[class_id] = default_data
     except Exception:
         _classes_cache = _load_default_classes()
         return _classes_cache

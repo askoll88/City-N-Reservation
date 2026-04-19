@@ -1156,7 +1156,7 @@ def show_welcome(vk, user_id: int):
             loc.id,
             (
                 f"{loc.name}\n\n{loc.description}\n\n"
-                f"Черный рынок доступен с {config.BLACK_MARKET_MIN_LEVEL} уровня.\n"
+                "Черный рынок доступен с первого уровня.\n"
                 f"P2P рынок игроков на Черном рынке доступен с {config.MARKET_MIN_LEVEL} уровня."
             ),
             create_location_keyboard(current_location, player_level).get_keyboard(),

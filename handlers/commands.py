@@ -60,7 +60,7 @@ def get_welcome_message():
         "Используй кнопки для навигации по локациям.\n\n"
         "Подсказки:\n"
         "• Начни с КПП: там военный и учёный\n"
-        f"• Черный рынок откроется с {config.BLACK_MARKET_MIN_LEVEL} уровня\n"
+        "• Черный рынок открыт с первого уровня\n"
         f"• P2P рынок игроков откроется с {config.MARKET_MIN_LEVEL} уровня"
     )
 
@@ -119,19 +119,6 @@ def handle_navigation(player, vk, user_id: int, text: str):
 
     if not requested:
         return False
-
-    if requested == 'черный рынок' and player.level < config.BLACK_MARKET_MIN_LEVEL:
-        vk.messages.send(
-            user_id=user_id,
-            message=(
-                "🚫Доступ запрещён!\n\n"
-                f"Чёрный рынок открыт только для сталкеров {config.BLACK_MARKET_MIN_LEVEL}+ уровня.\n\n"
-                f"Твоё текущее положение: {player.level} уровень\n\n"
-                "Подними уровень, чтобы получить доступ."
-            ),
-            random_id=0
-        )
-        return True
 
     allowed_transitions = {
         'город': {'кпп', 'больница', 'убежище', 'черный рынок'},
