@@ -23,6 +23,7 @@ ANOMALY_GUARANTEE_FLAG = "research_no_anomaly_streak"
 # Без детектора можно "влететь" в аномалию и потерять ресурсы.
 ANOMALY_BLIND_MISSTEP_CHANCE = 10
 ANOMALY_BLIND_ITEM_LOSS_CHANCE = 45
+SAWDUST_SOUP_RESEARCH_DROP_CHANCE = 2  # 2% среди событий "предмет": очень редкий странный лут
 
 
 # === События исследования ===
@@ -1930,6 +1931,28 @@ def _spawn_item(player, vk, user_id: int):
     _combat_state, create_location_keyboard, _, _ = _get_main_imports()
     from game.location_mechanics import get_location_loot_bias, get_location_loot_bias_chance
 
+    if random.randint(1, 100) <= SAWDUST_SOUP_RESEARCH_DROP_CHANCE:
+        soup = database.get_item_by_name("Суп с опилками")
+        if soup:
+            item_weight = soup.get('weight', 0.3)
+            current_weight = player.inventory.total_weight
+            if current_weight + item_weight <= player.max_weight:
+                database.add_item_to_inventory(user_id, soup['name'], 1)
+                player.inventory.reload()
+                vk.messages.send(
+                    user_id=user_id,
+                    message=(
+                        "Ты обыскал территорию!\n\n"
+                        "СТРАННАЯ НАХОДКА!\n\n"
+                        f"Найдено: {soup['name']}\n"
+                        f"Описание: {soup.get('description', 'Без описания.')}\n"
+                        f"Вес: {item_weight}кг"
+                    ),
+                    keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                    random_id=0
+                )
+                return
+
     # Проверяем бонус локации
     bias_items = get_location_loot_bias(player.current_location_id)
     bias_chance = get_location_loot_bias_chance(player.current_location_id)
@@ -1943,6 +1966,14 @@ def _spawn_item(player, vk, user_id: int):
         weights = [20, 20, 18, 18, 10, 8, 6]
     category = random.choices(categories, weights=weights, k=1)[0]
     items_in_category = database.get_items_by_category(category)
+    if category in {"weapons", "rare_weapons"}:
+        from game.weapon_progression import get_weapon_required_level
+        lvl = max(1, int(getattr(player, "level", 1) or 1))
+        allowed_weapons = [
+            item for item in items_in_category
+            if get_weapon_required_level(item) <= lvl + 3
+        ]
+        items_in_category = allowed_weapons or items_in_category[:1]
 
     if not items_in_category:
         vk.messages.send(

@@ -570,6 +570,22 @@ def handle_market_buy_listing(player, vk, user_id, text):
         return True
 
     total_price = lot_info["price_per_item"] * lot_info["quantity"]
+    from game.weapon_progression import get_weapon_required_level, is_weapon
+    item_info = database.get_item_by_name(lot_info["item_name"])
+    if is_weapon(item_info):
+        required_level = get_weapon_required_level(item_info)
+        if required_level > player.level + 3:
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    f"❌ {lot_info['item_name']} относится к оружию {required_level} уровня.\n"
+                    f"Твой уровень: {player.level}. Это оружие пока нельзя купить."
+                ),
+                keyboard=create_player_market_keyboard().get_keyboard(),
+                random_id=0,
+            )
+            return True
+
     if player.money < total_price:
         vk.messages.send(
             user_id=user_id,

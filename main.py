@@ -646,6 +646,12 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         vk.messages.send(user_id=user_id, message=f"У тебя нет предмета '{item_name}' в инвентаре.", random_id=0)
         return True
 
+    if text.startswith('улучшить оружие') or text.startswith('прокачать оружие'):
+        item_name = text.replace('улучшить оружие', '').replace('прокачать оружие', '').strip()
+        success, msg = player.upgrade_weapon(item_name or None)
+        vk.messages.send(user_id=user_id, message=msg, random_id=0)
+        return True
+
     # Снять предмет
     if text in ['снять рюкзак', 'снять оружие', 'снять броню', 'снять устройство', 'снять детектор', 'снять']:
         if text == 'снять рюкзак':

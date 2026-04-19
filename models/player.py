@@ -714,9 +714,9 @@ class Player:
         # ═══════════════════════════════════════════════════
         total_attack = 0
         if self.equipped_weapon:
-            weapon_item = database.get_item_by_name(self.equipped_weapon)
-            attack = weapon_item.get('attack', 0) if weapon_item else 0
-            total_attack = attack
+            self.inventory.reload()
+            weapon_item = next((w for w in self.inventory.weapons if w.get("name") == self.equipped_weapon), None)
+            total_attack = int(weapon_item.get('attack', 0) or 0) if weapon_item else 0
 
         # Броня по слотам
         armor_slots = []
@@ -1179,12 +1179,41 @@ class Player:
         weapon = next((w for w in self.inventory.weapons if w['name'] == weapon_name), None)
         if not weapon:
             return False, f"У тебя нет оружия '{weapon_name}' в инвентаре."
+        required_level = int(weapon.get("required_level", 1) or 1)
+        weapon_level = int(weapon.get("item_level", required_level) or required_level)
+        if required_level > self.level:
+            return False, (
+                f"{weapon_name} требует {required_level} уровень.\n"
+                f"Твой уровень: {self.level}. Оружие можно хранить, но нельзя использовать."
+            )
+        if weapon_level > self.level:
+            return False, (
+                f"{weapon_name} L{weapon_level} выше твоего уровня {self.level}.\n"
+                "Прокачай персонажа или используй оружие ниже уровнем."
+            )
 
         self.equipped_weapon = weapon_name
         attack = weapon.get('attack', 0)
         database.update_user_stats(self.user_id, equipped_weapon=weapon_name)
 
-        return True, f"Надето оружие: {weapon_name} ({attack})"
+        rank = weapon.get("item_rank", "common")
+        return True, f"Надето оружие: {weapon_name} L{weapon_level} [{rank}] | урон {attack}"
+
+    def upgrade_weapon(self, weapon_name: str | None = None) -> tuple[bool, str]:
+        """Прокачать оружие до текущего уровня игрока."""
+        self.inventory.reload()
+        if not weapon_name:
+            weapon_name = self.equipped_weapon
+        if not weapon_name:
+            return False, "Укажи оружие или надень его: 'улучшить оружие <название>'."
+        weapon = next((w for w in self.inventory.weapons if w['name'].lower() == weapon_name.lower()), None)
+        if not weapon:
+            return False, f"У тебя нет оружия '{weapon_name}'."
+        result = database.upgrade_weapon_to_player_level(self.user_id, weapon["name"])
+        if result.get("success"):
+            self.money = max(0, int(self.money))
+            self.inventory.reload()
+        return bool(result.get("success")), result.get("message", "Ошибка прокачки оружия.")
 
     def equip_armor(self, armor_name: str = None) -> tuple[bool, str]:
         """Надеть или снять броню"""
@@ -1359,10 +1388,12 @@ class Player:
         old_radiation = int(self.radiation)
         old_max_health = int(self.max_health)
 
-        hp_restore = {
+        hp_restore_percent = {
             "аптечка": 50,
             "научная аптечка": 80,
             "бинт": 20,
+        }
+        hp_restore = {
             "стимулятор": 50,
             "боевой стимулятор": 80,
             "боевой стимулятор упак": 80,
@@ -1408,8 +1439,14 @@ class Player:
                 f"Прокачка: {self.hp_upgrade_level}/{max_upgrade_level}"
             )
             used = True
-        elif item_key in hp_restore or item_key in energy_restore or item_key in radiation_delta:
-            if item_key in hp_restore:
+        elif item_key in hp_restore_percent or item_key in hp_restore or item_key in energy_restore or item_key in radiation_delta:
+            hp_percent_text = ""
+            if item_key in hp_restore_percent:
+                restore_pct = hp_restore_percent[item_key]
+                restore_hp = max(1, int(self.max_health * restore_pct / 100))
+                self.health = min(self.max_health, self.health + restore_hp)
+                hp_percent_text = f" ({restore_pct}% от макс. HP)"
+            elif item_key in hp_restore:
                 self.health = min(self.max_health, self.health + hp_restore[item_key])
             if item_key in energy_restore:
                 self.energy = min(100, self.energy + energy_restore[item_key])
@@ -1423,7 +1460,7 @@ class Player:
             )
             parts = [f"Использовано: {item_name}"]
             if self.health != old_health:
-                parts.append(f"❤️ HP: {old_health} -> {self.health}/{self.max_health}")
+                parts.append(f"❤️ HP: {old_health} -> {self.health}/{self.max_health}{hp_percent_text}")
             if self.energy != old_energy:
                 parts.append(f"⚡ Энергия: {old_energy} -> {self.energy}/100")
             if self.radiation != old_radiation:
@@ -1454,6 +1491,15 @@ class Player:
 
         if not item_info:
             return False, f"Такой предмет не продаётся."
+
+        from game.weapon_progression import get_weapon_required_level, is_weapon
+        if is_weapon(item_info):
+            required_level = get_weapon_required_level(item_info)
+            if required_level > self.level + 3:
+                return False, (
+                    f"{item_name} относится к оружию {required_level} уровня.\n"
+                    f"Твой уровень: {self.level}. У торговцев для тебя доступны стволы ближе к твоему уровню."
+                )
 
         price = item_info.get('price', 0)
 

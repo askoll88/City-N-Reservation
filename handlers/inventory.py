@@ -14,10 +14,13 @@ def _fmt_weight(item: dict, default: float = 1.0) -> str:
 
 
 def _screen_header(title: str, player) -> str:
+    total_weight = float(getattr(player.inventory, "total_weight", 0.0) or 0.0)
+    max_weight = float(getattr(player, "max_weight", 0.0) or 0.0)
+    money = int(getattr(player, "money", 0) or 0)
     return (
         f"{ui.title(title)}\n"
-        f"⚖️ Вес: {player.inventory.total_weight:.1f}/{player.max_weight:.1f}кг\n"
-        f"💰 Деньги: {player.money} руб.\n"
+        f"⚖️ Вес: {total_weight:.1f}/{max_weight:.1f}кг\n"
+        f"💰 Деньги: {money} руб.\n"
     )
 
 
@@ -218,11 +221,8 @@ def _equip_weapon(player, index: int, vk, user_id: int) -> bool:
     
     weapon = weapons[index]
     weapon_name = weapon['name']
-    
-    player.equipped_weapon = weapon_name
-    database.update_user_stats(user_id, equipped_weapon=weapon_name)
-    
-    vk.messages.send(user_id=user_id, message=f"Надето оружие: {weapon_name}!", random_id=0)
+    success, msg = player.equip_weapon(weapon_name)
+    vk.messages.send(user_id=user_id, message=msg, random_id=0)
     return True
 
 
@@ -395,7 +395,10 @@ def show_weapons(player, vk, user_id: int):
             equipped_mark = " [ЭКИП]" if item['name'] == player.equipped_weapon else ""
             msg += (
                 f"{idx}. 🔫 {item['name']}{equipped_mark}\n"
-                f"   Урон {item.get('attack', 0)} | Вес {_fmt_weight(item)} | x{item.get('quantity', 1)}\n"
+                f"   Урон {item.get('attack', 0)} | "
+                f"L{item.get('item_level', 1)}/{item.get('required_level', 1)} | "
+                f"Ранг {item.get('item_rank', 'common')} | "
+                f"Вес {_fmt_weight(item)} | x{item.get('quantity', 1)}\n"
             )
         msg += _screen_footer("надеть/снять")
     else:
@@ -420,12 +423,12 @@ def show_armor(player, vk, user_id: int):
             item_name = item['name']
             # Проверяем, экипирована ли броня в любом слоте
             if item_name in [
-                player.equipped_armor,
-                player.equipped_armor_head,
-                player.equipped_armor_body,
-                player.equipped_armor_legs,
-                player.equipped_armor_hands,
-                player.equipped_armor_feet
+                getattr(player, "equipped_armor", None),
+                getattr(player, "equipped_armor_head", None),
+                getattr(player, "equipped_armor_body", None),
+                getattr(player, "equipped_armor_legs", None),
+                getattr(player, "equipped_armor_hands", None),
+                getattr(player, "equipped_armor_feet", None),
             ]:
                 equipped_mark = " [ЭКИП]"
             msg += (
@@ -1356,7 +1359,8 @@ def show_soldier_weapons(player, vk, user_id: int):
             featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
 
             msg += f"{idx}. {name}{featured}\n"
-            msg += f"   🔫 Урон: {attack} | Вес: {weight}кг\n"
+            level_text = f" | Треб. L{weapon.get('required_level')}" if weapon.get('required_level') else ""
+            msg += f"   🔫 База: {attack}{level_text} | Вес: {weight}кг\n"
             msg += f"   📝 {desc}\n"
             if is_featured and base_price != price:
                 msg += f"   💵 Цена: {price} руб. (было {base_price})\n"
@@ -1773,6 +1777,10 @@ def show_trader_shop_all(player, vk, user_id: int):
             stat_parts = []
             if attack > 0:
                 stat_parts.append(f"урон {attack}")
+            if item.get("item_level"):
+                stat_parts.append(f"L{item.get('item_level')}/{item.get('required_level', 1)}")
+            if item.get("item_rank"):
+                stat_parts.append(f"ранг {item.get('item_rank')}")
             if defense > 0:
                 stat_parts.append(f"защита {defense}")
             stat_line = " | ".join(stat_parts) if stat_parts else "универсал"

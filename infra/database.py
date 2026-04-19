@@ -20,6 +20,15 @@ from psycopg2 import pool, OperationalError, DatabaseError, InterfaceError
 from psycopg2.extras import RealDictCursor
 
 from infra import config
+from game.weapon_progression import (
+    calc_weapon_attack,
+    clamp_weapon_level,
+    get_weapon_required_level,
+    is_weapon,
+    normalize_weapon_rank,
+    roll_weapon_rank,
+    weapon_upgrade_cost,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +279,8 @@ def init_db():
                 user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 item_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
                 quantity INTEGER DEFAULT 1,
+                item_level INTEGER DEFAULT 1,
+                item_rank VARCHAR(20) DEFAULT 'common',
                 UNIQUE(user_id, item_id)
             )
         """)
@@ -495,6 +506,9 @@ def _migrate_legacy_schema():
         cursor.execute("ALTER TABLE users ALTER COLUMN rank_tier SET DEFAULT 1")
         cursor.execute("ALTER TABLE users ALTER COLUMN rank_tier SET NOT NULL")
 
+        cursor.execute("ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS item_level INTEGER DEFAULT 1")
+        cursor.execute("ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS item_rank VARCHAR(20) DEFAULT 'common'")
+
 
 # ---------------------------------------------------------------------------
 # Справочник предметов
@@ -670,9 +684,9 @@ def _seed_items():
         ("Грузовой рюкзак",   "backpacks", "Большой грузовой рюкзак.",         400,  0, 0, 8.0, 60),
 
         # === МЕДИЦИНА (для магазина учёного) =============================
-        ("Аптечка",          "meds", "Стандартная армейская аптечка. +50 HP.",  60,  0, 0, 0.30),
-        ("Научная аптечка",  "meds", "Улучшенная аптечка учёных. +80 HP.",     120,  0, 0, 0.25),
-        ("Бинт",             "meds", "Обычный бинт. +20 HP.",                   25,  0, 0, 0.10),
+        ("Аптечка",          "meds", "Стандартная армейская аптечка. Восстанавливает 50% HP.",  60,  0, 0, 0.30),
+        ("Научная аптечка",  "meds", "Улучшенная аптечка учёных. Восстанавливает 80% HP.",     120,  0, 0, 0.25),
+        ("Бинт",             "meds", "Обычный бинт. Восстанавливает 20% HP.",                   25,  0, 0, 0.10),
         ("Стимулятор",       "meds", "Военный стимулятор. +50 HP, +20 энергии.", 80, 0, 0, 0.10),
         ("Боевой стимулятор","meds", "Мощный стимулятор. +80 HP, +50 энергии.",150,  0, 0, 0.08),
 
@@ -734,6 +748,7 @@ def _seed_items():
         ("Ржавая железка",   "trash", "Кусок ржавого железа.",     4, 0, 0, 0.15),
         ("Сломанный нож",    "trash", "Затупившийся ржавый нож.",  5, 0, 0, 0.15),
         ("Мёртвый артефакт", "trash", "Потухший артефакт.",        8, 0, 0, 0.08),
+        ("Суп с опилками",   "trash", "Банка мутного супа. На дне что-то хрустит.", 1, 0, 0, 0.30),
         ("Патрон 5.45",      "trash", "Один патрон для АК.",       2, 0, 0, 0.10),
         ("Патрон 9мм",       "trash", "Пистолетный патрон.",       2, 0, 0, 0.12),
         ("Медная проволока", "trash", "Кусок медной проволоки.",   8, 0, 0, 0.06),
@@ -1072,39 +1087,76 @@ def update_user_stats(vk_id: int, **fields):
 
 def get_user_inventory(vk_id: int) -> list[dict]:
     with db_cursor() as (cursor, _):
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        cursor.execute("SELECT id, level FROM users WHERE vk_id = %s", (vk_id,))
         row = cursor.fetchone()
         if not row:
             return []
         cursor.execute("""
             SELECT i.name, i.category, i.description, i.price,
                    i.attack, i.defense, i.weight, i.backpack_bonus,
-                   ui.quantity
+                   i.rarity, i.anomaly_type, i.bonus_type, i.bonus_value,
+                   ui.quantity, ui.item_level, ui.item_rank
             FROM user_inventory ui
             JOIN items i ON ui.item_id = i.id
             WHERE ui.user_id = %s
         """, (row["id"],))
-        return [dict(r) for r in cursor.fetchall()]
+        result = []
+        player_level = int(row.get("level", 1) or 1)
+        for r in cursor.fetchall():
+            item = dict(r)
+            if is_weapon(item):
+                item_level = clamp_weapon_level(item.get("item_level"), player_level, item)
+                item_rank = normalize_weapon_rank(item.get("item_rank"), item)
+                item["item_level"] = item_level
+                item["item_rank"] = item_rank
+                item["required_level"] = get_weapon_required_level(item)
+                item["base_attack"] = int(item.get("attack", 0) or 0)
+                item["attack"] = calc_weapon_attack(item, item_level, item_rank)
+            result.append(item)
+        return result
 
 
-def add_item_to_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+def add_item_to_inventory(
+    vk_id: int,
+    item_name: str,
+    quantity: int = 1,
+    item_level: int | None = None,
+    item_rank: str | None = None,
+) -> bool:
     with db_cursor() as (cursor, _):
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        cursor.execute("SELECT id, level FROM users WHERE vk_id = %s", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return False
 
-        cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+        cursor.execute("SELECT * FROM items WHERE name = %s", (item_name,))
         item = cursor.fetchone()
         if not item:
             return False
 
+        item_data = dict(item)
+        player_level = int(user.get("level", 1) or 1)
+        if is_weapon(item_data):
+            item_level = clamp_weapon_level(item_level or player_level, player_level, item_data)
+            item_rank = normalize_weapon_rank(item_rank or roll_weapon_rank(player_level, item_data), item_data)
+        else:
+            item_level = 1
+            item_rank = normalize_weapon_rank(item_rank, item_data)
+
         cursor.execute("""
-            INSERT INTO user_inventory (user_id, item_id, quantity)
-            VALUES (%s, %s, %s)
+            INSERT INTO user_inventory (user_id, item_id, quantity, item_level, item_rank)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (user_id, item_id)
-            DO UPDATE SET quantity = user_inventory.quantity + %s
-        """, (user["id"], item["id"], quantity, quantity))
+            DO UPDATE SET
+                quantity = user_inventory.quantity + EXCLUDED.quantity,
+                item_level = GREATEST(user_inventory.item_level, EXCLUDED.item_level),
+                item_rank = CASE
+                    WHEN array_position(ARRAY['common','uncommon','rare','epic','legendary'], EXCLUDED.item_rank)
+                       > array_position(ARRAY['common','uncommon','rare','epic','legendary'], COALESCE(user_inventory.item_rank, 'common'))
+                    THEN EXCLUDED.item_rank
+                    ELSE user_inventory.item_rank
+                END
+        """, (user["id"], item["id"], quantity, item_level, item_rank))
     return True
 
 
@@ -1395,6 +1447,8 @@ def get_npc_shop_assortment(
         row["stock_left"] = stock_left
         row["is_featured"] = is_featured
         row["discount_pct"] = max(0, discount_pct)
+        if is_weapon(row):
+            row["required_level"] = get_weapon_required_level(row)
         result_items.append(row)
 
     return {
@@ -1437,10 +1491,22 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
             return {"success": False, "message": f"Предмет '{item_name}' не найден"}
         item_data = dict(item_row)
 
-        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, money, level FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден"}
+        player_level = int(user.get("level", 1) or 1)
+
+        if is_weapon(item_data):
+            required_level = get_weapon_required_level(item_data)
+            if required_level > player_level + 3:
+                return {
+                    "success": False,
+                    "message": (
+                        f"{item_name} требует минимум {required_level} уровень владения оружием.\n"
+                        f"Твой уровень: {player_level}. Ищи оружие своего эшелона или прокачайся."
+                    ),
+                }
 
         is_featured = False
         stock_left_after = None
@@ -1489,14 +1555,28 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
         )
         new_balance = int(cursor.fetchone()["money"])
 
+        inv_level = 1
+        inv_rank = normalize_weapon_rank(None, item_data)
+        if is_weapon(item_data):
+            inv_level = clamp_weapon_level(player_level, player_level, item_data)
+            inv_rank = roll_weapon_rank(player_level, item_data)
+
         cursor.execute(
             """
-            INSERT INTO user_inventory (user_id, item_id, quantity)
-            VALUES (%s, %s, 1)
+            INSERT INTO user_inventory (user_id, item_id, quantity, item_level, item_rank)
+            VALUES (%s, %s, 1, %s, %s)
             ON CONFLICT (user_id, item_id)
-            DO UPDATE SET quantity = user_inventory.quantity + 1
+            DO UPDATE SET
+                quantity = user_inventory.quantity + 1,
+                item_level = GREATEST(user_inventory.item_level, EXCLUDED.item_level),
+                item_rank = CASE
+                    WHEN array_position(ARRAY['common','uncommon','rare','epic','legendary'], EXCLUDED.item_rank)
+                       > array_position(ARRAY['common','uncommon','rare','epic','legendary'], COALESCE(user_inventory.item_rank, 'common'))
+                    THEN EXCLUDED.item_rank
+                    ELSE user_inventory.item_rank
+                END
             """,
-            (user["id"], item_data["id"]),
+            (user["id"], item_data["id"], inv_level, inv_rank),
         )
 
         if merchant_id:
@@ -1515,6 +1595,8 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
             stock_left_after = int(row["stock_left"])
 
     msg = f"Ты купил {item_name} за {price} руб."
+    if is_weapon(item_data):
+        msg += f"\nУровень оружия: {inv_level}. Ранг: {inv_rank}."
     if stock_left_after is not None:
         msg += f"\nОстаток на витрине: {stock_left_after} шт."
     return {"success": True, "message": msg, "price": price, "remaining_money": new_balance}
@@ -1620,6 +1702,71 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
         "message": f"Ты продал {item_name} за {sell_price} руб.{bonus_msg}",
         "sell_price": sell_price,
         "remaining_money": new_balance,
+    }
+
+
+def upgrade_weapon_to_player_level(vk_id: int, item_name: str) -> dict:
+    """Прокачать оружие в инвентаре до текущего уровня игрока."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id, level, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден"}
+
+        cursor.execute(
+            """
+            SELECT ui.item_level, ui.item_rank, i.*
+            FROM user_inventory ui
+            JOIN items i ON i.id = ui.item_id
+            WHERE ui.user_id = %s AND LOWER(i.name) = LOWER(%s)
+            FOR UPDATE
+            """,
+            (user["id"], item_name),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {"success": False, "message": f"У тебя нет оружия '{item_name}'."}
+
+        item = dict(row)
+        if not is_weapon(item):
+            return {"success": False, "message": "Прокачивать можно только оружие."}
+
+        target_level = int(user.get("level", 1) or 1)
+        current_level = clamp_weapon_level(item.get("item_level"), target_level, item)
+        if current_level >= target_level:
+            return {
+                "success": False,
+                "message": f"{item['name']} уже актуального уровня: {current_level}/{target_level}.",
+            }
+
+        rank = normalize_weapon_rank(item.get("item_rank"), item)
+        cost = weapon_upgrade_cost(item, current_level, target_level, rank)
+        money = int(user.get("money", 0) or 0)
+        if money < cost:
+            return {"success": False, "message": f"Прокачка стоит {cost} руб., у тебя {money} руб."}
+
+        cursor.execute(
+            "UPDATE users SET money = money - %s WHERE id = %s RETURNING money",
+            (cost, user["id"]),
+        )
+        new_money = int(cursor.fetchone()["money"])
+        cursor.execute(
+            "UPDATE user_inventory SET item_level = %s WHERE user_id = %s AND item_id = %s",
+            (target_level, user["id"], item["id"]),
+        )
+
+    old_attack = calc_weapon_attack(item, current_level, rank)
+    new_attack = calc_weapon_attack(item, target_level, rank)
+    return {
+        "success": True,
+        "message": (
+            f"Оружие улучшено: {item['name']}\n"
+            f"Уровень: {current_level} -> {target_level}\n"
+            f"Ранг: {rank}\n"
+            f"Урон: {old_attack} -> {new_attack}\n"
+            f"Цена: {cost} руб.\n"
+            f"Осталось денег: {new_money} руб."
+        ),
     }
 
 
