@@ -3,9 +3,13 @@
 """
 from __future__ import annotations
 
+import json
+import logging
 import random
 import time
 import threading
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from infra import config
 from infra import database
 from models import enemies
@@ -15,6 +19,80 @@ from infra.state_manager import _combat_state, set_combat_state, is_in_combat, g
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
 _active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
+COMBAT_LOG_PATH = Path(__file__).resolve().parent.parent / "logs" / "combat.log"
+
+
+def _get_combat_logger() -> logging.Logger:
+    logger = logging.getLogger("city_n.combat")
+    if any(getattr(handler, "_city_n_combat_file", False) for handler in logger.handlers):
+        return logger
+
+    COMBAT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        COMBAT_LOG_PATH,
+        maxBytes=5_000_000,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    handler._city_n_combat_file = True
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    return logger
+
+
+def _player_log_snapshot(player) -> dict:
+    if player is None:
+        return {}
+    return {
+        "level": getattr(player, "level", None),
+        "rank": getattr(player, "rank", None),
+        "class": getattr(player, "player_class", None),
+        "location_id": getattr(player, "current_location_id", None),
+        "health": getattr(player, "health", None),
+        "max_health": getattr(player, "max_health", None),
+        "energy": getattr(player, "energy", None),
+        "radiation": getattr(player, "radiation", None),
+        "money": getattr(player, "money", None),
+        "experience": getattr(player, "experience", None),
+        "weapon": getattr(player, "equipped_weapon", None),
+        "armor": getattr(player, "equipped_armor", None),
+        "defense": getattr(player, "total_defense", None),
+        "crit_chance": getattr(player, "crit_chance", None),
+        "dodge_chance": getattr(player, "dodge_chance", None),
+    }
+
+
+def _enemy_log_snapshot(combat: dict | None) -> dict:
+    if not combat:
+        return {}
+    return {
+        "name": combat.get("enemy_name"),
+        "level": combat.get("enemy_level"),
+        "role": combat.get("enemy_role"),
+        "role_label": combat.get("enemy_role_label"),
+        "hp": combat.get("enemy_hp"),
+        "max_hp": combat.get("enemy_max_hp"),
+        "damage": combat.get("enemy_damage"),
+        "speed": combat.get("enemy_speed"),
+        "elite": combat.get("enemy_is_elite"),
+        "location_id": combat.get("location_id"),
+    }
+
+
+def _combat_log(event: str, user_id: int | None = None, player=None, combat: dict | None = None, **data):
+    payload = {
+        "event": event,
+        "user_id": user_id,
+        "player": _player_log_snapshot(player),
+        "enemy": _enemy_log_snapshot(combat),
+        "data": data,
+    }
+    try:
+        _get_combat_logger().info(json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to write combat log")
 
 # Гарантированная аномалия: не реже 1 раза в N исследований.
 ANOMALY_GUARANTEE_RESEARCHES = 150
@@ -545,6 +623,7 @@ def _handle_death(player, vk, user_id: int, cause: str = None, killer_name: str 
     # Штрафы при смерти (единые с выбросом): -20% деньги, -15% XP
     lost_money = int(player.money * 0.20)
     lost_exp = int(player.experience * 0.15)
+    death_location = player.current_location_id
 
     player.money -= lost_money
     player.experience -= lost_exp
@@ -565,6 +644,18 @@ def _handle_death(player, vk, user_id: int, cause: str = None, killer_name: str 
         radiation=0,
         money=player.money,
         experience=player.experience
+    )
+    _combat_log(
+        "death",
+        user_id,
+        player,
+        cause=cause_text,
+        killer=killer_text,
+        final_damage=final_damage,
+        lost_money=lost_money,
+        lost_exp=lost_exp,
+        death_location=death_location,
+        respawn_location="больница",
     )
 
     message = (
@@ -1295,6 +1386,16 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
         dodge_chance = min(95, 30 + perception * 5)
 
         if random.randint(1, 100) <= dodge_chance:
+            _combat_log(
+                "anomaly_bypassed",
+                user_id,
+                player,
+                anomaly=anomaly_name,
+                anomaly_type=anomaly_type,
+                action=action,
+                dodge_chance=dodge_chance,
+                location_id=location_id,
+            )
             vk.messages.send(
                 user_id=user_id,
                 message=(
@@ -1312,6 +1413,17 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
             new_health = max(0, user['health'] - damage)
             database.update_user_stats(user_id, health=new_health)
             player.health = new_health
+            _combat_log(
+                "anomaly_damage",
+                user_id,
+                player,
+                anomaly=anomaly_name,
+                anomaly_type=anomaly_type,
+                action=action,
+                damage=damage,
+                player_hp_after=new_health,
+                location_id=location_id,
+            )
             if new_health <= 0:
                 _handle_death(
                     player,
@@ -1421,8 +1533,30 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 keyboard=choice_keyboard.get_keyboard(),
                 random_id=0
             )
+            _combat_log(
+                "anomaly_artifact_success",
+                user_id,
+                player,
+                anomaly=anomaly_name,
+                anomaly_type=anomaly_type,
+                action=action,
+                artifact=artifact_name,
+                rarity=rarity,
+                shells_after=shells_after,
+                location_id=location_id,
+            )
         else:
             # Артефакт не выпал - гильза потеряна
+            _combat_log(
+                "anomaly_artifact_failed",
+                user_id,
+                player,
+                anomaly=anomaly_name,
+                anomaly_type=anomaly_type,
+                action=action,
+                shells_after=shells_after,
+                location_id=location_id,
+            )
             vk.messages.send(
                 user_id=user_id,
                 message=(
@@ -1442,6 +1576,17 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
         new_health = max(0, user['health'] - damage)
         database.update_user_stats(user_id, health=new_health)
         player.health = new_health
+        _combat_log(
+            "anomaly_damage",
+            user_id,
+            player,
+            anomaly=anomaly_name,
+            anomaly_type=anomaly_type,
+            action=action,
+            damage=damage,
+            player_hp_after=new_health,
+            location_id=location_id,
+        )
         if new_health <= 0:
             _handle_death(
                 player,
@@ -1495,6 +1640,20 @@ def _handle_radiation(player, vk, user_id: int):
     database.update_user_stats(user_id, health=new_health, radiation=new_radiation)
     player.health = new_health
     player.radiation = new_radiation
+    _combat_log(
+        "radiation_damage",
+        user_id,
+        player,
+        location_id=player.current_location_id,
+        radiation_gain=rad_gain,
+        radiation_after=new_radiation,
+        base_damage=rad_damage,
+        overload_damage=rad_overload,
+        total_damage=total_rad_damage,
+        player_hp_after=new_health,
+        rad_mult=rad_mult,
+        rad_reduction_pct=rad_reduction_pct,
+    )
     if new_health <= 0:
         _handle_death(
             player,
@@ -1542,6 +1701,14 @@ def _handle_trap(player, vk, user_id: int):
     new_health = max(0, user['health'] - damage)
     database.update_user_stats(user_id, health=new_health)
     player.health = new_health
+    _combat_log(
+        "trap_damage",
+        user_id,
+        player,
+        location_id=player.current_location_id,
+        damage=damage,
+        player_hp_after=new_health,
+    )
     if new_health <= 0:
         _handle_death(
             player,
@@ -1928,6 +2095,15 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
         'turn': 'player',
         'location_id': player.current_location_id,
     }
+    combat = _combat_state[user_id]
+    _combat_log(
+        "enemy_spawn",
+        user_id,
+        player,
+        combat,
+        initiative=initiative,
+        enemy_stat_mult=enemy_stat_mult,
+    )
 
     message = (
         f"ОПАСНОСТЬ!\n\n"
@@ -1949,6 +2125,15 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
         is_dodged = random.randint(1, 100) <= dodge_chance
         if is_dodged:
             message += "\n⚡ Враг начал первым, но ты уклонился от стартового удара!\n"
+            _combat_log(
+                "enemy_opening_attack",
+                user_id,
+                player,
+                combat,
+                dodged=True,
+                damage=0,
+                player_hp_after=player.health,
+            )
         else:
             final_damage, hit_cap = _calculate_incoming_damage(player, enemy_damage, total_defense)
             # Открывающий удар не убивает мгновенно: оставляем минимум 1 HP.
@@ -1961,6 +2146,18 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
             )
             if hit_cap:
                 message += "Ранняя осторожность снижает тяжесть первого удара.\n"
+            _combat_log(
+                "enemy_opening_attack",
+                user_id,
+                player,
+                combat,
+                dodged=False,
+                raw_damage=enemy_damage,
+                final_damage=final_damage,
+                defense=total_defense,
+                hit_cap=hit_cap,
+                player_hp_after=player.health,
+            )
     else:
         message += "\n✅ Ты выиграл инициативу и действуешь первым!\n"
 
@@ -2317,12 +2514,32 @@ def use_skill(player, vk, user_id: int, skill_name: str):
 
     # Применяем эффект навыка
     effect = skill.get("effect", {})
+    enemy_hp_before = combat.get('enemy_hp', 0)
+    player_hp_before = getattr(player, "health", None)
+    player_energy_before = player.energy + skill["energy_cost"]
     result_msg = _apply_skill_effect(player, vk, user_id, skill, combat, effect)
 
     # === Проверяем, нанесен ли урон (мгновенные эффекты) или требуется следующий ход ===
     instant_damage_effects = ["double_shot", "burst_count", "damage_mult", "ignore_defense", "self_heal"]
+    is_instant_effect = any(eff in effect for eff in instant_damage_effects)
+    _combat_log(
+        "skill_used",
+        user_id,
+        player,
+        combat,
+        skill=skill["name"],
+        class_id=class_id,
+        effect=effect,
+        energy_cost=skill["energy_cost"],
+        player_hp_before=player_hp_before,
+        player_energy_before=player_energy_before,
+        player_energy_after=player.energy,
+        enemy_hp_before=enemy_hp_before,
+        enemy_hp_after=combat.get('enemy_hp'),
+        instant_effect=is_instant_effect,
+    )
 
-    if any(eff in effect for eff in instant_damage_effects):
+    if is_instant_effect:
         # Мгновенный урон - обрабатываем ответ врага
         if combat['enemy_hp'] > 0:
             # Враг атакует
@@ -2334,12 +2551,13 @@ def use_skill(player, vk, user_id: int, skill_name: str):
                     result_msg += "\n😡 Танк в ярости: урон врага усилен!"
             active_effects = get_active_effects(user_id)
 
+            total_defense = player.total_defense
+            final_damage = 0
+            energy_drain = 0
             is_dodged = random.randint(1, 100) <= player.dodge_chance
             if is_dodged:
                 result_msg += f"\nТы уклонился от атаки!"
             else:
-                total_defense = player.total_defense
-
                 # Применяем эффекты защиты
                 if "temp_defense_active" in active_effects:
                     total_defense += active_effects.get("temp_defense", 0)
@@ -2362,7 +2580,22 @@ def use_skill(player, vk, user_id: int, skill_name: str):
                         if energy_drain > 0:
                             player.energy -= energy_drain
                             result_msg += f"\n🧠 Контролёр высасывает энергию: -{energy_drain}⚡"
+            _combat_log(
+                "enemy_counter_after_skill",
+                user_id,
+                player,
+                combat,
+                skill=skill["name"],
+                dodged=is_dodged,
+                raw_damage=enemy_damage,
+                final_damage=final_damage,
+                defense=total_defense,
+                energy_drain=energy_drain,
+                player_hp_after=player.health,
+                player_energy_after=player.energy,
+            )
 
+            if not is_dodged:
                 # Проверка на смерть
                 if player.health <= 0:
                     player.health = 0
@@ -2725,6 +2958,7 @@ def handle_combat_attack(player, vk, user_id: int):
     melee = player.melee_damage
     total_damage = weapon_damage + melee
     total_damage, weapon_bonus_pct = _apply_weapon_damage_bonus(player, total_damage)
+    enemy_hp_before = combat.get('enemy_hp', 0)
     
     # === Применяем эффекты навыков ===
     skill_message = ""
@@ -2815,6 +3049,25 @@ def handle_combat_attack(player, vk, user_id: int):
 
     # Определяем какую клавиатуру показывать
     keyboard = None
+    _combat_log(
+        "player_attack",
+        user_id,
+        player,
+        combat,
+        weapon=weapon_name,
+        weapon_damage=weapon_damage,
+        melee_damage=melee,
+        total_damage=total_damage,
+        crit=is_crit,
+        crit_bonus_pct=crit_bonus_pct,
+        enemy_evaded=enemy_evaded,
+        bleed_applied=bleed_applied,
+        bleed_damage=bleed_damage,
+        enemy_hp_before=enemy_hp_before,
+        enemy_hp_after=combat.get('enemy_hp'),
+        stamina_regen=stamina_regen,
+        mastery_cap=mastery_cap,
+    )
 
     if combat['enemy_hp'] <= 0:
         database.update_user_stats(user_id, energy=player.energy)
@@ -2833,7 +3086,25 @@ def handle_combat_attack(player, vk, user_id: int):
         if "perfect_dodge" in active_effects:
             message += "\n💨УКЛОНЕНИЕ! (навык Уклонение)\n"
             del _active_skill_effects[user_id]["perfect_dodge"]
+            _combat_log(
+                "enemy_counter_attack",
+                user_id,
+                player,
+                combat,
+                dodged=True,
+                dodge_source="perfect_dodge",
+                raw_damage=enemy_damage,
+                final_damage=0,
+                defense=total_defense,
+                hit_cap=None,
+                energy_drain=0,
+                player_hp_after=player.health,
+                player_energy_after=player.energy,
+            )
         else:
+            final_damage = 0
+            hit_cap = None
+            energy_drain = 0
             is_dodged = random.randint(1, 100) <= player.dodge_chance
             if is_dodged:
                 message += f"\n💨УКЛОНЕНИЕ! (шанс: {player.dodge_chance}%)\n"
@@ -2877,6 +3148,20 @@ def handle_combat_attack(player, vk, user_id: int):
                         if energy_drain > 0:
                             player.energy -= energy_drain
                             message += f"🧠 Контролёр высасывает энергию: -{energy_drain}⚡\n"
+            _combat_log(
+                "enemy_counter_attack",
+                user_id,
+                player,
+                combat,
+                dodged=is_dodged,
+                raw_damage=enemy_damage,
+                final_damage=final_damage,
+                defense=total_defense,
+                hit_cap=hit_cap,
+                energy_drain=energy_drain,
+                player_hp_after=player.health,
+                player_energy_after=player.energy,
+            )
 
             # Проверка на смерть
             if player.health <= 0:
@@ -2945,6 +3230,14 @@ def handle_combat_flee(player, vk, user_id: int):
     flee_chance = max(5, min(90, 50 + int(passive.get("flee_chance_bonus", 0) or 0)))
     if random.randint(1, 100) <= flee_chance:
         del _combat_state[user_id]
+        _combat_log(
+            "flee_success",
+            user_id,
+            player,
+            combat,
+            flee_chance=flee_chance,
+            player_hp_after=player.health,
+        )
         from handlers.keyboards import create_resume_keyboard
         player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
         vk.messages.send(
@@ -2963,6 +3256,17 @@ def handle_combat_flee(player, vk, user_id: int):
         total_defense = player.total_defense
         final_damage = max(1, enemy_damage - total_defense)
         player.health -= final_damage
+        _combat_log(
+            "flee_failed",
+            user_id,
+            player,
+            combat,
+            flee_chance=flee_chance,
+            raw_damage=enemy_damage,
+            final_damage=final_damage,
+            defense=total_defense,
+            player_hp_after=player.health,
+        )
 
         # Проверка на смерть
         if player.health <= 0:
@@ -3059,6 +3363,7 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
 
     lvl = max(1, int(getattr(player, "level", 1) or 1))
     hp_ratio = int(getattr(player, "health", 0) or 0) / max(1, int(getattr(player, "max_health", 100) or 100))
+    field_supply = None
     if lvl <= 12 and hp_ratio <= 0.80 and random.randint(1, 100) <= 35:
         field_supply = random.choice(["Бинт", "Лечебная трава"])
         database.add_item_to_inventory(user_id, field_supply, 1)
@@ -3067,6 +3372,20 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
         except Exception:
             pass
         message += f"🧰 После боя найдено: {field_supply} x1\n"
+    _combat_log(
+        "victory",
+        user_id,
+        player,
+        combat,
+        gained_xp=gained_xp,
+        money=money,
+        shells_drop=shells_drop,
+        shells_added=added_shells,
+        reward_mult=round(reward_mult, 2),
+        event_reward_mult=round(event_reward_mult, 2),
+        field_supply=field_supply,
+        level_up=bool(level_up),
+    )
 
     message += (
         f"\n{ui.section('Состояние')}\n"

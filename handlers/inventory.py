@@ -1610,6 +1610,18 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
 
     try:
         clear_shop_cache(user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🔮 АРТЕФАКТЫ\n\n"
+                "Барыга больше не выставляет артефакты на продажу.\n"
+                "Найденные артефакты он по-прежнему выкупает.\n\n"
+                "Открой скупку и используй: 'продать <название>' или 'продать <номер>'."
+            ),
+            keyboard=create_artifact_shop_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
 
         # Категории артефактов - используем редкость вместо категории
         rarity_map = {
@@ -2073,6 +2085,13 @@ def handle_buy_artifact(player, item_name: str, vk, user_id: int) -> bool:
     logger = logging.getLogger(__name__)
 
     try:
+        vk.messages.send(
+            user_id=user_id,
+            message="❌ Барыга артефакты не продаёт. Только выкупает найденное.",
+            random_id=0
+        )
+        return True
+
         # Ищем артефакт в кэше магазина
         shop_data = get_shop_cache_data(user_id)
         artifacts = shop_data.get('artifacts', [])

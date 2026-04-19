@@ -1232,10 +1232,11 @@ NPC_MERCHANT_TRADER = "trader"
 _NPC_SHOPS = {
     NPC_MERCHANT_SOLDIER: {"categories": ("weapons", "armor")},
     NPC_MERCHANT_SCIENTIST: {"categories": ("meds", "food")},
-    # Барыга — единый торговец: продаёт все основные категории.
-    NPC_MERCHANT_TRADER: {"categories": ("weapons", "rare_weapons", "armor", "backpacks", "artifacts", "meds", "food")},
+    # Барыга продаёт снаряжение и припасы, но артефакты только выкупает.
+    NPC_MERCHANT_TRADER: {"categories": ("weapons", "rare_weapons", "armor", "backpacks", "meds", "food")},
 }
 _TRADER_BLOCKED_RARITIES = frozenset({"legendary"})
+_TRADER_BUY_BLOCKED_CATEGORIES = frozenset({"artifacts", "rare_artifacts", "legendary_artifacts"})
 
 _SHOP_EVENT_POOL = [
     {
@@ -1513,6 +1514,9 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
         period_key = None
 
         if merchant_id:
+            item_category = (item_data.get("category") or "").lower()
+            if merchant_id == NPC_MERCHANT_TRADER and item_category in _TRADER_BUY_BLOCKED_CATEGORIES:
+                return {"success": False, "message": "Барыга артефакты не продаёт. Только выкупает найденное."}
             item_rarity = (item_data.get("rarity") or "common").lower()
             if merchant_id == NPC_MERCHANT_TRADER and item_rarity in _TRADER_BLOCKED_RARITIES:
                 return {"success": False, "message": "Легендарные предметы у Барыги пока не продаются."}
