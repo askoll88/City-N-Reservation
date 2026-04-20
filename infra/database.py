@@ -27,6 +27,7 @@ from game.weapon_progression import (
     is_weapon,
     normalize_weapon_rank,
     roll_weapon_rank,
+    roll_shop_weapon_level,
     weapon_upgrade_cost,
 )
 
@@ -1105,7 +1106,10 @@ def get_user_inventory(vk_id: int) -> list[dict]:
         for r in cursor.fetchall():
             item = dict(r)
             if is_weapon(item):
-                item_level = clamp_weapon_level(item.get("item_level"), player_level, item)
+                stored_level = int(item.get("item_level") or get_weapon_required_level(item) or 1)
+                min_level = max(1, int(get_weapon_required_level(item) or 1))
+                max_level = max(min_level, player_level + 3)
+                item_level = max(min_level, min(max_level, stored_level))
                 item_rank = normalize_weapon_rank(item.get("item_rank"), item)
                 item["item_level"] = item_level
                 item["item_rank"] = item_rank
@@ -1395,6 +1399,8 @@ def get_npc_shop_assortment(
     category: str | None = None,
     limit: int = 10,
     rarity: str | None = None,
+    player_level: int | None = None,
+    viewer_vk_id: int | None = None,
 ) -> dict:
     """
     Получить текущую витрину NPC магазина:
@@ -1449,7 +1455,18 @@ def get_npc_shop_assortment(
         row["is_featured"] = is_featured
         row["discount_pct"] = max(0, discount_pct)
         if is_weapon(row):
+            seed = f"shop_weapon_level:{period_key}:{merchant_id}:{item_id}:{int(viewer_vk_id or 0)}"
+            effective_player_level = max(1, int(player_level or get_weapon_required_level(row)))
+            item_level = roll_shop_weapon_level(
+                effective_player_level,
+                row,
+                spread=2,
+                seed_key=seed,
+            )
+            row["item_level"] = item_level
             row["required_level"] = get_weapon_required_level(row)
+            row["base_attack"] = int(row.get("attack", 0) or 0)
+            row["attack"] = calc_weapon_attack(row, item_level, normalize_weapon_rank(None, row))
         result_items.append(row)
 
     return {
@@ -1562,7 +1579,16 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
         inv_level = 1
         inv_rank = normalize_weapon_rank(None, item_data)
         if is_weapon(item_data):
-            inv_level = clamp_weapon_level(player_level, player_level, item_data)
+            if merchant_id:
+                seed = f"shop_weapon_level:{period_key}:{merchant_id}:{item_data['id']}:{vk_id}"
+                inv_level = roll_shop_weapon_level(
+                    player_level,
+                    item_data,
+                    spread=2,
+                    seed_key=seed,
+                )
+            else:
+                inv_level = clamp_weapon_level(player_level, player_level, item_data)
             inv_rank = roll_weapon_rank(player_level, item_data)
 
         cursor.execute(

@@ -125,6 +125,32 @@ def roll_weapon_rank(player_level: int, item: dict | None = None) -> str:
     return order[max(order.index(rolled), order.index(rarity_floor))]
 
 
+def roll_shop_weapon_level(
+    player_level: int,
+    item: dict | None = None,
+    spread: int = 2,
+    seed_key: str | None = None,
+) -> int:
+    """
+    Уровень оружия на витрине NPC: небольшой разброс вокруг уровня игрока.
+    По seed_key уровень стабилен в рамках одной ротации/пользователя.
+    """
+    import random
+
+    if not is_weapon(item):
+        return 1
+
+    lvl = max(1, int(player_level or 1))
+    spread = max(0, int(spread or 0))
+    required = get_weapon_required_level(item)
+
+    min_level = max(required, lvl - spread)
+    max_level = max(min_level, lvl + spread)
+
+    rng = random.Random(str(seed_key)) if seed_key is not None else random
+    return int(rng.randint(min_level, max_level))
+
+
 def weapon_upgrade_cost(item: dict | None, current_level: int, target_level: int, rank: str | None) -> int:
     current_level = max(1, int(current_level or 1))
     target_level = max(current_level, int(target_level or current_level))

@@ -1323,6 +1323,8 @@ def show_soldier_weapons(player, vk, user_id: int):
             database.NPC_MERCHANT_SOLDIER,
             category='weapons',
             limit=10,
+            player_level=player.level,
+            viewer_vk_id=user_id,
         )
         weapons = shop.get("items", [])
         logger.info(f"[SOLDIER_SHOP] Загружено оружия в витрине: {len(weapons)}")
@@ -1359,8 +1361,9 @@ def show_soldier_weapons(player, vk, user_id: int):
             featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
 
             msg += f"{idx}. {name}{featured}\n"
-            level_text = f" | Треб. L{weapon.get('required_level')}" if weapon.get('required_level') else ""
-            msg += f"   🔫 База: {attack}{level_text} | Вес: {weight}кг\n"
+            level_text = f" | Ур. L{weapon.get('item_level')}" if weapon.get('item_level') else ""
+            req_text = f" | Треб. L{weapon.get('required_level')}" if weapon.get('required_level') else ""
+            msg += f"   🔫 Урон: {attack}{level_text}{req_text} | Вес: {weight}кг\n"
             msg += f"   📝 {desc}\n"
             if is_featured and base_price != price:
                 msg += f"   💵 Цена: {price} руб. (было {base_price})\n"
@@ -1741,6 +1744,8 @@ def show_trader_shop_all(player, vk, user_id: int):
             database.NPC_MERCHANT_TRADER,
             category=None,
             limit=14,
+            player_level=player.level,
+            viewer_vk_id=user_id,
         )
         items = shop.get("items", [])
         set_shop_cache_data(user_id, {
