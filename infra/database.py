@@ -792,10 +792,57 @@ def _balanced_item_price(category: str, price: int, attack: int = 0, defense: in
     return price
 
 
+def _with_lore_description(name: str, category: str, description: str) -> str:
+    """Привести описание предмета к лорному стилю Зоны."""
+    base = str(description or "").strip()
+    if not base:
+        base = f"{name}."
+
+    overrides = {
+        "Суп с опилками": "Консерва без этикетки, от которой пахнет костром и железом. В Зоне такие банки не выбрасывают даже самые сытые.",
+        "Гильза": "Тёплая латунная гильза, подобранная у свежего следа. В аномальных местах такая мелочь решает, вернёшься ли с добычей.",
+        "Гильзы": "Стянутая резинкой связка гильз. Сталкеры берегут их как валюту риска у самой кромки аномалий.",
+        "Душа": "Пульсирующий артефакт, от которого воздух становится плотнее. Про такие находки говорят шёпотом и прячут под тремя замками.",
+        "Экзоскелет": "Тяжёлая силовая рама, скрипящая на каждом шаге. Даёт право идти туда, где без неё живут считанные секунды.",
+        "Т-5000": "Собранная под дальний бой винтовка с холодным, ровным спуском. В руках терпеливого стрелка превращает открытую местность в тир.",
+        "М249": "Лёгкий пулемёт с жадным аппетитом к ленте. В тесных коридорах его голос быстро глушит любые споры.",
+        "ПМ": "Старый пистолет, знакомый каждому новичку у Периметра. Невелик в силе, но в Зоне надёжность ценят выше понтов.",
+        "Антирад": "Горький раствор в потёртом флаконе. Не делает бессмертным, но даёт шанс дожить до безопасной койки.",
+    }
+    if name in overrides:
+        return overrides[name]
+
+    category = (category or "").lower().strip()
+    tails = {
+        "weapons": "После каждого рейда его чистят до блеска: в Зоне осечка часто звучит как приговор.",
+        "rare_weapons": "Такие экземпляры ходят по рукам редко и обычно с историей, в которой кто-то не вернулся.",
+        "armor": "Носится тяжело, зато даёт лишний вдох там, где воздух пахнет порохом и ржавчиной.",
+        "rare_armor": "Редкая защита, собранная по кускам после чужих вылазок. Слабых мест почти не осталось.",
+        "artifacts": "Тёплый на ладони артефакт с неровным фоном. Полезен, но за каждую его милость Зона обычно берёт плату.",
+        "legendary_artifacts": "Легендарный артефакт из старых сталкерских баек, который вживую видели единицы.",
+        "backpacks": "Лишние карманы здесь важнее красоты: путь назад почти всегда длиннее, чем казался на карте.",
+        "shells_bag": "Простой с виду мешочек, без которого добыча артефактов превращается в пустой риск.",
+        "meds": "Полевой расходник, который держат под рукой даже в мирных зонах. Иногда это единственная пауза между боем и тьмой.",
+        "food": "Сухой паёк сталкера: без изысков, но помогает держать голову ясной и руки твёрдыми.",
+        "consumables": "Одноразовая мелочь из сталкерского набора, которой часто не хватает именно в нужную минуту.",
+        "other": "Обычная на вид вещь, полезность которой в Зоне понимаешь только после первой серьёзной ночи.",
+        "resources": "Рабочий ресурс из сталкерского оборота. Дёшево стоит на бумаге, но на маршруте ценится иначе.",
+        "trash": "Хлам с дороги, который пахнет сыростью и гарью. Иногда именно из такого мусора собирают комплект на выживание.",
+    }
+
+    tail = tails.get(category)
+    if not tail:
+        return base
+    if base.endswith("."):
+        return f"{base} {tail}"
+    return f"{base}. {tail}"
+
+
 def _insert_item(cursor, item: tuple):
     """Вставить один предмет. ON CONFLICT DO UPDATE обновляет всё кроме id."""
     if len(item) == 7:
         name, category, description, price, attack, defense, weight = item
+        description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
@@ -809,6 +856,7 @@ def _insert_item(cursor, item: tuple):
 
     elif len(item) == 8:
         name, category, description, price, attack, defense, weight, backpack_bonus = item
+        description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
@@ -830,6 +878,7 @@ def _insert_item(cursor, item: tuple):
     elif len(item) == 12:
         name, category, description, price, attack, defense, weight, \
             backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value = item
+        description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense, rarity)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
