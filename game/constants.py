@@ -174,14 +174,9 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
 # === Порог уровней по локациям (для дропа/скейла) ===
 # Если локации нет в таблице — используем fallback: min=1, max=100.
 LOCATION_LEVEL_THRESHOLDS = {
-    LocationType.CITY.value: {"min": 1, "max": 6},
-    LocationType.KPP.value: {"min": 1, "max": 10},
-    LocationType.SHELTER.value: {"min": 1, "max": 10},
-    LocationType.HOSPITAL.value: {"min": 1, "max": 10},
-    LocationType.BLACK_MARKET.value: {"min": 5, "max": 20},
-    LocationType.MILITARY_ROAD.value: {"min": 1, "max": 20},
-    LocationType.NII_ROAD.value: {"min": 12, "max": 45},
-    LocationType.INFECTED_FOREST.value: {"min": 25, "max": 70},
+    LocationType.MILITARY_ROAD.value: {"min": 1, "max": 5},
+    LocationType.NII_ROAD.value: {"min": 1, "max": 5},
+    LocationType.INFECTED_FOREST.value: {"min": 1, "max": 5},
 }
 
 
