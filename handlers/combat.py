@@ -3305,10 +3305,13 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     _combat_state, _, _, _ = _get_main_imports()
     from handlers.quests import track_quest_kill, track_quest_shells
     from game.limited_events import get_limited_event_modifiers, get_active_limited_event
+    from game.emission import is_emission_aftermath_active
 
     del _combat_state[user_id]
 
     reward_mult = max(1.0, float(combat.get("reward_mult", 1.0)))
+    if is_emission_aftermath_active():
+        reward_mult *= max(1.0, float(getattr(config, "EMISSION_BONUS_COMBAT_REWARD_MULT", 1.0) or 1.0))
     limited_mods = get_limited_event_modifiers()
     event_reward_mult = max(0.5, float(limited_mods.get("combat_reward_mult", 1.0) or 1.0))
     reward_mult *= event_reward_mult

@@ -114,8 +114,8 @@ BOT_QUEUE_PUT_TIMEOUT = float(os.getenv('BOT_QUEUE_PUT_TIMEOUT', '0.2'))
 
 # === Выброс (Emission) ===
 EMISSION_ENABLED = os.getenv('EMISSION_ENABLED', 'true').lower() == 'true'
-EMISSION_MIN_INTERVAL_HOURS = int(os.getenv('EMISSION_MIN_INTERVAL_HOURS', '4'))   # мин интервал между выбросами
-EMISSION_MAX_INTERVAL_HOURS = int(os.getenv('EMISSION_MAX_INTERVAL_HOURS', '10'))  # макс интервал
+EMISSION_MIN_INTERVAL_HOURS = int(os.getenv('EMISSION_MIN_INTERVAL_HOURS', '48'))  # 2 дня
+EMISSION_MAX_INTERVAL_HOURS = int(os.getenv('EMISSION_MAX_INTERVAL_HOURS', '96'))  # 4 дня
 EMISSION_WARNING_MINUTES = int(os.getenv('EMISSION_WARNING_MINUTES', '15'))       # время предупреждения
 EMISSION_DURATION_MINUTES = int(os.getenv('EMISSION_DURATION_MINUTES', '30'))     # длительность выброса
 EMISSION_AFTERMATH_MINUTES = int(os.getenv('EMISSION_AFTERMATH_MINUTES', '60'))   # время последствий (бонусы)
@@ -131,8 +131,9 @@ EMISSION_ITEM_LOSS_CHANCE = float(os.getenv('EMISSION_ITEM_LOSS_CHANCE', '0.15')
 EMISSION_ITEM_LOSS_MAX = int(os.getenv('EMISSION_ITEM_LOSS_MAX', '2'))           # макс потерянных предметов
 
 # Бонусы после выброса
-EMISSION_BONUS_ARTIFACT_CHANCE = float(os.getenv('EMISSION_BONUS_ARTIFACT_CHANCE', '0.50'))  # +50% шанс артефактов
-EMISSION_BONUS_RARE_ENEMY_CHANCE = float(os.getenv('EMISSION_BONUS_RARE_ENEMY_CHANCE', '0.20'))  # шанс редкого врага
+EMISSION_BONUS_ARTIFACT_CHANCE = float(os.getenv('EMISSION_BONUS_ARTIFACT_CHANCE', '1.00'))  # +100% шанс артефактов
+EMISSION_BONUS_RARE_ENEMY_CHANCE = float(os.getenv('EMISSION_BONUS_RARE_ENEMY_CHANCE', '0.35'))  # шанс редкого врага
+EMISSION_BONUS_COMBAT_REWARD_MULT = float(os.getenv('EMISSION_BONUS_COMBAT_REWARD_MULT', '1.30'))  # +30% к наградам за бой
 
 # === Ограниченные глобальные ивенты ===
 LIMITED_EVENTS_ENABLED = os.getenv('LIMITED_EVENTS_ENABLED', 'true').lower() == 'true'

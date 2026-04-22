@@ -1307,6 +1307,10 @@ def _announce_emission_cancelled(vk, emission_id: int):
 def _announce_aftermath(vk, emission_id: int):
     """Объявить о фазе последствий — бонусы для всех"""
     players = database.get_all_active_players()
+    artifact_bonus = int(round(float(config.EMISSION_BONUS_ARTIFACT_CHANCE) * 100))
+    rare_enemy_bonus = int(round(float(config.EMISSION_BONUS_RARE_ENEMY_CHANCE) * 100))
+    combat_reward_bonus = int(round((float(getattr(config, "EMISSION_BONUS_COMBAT_REWARD_MULT", 1.0) or 1.0) - 1.0) * 100))
+    aftermath_hours = max(1, int(round(float(config.EMISSION_AFTERMATH_MINUTES) / 60.0)))
 
     for player_data in players:
         vk_id = player_data["vk_id"]
@@ -1322,9 +1326,10 @@ def _announce_aftermath(vk, emission_id: int):
                     "🌅 **Выброс завершился!**\n\n"
                     "Зона успокоилась. В оставшихся аномалиях\n"
                     "появились редкие артефакты!\n\n"
-                    "🔥 Бонусы (1 час):\n"
-                    "• +50% шанс найти артефакты\n"
-                    "• Могут появиться редкие мутанты\n"
+                    f"🔥 Бонусы ({aftermath_hours} ч):\n"
+                    f"• +{artifact_bonus}% шанс найти артефакты\n"
+                    f"• Шанс редкого мутанта: {rare_enemy_bonus}%\n"
+                    f"• Награды за бой: +{combat_reward_bonus}%\n"
                     "• Новые тайники на дорогах\n\n"
                     "Не упусти момент, сталкер!"
                 ),
