@@ -33,6 +33,8 @@ TRAVEL_ENEMY_CHANCE_FORCED = 42
 TRAVEL_POST_EMISSION_ELITE_CHANCE = 0.12
 SHELTER_REGEN_TS_FLAG = "shelter_energy_regen_ts"
 SHELTER_REGEN_ACTIVE_FLAG = "shelter_energy_regen_active"
+HEAL_QUOTE_RUNTIME_KEY = "pending_hospital_heal_quote"
+HEAL_QUOTE_TTL_SEC = 120
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOCATION_IMAGE_ATTACHMENT_CACHE: dict[str, str] = {}
 
@@ -1011,6 +1013,118 @@ def calculate_hospital_treatment_price(
     }
 
 
+def _get_pending_heal_quote(user_id: int) -> dict | None:
+    payload = database.get_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY) or {}
+    if not payload:
+        return None
+    now_ts = int(time.time())
+    ts = int(payload.get("created_at", 0) or 0)
+    if ts <= 0 or (now_ts - ts) > HEAL_QUOTE_TTL_SEC:
+        database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
+        return None
+    return payload
+
+
+def _set_pending_heal_quote(
+    user_id: int,
+    price: int,
+    missing_hp: int,
+    missing_energy: int,
+    level: int,
+    rank_tier: int,
+):
+    database.set_runtime_state(
+        user_id,
+        HEAL_QUOTE_RUNTIME_KEY,
+        {
+            "created_at": int(time.time()),
+            "price": int(price),
+            "missing_hp": int(missing_hp),
+            "missing_energy": int(missing_energy),
+            "level": int(level),
+            "rank_tier": int(rank_tier),
+        },
+    )
+
+
+def _execute_hospital_heal(
+    player,
+    vk,
+    user_id: int,
+    *,
+    price: int,
+    price_info: dict,
+    rank_name: str,
+    hospital_discount_pct: int,
+    old_hp: int,
+    old_energy: int,
+    missing_hp: int,
+    missing_energy: int,
+    treatment_count: int,
+):
+    from main import create_location_keyboard
+
+    # Проверяем, хватает ли денег
+    if player.money < price:
+        discount_line = (
+            f"\nСкидка класса: -{hospital_discount_pct}%." if hospital_discount_pct > 0 else ""
+        )
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                f"💸 Лечение стоит {price:,} руб., а у тебя {player.money:,} руб.\n\n"
+                f"Цена рассчитана по травмам: +{missing_hp} HP, +{missing_energy} энергии.\n"
+                f"Потолок твоего ранга ({rank_name}): {price_info['cap']:,} руб."
+                f"{discount_line}"
+            ),
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    # Лечим полностью здоровье и восстанавливаем энергию
+    player.health = player.max_health
+    player.energy = 100
+    database.update_user_stats(user_id, health=player.health, energy=player.energy)
+
+    # Списываем деньги и увеличиваем счетчик лечений
+    new_money = player.money - price
+    new_treatment_count = treatment_count + 1
+    database.update_user_stats(user_id, money=new_money, hospital_treatments=new_treatment_count)
+
+    # Формируем сообщение
+    if bool(price_info.get("free")):
+        price_text = "бесплатно (первое лечение)"
+    elif price_info.get("capped"):
+        price_text = (
+            f"{price:,} руб. (по потолку ранга {rank_name}; "
+            f"без потолка было бы {price_info['raw_price']:,} руб.)"
+        )
+    else:
+        price_text = f"{price:,} руб. (ранг {rank_name}, уровень {player.level})"
+    if hospital_discount_pct > 0 and not bool(price_info.get("free")):
+        price_text += f", скидка класса -{hospital_discount_pct}%"
+
+    message = (
+        f"🏥ЛЕЧЕНИЕ В БОЛЬНИЦЕ\n\n"
+        f"Врач осмотрел тебя, перевязал раны, сделал уколы.\n\n"
+        f"✅ЗДОРОВЬЕ ПОЛНОСТЬЮ ВОССТАНОВЛЕНО!\n"
+        f"   HP: {old_hp} → {player.health}/{player.max_health}\n\n"
+        f"⚡ЭНЕРГИЯ ВОССТАНОВЛЕНА!\n"
+        f"   Энергия: {old_energy} → {player.energy}/100\n\n"
+        f"💰 Оплата: {price_text}\n"
+        f"   Осталось денег: {new_money:,} руб.\n\n"
+        f"📊 Всего лечений: {new_treatment_count}"
+    )
+
+    vk.messages.send(
+        user_id=user_id,
+        message=message,
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
+
+
 def handle_heal(player, vk, user_id: int):
     """Лечиться в больнице
 
@@ -1031,6 +1145,7 @@ def handle_heal(player, vk, user_id: int):
         missing_energy = max(0, 100 - old_energy)
 
         if missing_hp <= 0 and missing_energy <= 0:
+            database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
             vk.messages.send(
                 user_id=user_id,
                 message=(
@@ -1057,72 +1172,184 @@ def handle_heal(player, vk, user_id: int):
         if hospital_discount_pct > 0 and price > 0:
             price = max(0, int(price * (100 - hospital_discount_pct) / 100))
 
-        # Проверяем, хватает ли денег
-        if player.money < price:
+        # Показываем точную цену до лечения. Подтверждение отдельной кнопкой.
+        if price > 0:
+            _set_pending_heal_quote(
+                user_id=user_id,
+                price=price,
+                missing_hp=missing_hp,
+                missing_energy=missing_energy,
+                level=int(player.level),
+                rank_tier=int(rank_tier),
+            )
             discount_line = (
                 f"\nСкидка класса: -{hospital_discount_pct}%." if hospital_discount_pct > 0 else ""
             )
             vk.messages.send(
                 user_id=user_id,
                 message=(
-                    f"💸 Лечение стоит {price:,} руб., а у тебя {player.money:,} руб.\n\n"
-                    f"Цена рассчитана по травмам: +{missing_hp} HP, +{missing_energy} энергии.\n"
-                    f"Потолок твоего ранга ({rank_name}): {price_info['cap']:,} руб."
-                    f"{discount_line}"
+                    "🏥 Предварительный счёт за лечение:\n\n"
+                    f"💸 Стоимость: {price:,} руб.\n"
+                    f"❤️ Восстановление HP: +{missing_hp}\n"
+                    f"⚡ Восстановление энергии: +{missing_energy}\n"
+                    f"🏅 Ранг: {rank_name}\n"
+                    f"📈 Уровень: {player.level}\n"
+                    f"📉 Потолок ранга: {price_info['cap']:,} руб."
+                    f"{discount_line}\n\n"
+                    "Нажми кнопку 'Подтвердить лечение' в течение 2 минут.\n"
+                    "Если передумал, нажми 'Отмена лечения'."
                 ),
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )
             return
 
-        # Лечим полностью здоровье и восстанавливаем энергию
-        player.health = player.max_health
-        player.energy = 100
-        database.update_user_stats(user_id, health=player.health, energy=player.energy)
-
-        # Списываем деньги и увеличиваем счетчик лечений
-        new_money = player.money - price
-        new_treatment_count = treatment_count + 1
-        database.update_user_stats(user_id, money=new_money, hospital_treatments=new_treatment_count)
-
-        # Формируем сообщение
-        if bool(price_info.get("free")):
-            price_text = "бесплатно (первое лечение)"
-        elif price_info.get("capped"):
-            price_text = (
-                f"{price:,} руб. (по потолку ранга {rank_name}; "
-                f"без потолка было бы {price_info['raw_price']:,} руб.)"
-            )
-        else:
-            price_text = f"{price:,} руб. (ранг {rank_name}, уровень {player.level})"
-        if hospital_discount_pct > 0 and not bool(price_info.get("free")):
-            price_text += f", скидка класса -{hospital_discount_pct}%"
-
-        message = (
-            f"🏥ЛЕЧЕНИЕ В БОЛЬНИЦЕ\n\n"
-            f"Врач осмотрел тебя, перевязал раны, сделал уколы.\n\n"
-            f"✅ЗДОРОВЬЕ ПОЛНОСТЬЮ ВОССТАНОВЛЕНО!\n"
-            f"   HP: {old_hp} → {player.health}/{player.max_health}\n\n"
-            f"⚡ЭНЕРГИЯ ВОССТАНОВЛЕНА!\n"
-            f"   Энергия: {old_energy} → {player.energy}/100\n\n"
-            f"💰 Оплата: {price_text}\n"
-            f"   Осталось денег: {new_money:,} руб.\n\n"
-            f"📊 Всего лечений: {new_treatment_count}"
-        )
-
-        vk.messages.send(
-            user_id=user_id,
-            message=message,
-            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
-            random_id=0
+        database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
+        _execute_hospital_heal(
+            player,
+            vk,
+            user_id,
+            price=price,
+            price_info=price_info,
+            rank_name=rank_name,
+            hospital_discount_pct=hospital_discount_pct,
+            old_hp=old_hp,
+            old_energy=old_energy,
+            missing_hp=missing_hp,
+            missing_energy=missing_energy,
+            treatment_count=treatment_count,
         )
     else:
+        database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
         vk.messages.send(
             user_id=user_id,
             message="Лечение доступно только в Больнице.",
             keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
             random_id=0
         )
+
+
+def handle_confirm_heal(player, vk, user_id: int):
+    """Подтверждение заранее рассчитанного лечения в больнице."""
+    from main import create_location_keyboard
+
+    if player.current_location_id != "больница":
+        database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
+        vk.messages.send(
+            user_id=user_id,
+            message="Подтверждение лечения доступно только в Больнице.",
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    pending = _get_pending_heal_quote(user_id)
+    if not pending:
+        vk.messages.send(
+            user_id=user_id,
+            message="Нет активного счёта. Сначала нажми 'Лечиться'.",
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    user_data = database.get_user_by_vk(user_id)
+    treatment_count = user_data.get('hospital_treatments', 0) if user_data else 0
+    old_hp = int(player.health)
+    old_energy = int(player.energy)
+    missing_hp = max(0, int(player.max_health) - old_hp)
+    missing_energy = max(0, 100 - old_energy)
+
+    if missing_hp <= 0 and missing_energy <= 0:
+        database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
+        vk.messages.send(
+            user_id=user_id,
+            message="Лечение уже не требуется: здоровье и энергия в норме.",
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    rank_tier, rank_name, rank_min_level = _get_player_rank_info(player)
+    price_info = calculate_hospital_treatment_price(
+        player_level=player.level,
+        rank_tier=rank_tier,
+        missing_hp=missing_hp,
+        missing_energy=missing_energy,
+        treatment_count=treatment_count,
+        rank_min_level=rank_min_level,
+    )
+    price = int(price_info["price"])
+    passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+    hospital_discount_pct = max(0, min(80, int(passive.get("hospital_price_discount_pct", 0) or 0)))
+    if hospital_discount_pct > 0 and price > 0:
+        price = max(0, int(price * (100 - hospital_discount_pct) / 100))
+
+    matches_pending = bool(
+        int(pending.get("price", -1)) == price
+        and int(pending.get("missing_hp", -1)) == missing_hp
+        and int(pending.get("missing_energy", -1)) == missing_energy
+        and int(pending.get("level", -1)) == int(player.level)
+        and int(pending.get("rank_tier", -1)) == int(rank_tier)
+    )
+    if not matches_pending:
+        _set_pending_heal_quote(
+            user_id=user_id,
+            price=price,
+            missing_hp=missing_hp,
+            missing_energy=missing_energy,
+            level=int(player.level),
+            rank_tier=int(rank_tier),
+        )
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "Счёт изменился, потому что параметры персонажа обновились.\n"
+                "Нажми 'Лечиться' чтобы посмотреть новый расчёт, затем подтверди."
+            ),
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
+    _execute_hospital_heal(
+        player,
+        vk,
+        user_id,
+        price=price,
+        price_info=price_info,
+        rank_name=rank_name,
+        hospital_discount_pct=hospital_discount_pct,
+        old_hp=old_hp,
+        old_energy=old_energy,
+        missing_hp=missing_hp,
+        missing_energy=missing_energy,
+        treatment_count=treatment_count,
+    )
+
+
+def handle_cancel_heal(player, vk, user_id: int):
+    """Отменить предварительный счёт лечения."""
+    from main import create_location_keyboard
+
+    pending = _get_pending_heal_quote(user_id)
+    if not pending:
+        vk.messages.send(
+            user_id=user_id,
+            message="Активного счёта на лечение нет.",
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0
+        )
+        return
+
+    database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
+    vk.messages.send(
+        user_id=user_id,
+        message="❎ Лечение отменено. Деньги не списаны.",
+        keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+        random_id=0
+    )
 
 
 def get_status(player, vk, user_id: int):
