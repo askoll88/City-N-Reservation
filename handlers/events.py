@@ -104,6 +104,25 @@ def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: i
         )
         return True
 
+    # Фатальный исход в ивенте: добиваем до 0 и отправляем в больницу.
+    if int(getattr(player, "health", 0) or 0) <= 0:
+        clear_pending_event(user_id)
+        if result.get("message"):
+            vk.messages.send(
+                user_id=user_id,
+                message=result["message"],
+                random_id=0,
+            )
+        from handlers.combat import _handle_death
+        _handle_death(
+            player,
+            vk,
+            user_id,
+            cause="Смертельная ловушка",
+            killer_name="опасность Зоны",
+        )
+        return True
+
     # Сохраняем изменения игрока
     database.update_user_stats(
         user_id,
@@ -111,7 +130,6 @@ def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: i
         energy=player.energy,
         money=player.money,
         experience=player.experience,
-        shells=getattr(player, 'shells', 0),
     )
 
     # Проверяем, есть ли следующая стадия

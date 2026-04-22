@@ -2958,24 +2958,26 @@ def unequip_shells_bag(vk_id: int) -> dict:
 def give_newbie_kit(vk_id: int) -> dict:
     """Выдать набор новичка"""
     from game.constants import NEWBIE_KIT_ITEMS
-    
+
+    granted_items: list[tuple[str, int]] = []
+
     with db_cursor() as (cursor, _):
         cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {'success': False, 'message': 'Пользователь не найден'}
-        
+
         user_id = user['id']
-        
+
         # Проверяем, не получал ли уже
         cursor.execute("""
             SELECT value FROM user_flags 
             WHERE user_id = %s AND flag_name = 'newbie_kit_received'
         """, (user_id,))
-        
+
         if cursor.fetchone():
             return {'success': False, 'message': 'Вы уже получили набор новичка'}
-        
+
         # Выдаём предметы из NEWBIE_KIT_ITEMS
         for item_name, quantity in NEWBIE_KIT_ITEMS:
             cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
@@ -2987,7 +2989,8 @@ def give_newbie_kit(vk_id: int) -> dict:
                     ON CONFLICT (user_id, item_id) DO UPDATE 
                     SET quantity = user_inventory.quantity + EXCLUDED.quantity
                 """, (user_id, item['id'], quantity))
-        
+                granted_items.append((item_name, int(quantity)))
+
         # Ставим флаг о получении
         cursor.execute("""
             INSERT INTO user_flags (user_id, flag_name, value)
@@ -2995,7 +2998,40 @@ def give_newbie_kit(vk_id: int) -> dict:
             ON CONFLICT (user_id, flag_name) DO NOTHING
         """, (user_id,))
 
-    return {'success': True, 'message': '✅ Набор новичка получен! Проверь инвентарь.'}
+    # Донастройка после выдачи:
+    # 1) надеваем стартовый мешочек и добавляем 25 гильз;
+    # 2) аккуратно автоэкипируем стартовый сет только в пустые слоты.
+    equip_shells_bag(vk_id, "Маленький мешочек")
+    shells_before = get_user_shells(vk_id)
+    add_shells(vk_id, 25)
+    shells_after = get_user_shells(vk_id)
+    shells_added = max(0, int(shells_after) - int(shells_before))
+
+    user_data = get_user_by_vk(vk_id) or {}
+    equip_updates = {}
+    if not user_data.get("equipped_weapon"):
+        equip_updates["equipped_weapon"] = "ПМ"
+    if not user_data.get("equipped_armor_head"):
+        equip_updates["equipped_armor_head"] = "Кепка"
+    if not user_data.get("equipped_armor_body"):
+        equip_updates["equipped_armor_body"] = "Кожаная куртка"
+    if not user_data.get("equipped_armor_legs"):
+        equip_updates["equipped_armor_legs"] = "Джинсы"
+    if not user_data.get("equipped_armor_hands"):
+        equip_updates["equipped_armor_hands"] = "Перчатки без пальцев"
+    if not user_data.get("equipped_armor_feet"):
+        equip_updates["equipped_armor_feet"] = "Кеды"
+    if equip_updates:
+        update_user_stats(vk_id, **equip_updates)
+
+    if shells_added > 0:
+        granted_items.append(("Гильзы", shells_added))
+
+    return {
+        'success': True,
+        'message': '✅ Набор новичка получен! Проверь инвентарь.',
+        'items': granted_items,
+    }
 
 
 def get_user_flag(vk_id: int, flag_name: str, default: int = 0) -> int:

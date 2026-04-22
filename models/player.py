@@ -452,7 +452,10 @@ class Player:
     def melee_damage(self) -> int:
         """Урон в ближнем бою"""
         artifact_damage_boost = int(self._artifact_bonuses.get('damage_boost', 0) or 0)
-        base_damage = 5 + self.effective_strength
+        # Базовый рукопашный урон + явный скейл от силы.
+        strength_per_level = max(0, int(getattr(game_config, "STRENGTH_DAMAGE_PER_LEVEL", 2) or 2))
+        strength_bonus = self.effective_strength * strength_per_level
+        base_damage = 5 + self.effective_strength + strength_bonus
         if artifact_damage_boost > 0:
             base_damage = int(base_damage * (1 + artifact_damage_boost / 100))
         return base_damage
@@ -828,7 +831,9 @@ class Player:
 
         # --- Характеристики ---
         lines.append(ui.section("Характеристики"))
-        lines.append(f"⚔️ Сила: {self.effective_strength}  |  🏃 Выносливость: {self.effective_stamina}")
+        strength_per_level = max(0, int(getattr(game_config, "STRENGTH_DAMAGE_PER_LEVEL", 2) or 2))
+        strength_damage_bonus = self.effective_strength * strength_per_level
+        lines.append(f"⚔️ Сила: {self.effective_strength} (+{strength_damage_bonus} урона)  |  🏃 Выносливость: {self.effective_stamina}")
         lines.append(f"👁️ Восприятие: {self.effective_perception}  |  🍀 Удача: {self.effective_luck}")
         lines.append(f"🧬 Прокачка HP: {self.hp_upgrade_level}/{self.hp_upgrade_max_level} (+{self.hp_upgrade_bonus} HP)")
         lines.append("")

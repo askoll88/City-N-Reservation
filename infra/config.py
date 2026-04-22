@@ -70,6 +70,7 @@ BASE_CRIT_CHANCE = 5  # % базовый шанс крита
 BASE_DODGE_CHANCE = 10  # % базовое уклонение
 CRIT_MULTIPLIER = 2.0  # множитель урона при крите
 FLEE_SUCCESS_CHANCE = 50  # % шанс убежать
+STRENGTH_DAMAGE_PER_LEVEL = int(os.getenv('STRENGTH_DAMAGE_PER_LEVEL', '2'))  # +урон за 1 уровень силы
 
 # === Класс ===
 CLASS_CHANGE_COST = 500000

@@ -3009,6 +3009,10 @@ def handle_combat_attack(player, vk, user_id: int):
     if weapon_damage > 0:
         damage_details.append(f"Оружие {weapon_name}: {weapon_damage}")
     damage_details.append(f"Рукопашный: {melee}")
+    strength_per_level = max(0, int(getattr(config, "STRENGTH_DAMAGE_PER_LEVEL", 2) or 2))
+    if strength_per_level > 0:
+        strength_bonus = int(getattr(player, "effective_strength", getattr(player, "strength", 1)) or 1) * strength_per_level
+        damage_details.append(f"Сила: +{strength_bonus}")
     if weapon_bonus_pct:
         sign = "+" if weapon_bonus_pct > 0 else ""
         damage_details.append(f"Модификатор класса: {sign}{weapon_bonus_pct}%")

@@ -1879,6 +1879,18 @@ def _add_player_xp(player, amount: int) -> int:
     return gain
 
 
+def _apply_hp_delta(player, delta: int) -> int:
+    """Изменить HP: урон может добить до 0, лечение ограничено max_health."""
+    current_hp = int(getattr(player, "health", 0) or 0)
+    max_hp = int(getattr(player, "max_health", max(current_hp, 1)) or max(current_hp, 1))
+    raw = current_hp + int(delta or 0)
+    if delta < 0:
+        player.health = max(0, raw)
+    else:
+        player.health = min(max_hp, raw)
+    return int(player.health)
+
+
 def apply_event_choice(event: dict, choice_index: int, player, user_id: int = None, stage_index: int = 0) -> dict:
     """
     Применить выбор игрока к событию.
@@ -1915,7 +1927,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
             if "energy" in eff:
                 player.energy = max(0, player.energy + eff["energy"])
             if "hp" in eff:
-                player.health = max(1, min(player.max_health, player.health + eff["hp"]))
+                _apply_hp_delta(player, int(eff["hp"]))
             if eff.get("random_loot"):
                 _apply_random_loot(player)
             if eff.get("random_artifact"):
@@ -1938,7 +1950,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
             if "energy" in final_effect:
                 player.energy = max(0, player.energy + final_effect["energy"])
             if "hp" in final_effect:
-                player.health = max(1, min(player.max_health, player.health + final_effect["hp"]))
+                _apply_hp_delta(player, int(final_effect["hp"]))
 
             # Квестовая цепочка
             _check_quest_progression(event, user_id)
@@ -1968,11 +1980,16 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         if "energy" in effect:
             player.energy = max(0, player.energy + effect["energy"])
         if "shells" in effect:
-            shell_gain = int(effect["shells"])
-            player.shells = getattr(player, 'shells', 0) + shell_gain
+            shell_gain = int(effect["shells"] or 0)
             if shell_gain > 0 and player_id is not None:
+                from infra import database
+                before_shells = int(database.get_user_shells(player_id) or 0)
+                database.add_shells(player_id, shell_gain)
+                after_shells = int(database.get_user_shells(player_id) or 0)
+                actual_shell_gain = max(0, after_shells - before_shells)
                 from handlers.quests import track_quest_shells
-                track_quest_shells(player_id, count=shell_gain)
+                if actual_shell_gain > 0:
+                    track_quest_shells(player_id, count=actual_shell_gain)
         return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # Риск - получение урона
@@ -2108,7 +2125,7 @@ def _apply_artifact_chance(player, effect=None):
         msg_tpl = effect.get("message_ok", f"Ты нашёл {artifact or 'артефакт'}!") if effect else f"Ты нашёл {artifact or 'артефакт'}!"
         return _render_event_message(msg_tpl, {"artifact": artifact or "артефакт"})
     else:
-        player.health = max(1, player.health - 25)
+        _apply_hp_delta(player, -25)
         msg_tpl = effect.get("message_fail", "Буря слишком сильна!") if effect else "Не повезло!"
         return _render_event_message(msg_tpl, {"artifact": artifact or "артефакт"})
 
@@ -2122,14 +2139,14 @@ def _apply_risk_combat(player, effect=None):
         msg_tpl = effect.get("message_ok", "Всё прошло успешно!") if effect else "Всё прошло успешно!"
         return _render_event_message(msg_tpl, {"money": money_gain})
     else:
-        player.health = max(1, player.health - 30)
+        _apply_hp_delta(player, -30)
         msg_tpl = effect.get("message_fail", "Что-то пошло не так!") if effect else "Что-то пошло не так!"
         return _render_event_message(msg_tpl, {})
 
 
 def _apply_risk_damage(player, effect=None):
     if random.randint(1, 100) <= 40:
-        player.health = max(1, player.health - 20)
+        _apply_hp_delta(player, -20)
         player.energy = max(0, player.energy - 15)
         msg_tpl = effect.get("message_fail", "Тебе не повезло!") if effect else "Тебе не повезло!"
         return _render_event_message(msg_tpl, {})
