@@ -162,17 +162,17 @@ def handle_location_actions(player, vk, user_id: int, text: str):
     from handlers.crafting import show_crafting_menu, craft_recipe
     from handlers.storage import show_storage, put_to_storage, take_from_storage
 
-    # Лечение
-    if text in ['лечиться', 'лечение'] or 'лечиться' in text or 'лечение' in text:
-        handle_heal(player, vk, user_id)
-        return True
-
     if text == 'подтвердить лечение' or text.startswith('подтвердить лечение'):
         handle_confirm_heal(player, vk, user_id)
         return True
 
     if text == 'отмена лечения' or text.startswith('отмена лечения'):
         handle_cancel_heal(player, vk, user_id)
+        return True
+
+    # Лечение
+    if text in ['лечиться', 'лечение'] or 'лечиться' in text or 'лечение' in text:
+        handle_heal(player, vk, user_id)
         return True
 
     # Отдых в убежище
