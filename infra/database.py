@@ -290,6 +290,18 @@ def init_db():
             )
         """)
 
+        # -- user_storage ---------------------------------------------------
+        # Шкаф в убежище: хранение предметов вне инвентаря.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_storage (
+                id       SERIAL PRIMARY KEY,
+                user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                item_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                quantity INTEGER DEFAULT 1,
+                UNIQUE(user_id, item_id)
+            )
+        """)
+
         # -- game_settings --------------------------------------------------
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS game_settings (
@@ -362,6 +374,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_users_vk_id          ON users(vk_id)",
             "CREATE INDEX IF NOT EXISTS idx_user_inventory_user   ON user_inventory(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_user_inventory_item   ON user_inventory(item_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_storage_user     ON user_storage(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_storage_item     ON user_storage(item_id)",
             "CREATE INDEX IF NOT EXISTS idx_items_category        ON items(category)",
             "CREATE INDEX IF NOT EXISTS idx_user_equipment_user   ON user_equipment(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status)",
@@ -1003,6 +1017,198 @@ def get_user_inventory(vk_id: int) -> list[dict]:
                 item["attack"] = calc_weapon_attack(item, item_level, item_rank)
             result.append(item)
         return result
+
+
+def get_user_storage(vk_id: int) -> list[dict]:
+    """Получить содержимое шкафа в убежище."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        row = cursor.fetchone()
+        if not row:
+            return []
+        cursor.execute(
+            """
+            SELECT i.name, i.category, i.description, i.price,
+                   i.attack, i.defense, i.weight, i.backpack_bonus,
+                   i.rarity, i.anomaly_type, i.bonus_type, i.bonus_value,
+                   us.quantity
+            FROM user_storage us
+            JOIN items i ON us.item_id = i.id
+            WHERE us.user_id = %s
+            ORDER BY i.category, i.name
+            """,
+            (row["id"],),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_user_storage_load(vk_id: int) -> dict:
+    """Текущее заполнение шкафа (по сумме quantity)."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"current": 0, "capacity": int(config.SHELTER_STORAGE_CAPACITY)}
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(quantity), 0) AS qty
+            FROM user_storage
+            WHERE user_id = %s
+            """,
+            (user["id"],),
+        )
+        row = cursor.fetchone() or {}
+        current = int(row.get("qty", 0) or 0)
+        return {"current": current, "capacity": int(config.SHELTER_STORAGE_CAPACITY)}
+
+
+def move_item_to_storage_transaction(vk_id: int, item_name: str, quantity: int = 1) -> dict:
+    """Переложить предмет из инвентаря в шкаф (атомарно)."""
+    safe_qty = max(1, int(quantity or 1))
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден."}
+        user_id = int(user["id"])
+
+        cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+        item = cursor.fetchone()
+        if not item:
+            return {"success": False, "message": f"Предмет '{item_name}' не найден."}
+        item_id = int(item["id"])
+
+        cursor.execute(
+            """
+            SELECT quantity
+            FROM user_inventory
+            WHERE user_id = %s AND item_id = %s
+            FOR UPDATE
+            """,
+            (user_id, item_id),
+        )
+        inv_row = cursor.fetchone()
+        have_qty = int((inv_row or {}).get("quantity", 0) or 0)
+        if have_qty < safe_qty:
+            return {"success": False, "message": f"Не хватает '{item_name}': нужно {safe_qty}, у тебя {have_qty}."}
+
+        cursor.execute(
+            """
+            SELECT quantity
+            FROM user_storage
+            WHERE user_id = %s
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+        storage_qty = sum(int(r.get("quantity", 0) or 0) for r in cursor.fetchall())
+        capacity = int(config.SHELTER_STORAGE_CAPACITY)
+        if storage_qty + safe_qty > capacity:
+            return {
+                "success": False,
+                "message": f"Шкаф переполнен: {storage_qty}/{capacity}. Освободи место.",
+            }
+
+        cursor.execute(
+            """
+            UPDATE user_inventory
+            SET quantity = quantity - %s
+            WHERE user_id = %s AND item_id = %s AND quantity >= %s
+            """,
+            (safe_qty, user_id, item_id, safe_qty),
+        )
+        cursor.execute(
+            """
+            DELETE FROM user_inventory
+            WHERE user_id = %s AND item_id = %s AND quantity <= 0
+            """,
+            (user_id, item_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO user_storage (user_id, item_id, quantity)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET quantity = user_storage.quantity + EXCLUDED.quantity
+            """,
+            (user_id, item_id, safe_qty),
+        )
+
+    return {"success": True, "message": f"Переложено в шкаф: {item_name} x{safe_qty}"}
+
+
+def move_item_from_storage_transaction(vk_id: int, item_name: str, quantity: int = 1) -> dict:
+    """Забрать предмет из шкафа в инвентарь (атомарно)."""
+    safe_qty = max(1, int(quantity or 1))
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id, level FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден."}
+        user_id = int(user["id"])
+        player_level = int(user.get("level", 1) or 1)
+
+        cursor.execute("SELECT * FROM items WHERE name = %s", (item_name,))
+        item = cursor.fetchone()
+        if not item:
+            return {"success": False, "message": f"Предмет '{item_name}' не найден."}
+        item_data = dict(item)
+        item_id = int(item["id"])
+
+        cursor.execute(
+            """
+            SELECT quantity
+            FROM user_storage
+            WHERE user_id = %s AND item_id = %s
+            FOR UPDATE
+            """,
+            (user_id, item_id),
+        )
+        st_row = cursor.fetchone()
+        have_qty = int((st_row or {}).get("quantity", 0) or 0)
+        if have_qty < safe_qty:
+            return {"success": False, "message": f"В шкафу недостаточно '{item_name}': {have_qty}."}
+
+        item_level = 1
+        item_rank = normalize_weapon_rank(None, item_data)
+        if is_weapon(item_data):
+            item_level = clamp_weapon_level(player_level, player_level, item_data)
+            item_rank = normalize_weapon_rank(roll_weapon_rank(player_level, item_data), item_data)
+
+        cursor.execute(
+            """
+            UPDATE user_storage
+            SET quantity = quantity - %s
+            WHERE user_id = %s AND item_id = %s AND quantity >= %s
+            """,
+            (safe_qty, user_id, item_id, safe_qty),
+        )
+        cursor.execute(
+            """
+            DELETE FROM user_storage
+            WHERE user_id = %s AND item_id = %s AND quantity <= 0
+            """,
+            (user_id, item_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO user_inventory (user_id, item_id, quantity, item_level, item_rank)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET
+                quantity = user_inventory.quantity + EXCLUDED.quantity,
+                item_level = GREATEST(user_inventory.item_level, EXCLUDED.item_level),
+                item_rank = CASE
+                    WHEN array_position(ARRAY['common','uncommon','rare','epic','legendary'], EXCLUDED.item_rank)
+                       > array_position(ARRAY['common','uncommon','rare','epic','legendary'], COALESCE(user_inventory.item_rank, 'common'))
+                    THEN EXCLUDED.item_rank
+                    ELSE user_inventory.item_rank
+                END
+            """,
+            (user_id, item_id, safe_qty, item_level, item_rank),
+        )
+
+    return {"success": True, "message": f"Забрано из шкафа: {item_name} x{safe_qty}"}
 
 
 def add_item_to_inventory(

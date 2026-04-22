@@ -98,6 +98,10 @@ COMMANDS = {
     'верстак': 'craft_menu',
     'рецепты': 'craft_menu',
     'скрафтить': 'craft_build',
+    'шкаф': 'storage_menu',
+    'хранилище': 'storage_menu',
+    'в шкаф': 'storage_put',
+    'из шкафа': 'storage_take',
     
     # Диалог
     'покинуть диалог': 'exit_dialog',

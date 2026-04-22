@@ -58,6 +58,7 @@ RESEARCH_BONUS_XP = 50
 SHELTER_PASSIVE_ENERGY_REGEN_ENABLED = os.getenv('SHELTER_PASSIVE_ENERGY_REGEN_ENABLED', 'true').lower() == 'true'
 SHELTER_PASSIVE_ENERGY_REGEN_INTERVAL_SEC = int(os.getenv('SHELTER_PASSIVE_ENERGY_REGEN_INTERVAL_SEC', '300'))  # +энергия раз в N сек
 SHELTER_PASSIVE_ENERGY_REGEN_AMOUNT = int(os.getenv('SHELTER_PASSIVE_ENERGY_REGEN_AMOUNT', '1'))  # сколько энергии за тик
+SHELTER_STORAGE_CAPACITY = int(os.getenv('SHELTER_STORAGE_CAPACITY', '80'))  # слоты шкафа (сумма quantity)
 
 # Прогрессия уровней
 MAX_PLAYER_LEVEL = int(os.getenv('MAX_PLAYER_LEVEL', '297'))

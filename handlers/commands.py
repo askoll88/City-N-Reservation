@@ -159,6 +159,7 @@ def handle_location_actions(player, vk, user_id: int, text: str):
     """Обработка действий в локации"""
     from handlers.location import handle_sleep
     from handlers.crafting import show_crafting_menu, craft_recipe
+    from handlers.storage import show_storage, put_to_storage, take_from_storage
 
     # Лечение
     if text in ['лечиться', 'лечение'] or 'лечиться' in text or 'лечение' in text:
@@ -181,6 +182,21 @@ def handle_location_actions(player, vk, user_id: int, text: str):
         else:
             target = text.replace('крафт ', '', 1).strip()
         craft_recipe(player, vk, user_id, target)
+        return True
+
+    # Шкаф в убежище
+    if text in ['шкаф', 'хранилище', 'склад']:
+        show_storage(player, vk, user_id)
+        return True
+
+    if text.startswith('в шкаф '):
+        payload = text.replace('в шкаф ', '', 1).strip()
+        put_to_storage(player, vk, user_id, payload)
+        return True
+
+    if text.startswith('из шкафа '):
+        payload = text.replace('из шкафа ', '', 1).strip()
+        take_from_storage(player, vk, user_id, payload)
         return True
     
     return False
