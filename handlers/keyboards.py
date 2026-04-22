@@ -114,9 +114,6 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_button("Лечиться", color=VkKeyboardColor.POSITIVE)
         keyboard.add_button("Поговорить", color=VkKeyboardColor.PRIMARY)
         keyboard.add_line()
-        keyboard.add_button("Подтвердить лечение", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_button("Отмена лечения", color=VkKeyboardColor.NEGATIVE)
-        keyboard.add_line()
         keyboard.add_button("В город", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
         _add_meta_row(keyboard)
@@ -282,6 +279,14 @@ def create_blackmarket_keyboard():
     keyboard.add_button("Продать", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_heal_confirm_keyboard():
+    """Клавиатура подтверждения лечения (показывается только после расчета цены)."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Подтвердить лечение", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("Отмена лечения", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
