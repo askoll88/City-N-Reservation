@@ -14,7 +14,11 @@ from infra import config
 from infra import database
 from models import enemies
 from game import ui
-from game.constants import RESEARCH_LOCATIONS, LOCATION_LEVEL_THRESHOLDS
+from game.constants import (
+    RESEARCH_LOCATIONS,
+    LOCATION_LEVEL_THRESHOLDS,
+    LOCATION_DROP_BALANCE_RULES,
+)
 from infra.state_manager import _combat_state, set_combat_state, is_in_combat, get_combat_data, clear_research_state
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
@@ -445,11 +449,46 @@ def _get_zone_level(location_id: str) -> int:
     return ZONE_LEVELS.get(location_id, 10)
 
 
-def _get_location_level_thresholds(location_id: str | None) -> tuple[int, int]:
+def _get_location_level_thresholds(location_id: str | None) -> tuple[int, int] | None:
     bounds = LOCATION_LEVEL_THRESHOLDS.get(location_id or "", {}) if isinstance(LOCATION_LEVEL_THRESHOLDS, dict) else {}
+    if not bounds:
+        return None
     min_lvl = max(1, int(bounds.get("min", 1) or 1))
     max_lvl = max(min_lvl, int(bounds.get("max", 100) or 100))
     return min_lvl, max_lvl
+
+
+def _normalize_drop_rarity(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    aliases = {
+        "обычное": "common",
+        "добротное": "uncommon",
+        "редкое": "rare",
+        "эпическое": "epic",
+        "легендарное": "legendary",
+        "unique": "epic",
+    }
+    normalized = aliases.get(raw, raw)
+    order = {"common", "uncommon", "rare", "epic", "legendary"}
+    return normalized if normalized in order else "common"
+
+
+def _is_item_allowed_by_location_balance(item: dict, location_id: str | None) -> bool:
+    if not location_id:
+        return True
+    rules = LOCATION_DROP_BALANCE_RULES.get(location_id, {}) if isinstance(LOCATION_DROP_BALANCE_RULES, dict) else {}
+    if not rules:
+        return True
+
+    max_price = int(rules.get("max_price", 10**9) or 10**9)
+    item_price = int(item.get("price", 0) or 0)
+    if item_price > max_price:
+        return False
+
+    rarity_order = ["common", "uncommon", "rare", "epic", "legendary"]
+    max_rarity = _normalize_drop_rarity(rules.get("max_rarity"))
+    item_rarity = _normalize_drop_rarity(item.get("rarity"))
+    return rarity_order.index(item_rarity) <= rarity_order.index(max_rarity)
 
 
 def _filter_enemies_by_type(enemy_list: list[dict], enemy_type: str) -> list[dict]:
@@ -2239,24 +2278,35 @@ def _spawn_item(player, vk, user_id: int):
 
     def _prepare_category_items(category_name: str) -> list[dict]:
         category_items = database.get_items_by_category(category_name)
-        loc_min_lvl, loc_max_lvl = _get_location_level_thresholds(player.current_location_id)
+        bounds = _get_location_level_thresholds(player.current_location_id)
+        player_lvl = max(1, int(getattr(player, "level", 1) or 1))
+        if bounds:
+            loc_min_lvl, loc_max_lvl = bounds
+            # Важно: max уровня локации ограничивает только качество/уровень лута,
+            # но не ограничивает вход игрока в локацию.
+            effective_farm_level = max(loc_min_lvl, min(player_lvl, loc_max_lvl))
+        else:
+            effective_farm_level = player_lvl
 
         if category_name in {"weapons", "rare_weapons"}:
             from game.weapon_progression import get_weapon_required_level
-            plvl = max(1, int(getattr(player, "level", 1) or 1))
             allowed_weapons = [
                 item for item in category_items
                 if (
-                    get_weapon_required_level(item) <= plvl + 3
-                    and loc_min_lvl <= _required_level_for_item(item) <= loc_max_lvl
+                    get_weapon_required_level(item) <= effective_farm_level + 3
                 )
             ]
             category_items = allowed_weapons
         elif category_name in {"armor", "rare_armor"}:
             category_items = [
                 item for item in category_items
-                if loc_min_lvl <= _required_level_for_item(item) <= loc_max_lvl
+                if _required_level_for_item(item) <= effective_farm_level + 3
             ]
+
+        category_items = [
+            item for item in category_items
+            if _is_item_allowed_by_location_balance(item, player.current_location_id)
+        ]
 
         return category_items
 

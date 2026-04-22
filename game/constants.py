@@ -175,8 +175,26 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
 # Если локации нет в таблице — используем fallback: min=1, max=100.
 LOCATION_LEVEL_THRESHOLDS = {
     LocationType.MILITARY_ROAD.value: {"min": 1, "max": 5},
-    LocationType.NII_ROAD.value: {"min": 1, "max": 5},
-    LocationType.INFECTED_FOREST.value: {"min": 1, "max": 5},
+    LocationType.NII_ROAD.value: {"min": 6, "max": 25},
+    LocationType.INFECTED_FOREST.value: {"min": 20, "max": 70},
+}
+
+# === Баланс дропа по фарм-локациям ===
+# Ограничивает "качество" выпадающих предметов на конкретной локации.
+# Не влияет на доступность входа игрока в локацию.
+LOCATION_DROP_BALANCE_RULES = {
+    LocationType.MILITARY_ROAD.value: {
+        "max_price": 5_000,
+        "max_rarity": "rare",
+    },
+    LocationType.NII_ROAD.value: {
+        "max_price": 3_000,
+        "max_rarity": "rare",
+    },
+    LocationType.INFECTED_FOREST.value: {
+        "max_price": 5_000,
+        "max_rarity": "rare",
+    },
 }
 
 
