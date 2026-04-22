@@ -132,6 +132,7 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_button("Поговорить", color=VkKeyboardColor.PRIMARY)
         keyboard.add_button("Спать", color=VkKeyboardColor.POSITIVE)
         keyboard.add_line()
+        keyboard.add_button("Крафт", color=VkKeyboardColor.SECONDARY)
         keyboard.add_button("В город", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()
         _add_meta_row(keyboard)

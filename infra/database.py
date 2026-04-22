@@ -1074,6 +1074,119 @@ def remove_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) ->
     return True
 
 
+def craft_item_transaction(
+    vk_id: int,
+    ingredients: list[tuple[str, int]],
+    result_item_name: str,
+    result_quantity: int = 1,
+) -> dict:
+    """
+    Крафт предмета атомарно:
+    - проверка наличия ингредиентов
+    - списание ингредиентов
+    - добавление результата
+    """
+    if not ingredients:
+        return {"success": False, "message": "Рецепт пустой."}
+    if not result_item_name:
+        return {"success": False, "message": "Не указан результат крафта."}
+
+    safe_ingredients = [(str(name), max(1, int(qty or 1))) for name, qty in ingredients]
+    safe_result_qty = max(1, int(result_quantity or 1))
+
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id, level FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден."}
+        user_id = int(user["id"])
+        player_level = int(user.get("level", 1) or 1)
+
+        ingredient_rows: list[dict[str, int | str]] = []
+        for item_name, required_qty in safe_ingredients:
+            cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+            item_row = cursor.fetchone()
+            if not item_row:
+                return {"success": False, "message": f"Ингредиент '{item_name}' не найден в базе."}
+
+            item_id = int(item_row["id"])
+            cursor.execute(
+                """
+                SELECT quantity
+                FROM user_inventory
+                WHERE user_id = %s AND item_id = %s
+                FOR UPDATE
+                """,
+                (user_id, item_id),
+            )
+            inv = cursor.fetchone()
+            have_qty = int((inv or {}).get("quantity", 0) or 0)
+            if have_qty < required_qty:
+                return {
+                    "success": False,
+                    "message": f"Не хватает '{item_name}': нужно {required_qty}, у тебя {have_qty}.",
+                }
+
+            ingredient_rows.append({
+                "name": item_name,
+                "item_id": item_id,
+                "required_qty": required_qty,
+            })
+
+        cursor.execute("SELECT * FROM items WHERE name = %s", (result_item_name,))
+        result_item_row = cursor.fetchone()
+        if not result_item_row:
+            return {"success": False, "message": f"Результат '{result_item_name}' не найден в базе."}
+
+        result_item = dict(result_item_row)
+        result_item_level = 1
+        result_item_rank = normalize_weapon_rank(None, result_item)
+        if is_weapon(result_item):
+            result_item_level = clamp_weapon_level(player_level, player_level, result_item)
+            result_item_rank = normalize_weapon_rank(roll_weapon_rank(player_level, result_item), result_item)
+
+        for row in ingredient_rows:
+            cursor.execute(
+                """
+                UPDATE user_inventory
+                SET quantity = quantity - %s
+                WHERE user_id = %s AND item_id = %s AND quantity >= %s
+                """,
+                (row["required_qty"], user_id, row["item_id"], row["required_qty"]),
+            )
+
+        cursor.execute(
+            """
+            DELETE FROM user_inventory
+            WHERE user_id = %s AND item_id = ANY(%s) AND quantity <= 0
+            """,
+            (user_id, [int(r["item_id"]) for r in ingredient_rows]),
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO user_inventory (user_id, item_id, quantity, item_level, item_rank)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET
+                quantity = user_inventory.quantity + EXCLUDED.quantity,
+                item_level = GREATEST(user_inventory.item_level, EXCLUDED.item_level),
+                item_rank = CASE
+                    WHEN array_position(ARRAY['common','uncommon','rare','epic','legendary'], EXCLUDED.item_rank)
+                       > array_position(ARRAY['common','uncommon','rare','epic','legendary'], COALESCE(user_inventory.item_rank, 'common'))
+                    THEN EXCLUDED.item_rank
+                    ELSE user_inventory.item_rank
+                END
+            """,
+            (user_id, int(result_item["id"]), safe_result_qty, result_item_level, result_item_rank),
+        )
+
+    return {
+        "success": True,
+        "message": f"Скрафчено: {result_item_name} x{safe_result_qty}",
+    }
+
+
 def drop_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> dict:
     with db_cursor() as (cursor, _):
         cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))

@@ -158,6 +158,7 @@ def handle_navigation(player, vk, user_id: int, text: str):
 def handle_location_actions(player, vk, user_id: int, text: str):
     """Обработка действий в локации"""
     from handlers.location import handle_sleep
+    from handlers.crafting import show_crafting_menu, craft_recipe
 
     # Лечение
     if text in ['лечиться', 'лечение'] or 'лечиться' in text or 'лечение' in text:
@@ -167,6 +168,19 @@ def handle_location_actions(player, vk, user_id: int, text: str):
     # Отдых в убежище
     if text in ['спать', 'сон', 'отдохнуть'] or 'спать' in text:
         handle_sleep(player, vk, user_id)
+        return True
+
+    # Крафт в убежище
+    if text in ['крафт', 'верстак', 'рецепты', 'рецепт']:
+        show_crafting_menu(player, vk, user_id)
+        return True
+
+    if text.startswith('скрафтить ') or text.startswith('крафт '):
+        if text.startswith('скрафтить '):
+            target = text.replace('скрафтить ', '', 1).strip()
+        else:
+            target = text.replace('крафт ', '', 1).strip()
+        craft_recipe(player, vk, user_id, target)
         return True
     
     return False

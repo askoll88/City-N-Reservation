@@ -94,6 +94,10 @@ COMMANDS = {
     'исследовать': 'explore',
     'говорить': 'talk',
     'диалог': 'talk',
+    'крафт': 'craft_menu',
+    'верстак': 'craft_menu',
+    'рецепты': 'craft_menu',
+    'скрафтить': 'craft_build',
     
     # Диалог
     'покинуть диалог': 'exit_dialog',
