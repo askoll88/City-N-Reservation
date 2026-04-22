@@ -126,12 +126,72 @@ RESEARCH_LOCATIONS = [
     LocationType.INFECTED_FOREST.value,
 ]
 
+# === Дроп предметов по локациям ===
+# Процент используется как вес/шанс выбора конкретного предмета в этой локации.
+# Если локация не указана для предмета -> шанс считается 0.
+ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
+    LocationType.MILITARY_ROAD.value: {
+        "weapons": 16,
+        "armor": 14,
+        "meds": 8,
+        "food": 6,
+        "consumables": 10,
+        "other": 8,
+        "trash": 34,
+        "artifacts": 4,
+        "rare_weapons": 4,
+        "rare_armor": 3,
+        "resources": 4,
+    },
+    LocationType.NII_ROAD.value: {
+        "weapons": 10,
+        "armor": 12,
+        "meds": 14,
+        "food": 8,
+        "consumables": 10,
+        "other": 12,
+        "trash": 30,
+        "artifacts": 12,
+        "rare_weapons": 2,
+        "rare_armor": 2,
+        "resources": 4,
+    },
+    LocationType.INFECTED_FOREST.value: {
+        "weapons": 10,
+        "armor": 9,
+        "meds": 8,
+        "food": 8,
+        "consumables": 12,
+        "other": 8,
+        "trash": 35,
+        "artifacts": 12,
+        "rare_weapons": 3,
+        "rare_armor": 2,
+        "resources": 6,
+    },
+}
+
+# === Порог уровней по локациям (для дропа/скейла) ===
+# Если локации нет в таблице — используем fallback: min=1, max=100.
+LOCATION_LEVEL_THRESHOLDS = {
+    LocationType.CITY.value: {"min": 1, "max": 6},
+    LocationType.KPP.value: {"min": 1, "max": 10},
+    LocationType.SHELTER.value: {"min": 1, "max": 10},
+    LocationType.HOSPITAL.value: {"min": 1, "max": 10},
+    LocationType.BLACK_MARKET.value: {"min": 5, "max": 20},
+    LocationType.MILITARY_ROAD.value: {"min": 1, "max": 20},
+    LocationType.NII_ROAD.value: {"min": 12, "max": 45},
+    LocationType.INFECTED_FOREST.value: {"min": 25, "max": 70},
+}
+
 
 # === Безопасные локации (укрытия от Выброса) ===
 SAFE_LOCATIONS = [
     LocationType.CITY.value,
     LocationType.HOSPITAL.value,
     LocationType.SHELTER.value,
+    LocationType.KPP.value,
+    LocationType.BLACK_MARKET.value,
 ]
 
 # === Опасные локации (Зона — урон от Выброса) ===
@@ -139,8 +199,6 @@ DANGEROUS_LOCATIONS = [
     LocationType.MILITARY_ROAD.value,
     LocationType.NII_ROAD.value,
     LocationType.INFECTED_FOREST.value,
-    LocationType.KPP.value,
-    LocationType.BLACK_MARKET.value,
 ]
 
 

@@ -14,7 +14,7 @@ from infra import config
 from infra import database
 from models import enemies
 from game import ui
-from game.constants import RESEARCH_LOCATIONS
+from game.constants import RESEARCH_LOCATIONS, LOCATION_LEVEL_THRESHOLDS
 from infra.state_manager import _combat_state, set_combat_state, is_in_combat, get_combat_data, clear_research_state
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
@@ -241,9 +241,8 @@ RESEARCH_ENERGY_COST = {
 
 # Базовые уровни зон для мягкого скейлинга врагов
 ZONE_LEVELS = {
-    "дорога_военная_часть": 8,
-    "дорога_нии": 12,
-    "дорога_зараженный_лес": 16,
+    location_id: int(max(1, (int(bounds.get("min", 1)) + int(bounds.get("max", 100))) // 2))
+    for location_id, bounds in LOCATION_LEVEL_THRESHOLDS.items()
 }
 
 # Роли врагов: делают поведение боев менее однообразным
@@ -444,6 +443,13 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
 
 def _get_zone_level(location_id: str) -> int:
     return ZONE_LEVELS.get(location_id, 10)
+
+
+def _get_location_level_thresholds(location_id: str | None) -> tuple[int, int]:
+    bounds = LOCATION_LEVEL_THRESHOLDS.get(location_id or "", {}) if isinstance(LOCATION_LEVEL_THRESHOLDS, dict) else {}
+    min_lvl = max(1, int(bounds.get("min", 1) or 1))
+    max_lvl = max(min_lvl, int(bounds.get("max", 100) or 100))
+    return min_lvl, max_lvl
 
 
 def _filter_enemies_by_type(enemy_list: list[dict], enemy_type: str) -> list[dict]:
@@ -2209,25 +2215,96 @@ def _spawn_item(player, vk, user_id: int):
     bias_items = get_location_loot_bias(player.current_location_id)
     bias_chance = get_location_loot_bias_chance(player.current_location_id)
 
+    def _required_level_for_item(item: dict) -> int:
+        category_name = str(item.get("category") or "").lower()
+        if category_name in {"weapons", "rare_weapons"}:
+            from game.weapon_progression import get_weapon_required_level
+            return max(1, int(get_weapon_required_level(item)))
+        if category_name in {"armor", "rare_armor"}:
+            defense = int(item.get("defense", 0) or 0)
+            if defense <= 10:
+                return 1
+            if defense <= 20:
+                return 5
+            if defense <= 35:
+                return 10
+            if defense <= 50:
+                return 20
+            if defense <= 70:
+                return 35
+            if defense <= 90:
+                return 50
+            return 70
+        return 1
+
+    def _prepare_category_items(category_name: str) -> list[dict]:
+        category_items = database.get_items_by_category(category_name)
+        loc_min_lvl, loc_max_lvl = _get_location_level_thresholds(player.current_location_id)
+
+        if category_name in {"weapons", "rare_weapons"}:
+            from game.weapon_progression import get_weapon_required_level
+            plvl = max(1, int(getattr(player, "level", 1) or 1))
+            allowed_weapons = [
+                item for item in category_items
+                if (
+                    get_weapon_required_level(item) <= plvl + 3
+                    and loc_min_lvl <= _required_level_for_item(item) <= loc_max_lvl
+                )
+            ]
+            category_items = allowed_weapons
+        elif category_name in {"armor", "rare_armor"}:
+            category_items = [
+                item for item in category_items
+                if loc_min_lvl <= _required_level_for_item(item) <= loc_max_lvl
+            ]
+
+        return category_items
+
+    def _pick_by_location_chance(items: list[dict], location_id: str | None) -> dict | None:
+        roll = random.randint(1, 100)
+        passed: list[tuple[dict, int]] = []
+        for item in items:
+            chance = database.get_item_location_drop_chance(item, location_id)
+            if chance > 0 and roll <= chance:
+                passed.append((item, chance))
+        if not passed:
+            return None
+        picked, _ = random.choices(passed, weights=[max(1, p[1]) for p in passed], k=1)[0]
+        return picked
+
     lvl = max(1, int(getattr(player, "level", 1) or 1))
     if lvl <= 10:
         categories = ['meds', 'consumables', 'food', 'other', 'trash', 'weapons', 'armor', 'artifacts']
-        weights = [22, 18, 12, 14, 14, 9, 8, 3]
+        weights = [10, 8, 6, 8, 42, 9, 7, 3]
     else:
         categories = ['weapons', 'armor', 'artifacts', 'other', 'trash', 'meds', 'consumables', 'food']
-        weights = [18, 18, 15, 16, 16, 8, 5, 4]
-    category = random.choices(categories, weights=weights, k=1)[0]
-    items_in_category = database.get_items_by_category(category)
-    if category in {"weapons", "rare_weapons"}:
-        from game.weapon_progression import get_weapon_required_level
-        lvl = max(1, int(getattr(player, "level", 1) or 1))
-        allowed_weapons = [
-            item for item in items_in_category
-            if get_weapon_required_level(item) <= lvl + 3
-        ]
-        items_in_category = allowed_weapons or items_in_category[:1]
+        weights = [11, 10, 9, 8, 44, 7, 6, 5]
 
-    if not items_in_category:
+    weighted_categories = list(zip(categories, weights))
+    primary_category = random.choices(categories, weights=weights, k=1)[0]
+    ordered_categories = [primary_category] + [
+        cat for cat, _ in sorted(weighted_categories, key=lambda x: x[1], reverse=True)
+        if cat != primary_category
+    ]
+
+    category = None
+    items_in_category: list[dict] = []
+    for candidate_category in ordered_categories:
+        candidate_items = _prepare_category_items(candidate_category)
+        if not candidate_items:
+            continue
+        # Если в локации у категории все шансы 0 — не выбираем её.
+        has_location_chances = any(
+            database.get_item_location_drop_chance(item, player.current_location_id) > 0
+            for item in candidate_items
+        )
+        if not has_location_chances:
+            continue
+        category = candidate_category
+        items_in_category = candidate_items
+        break
+
+    if not category or not items_in_category:
         vk.messages.send(
             user_id=user_id,
             message="Ты обыскал территорию...\n\nНичего не найдено.",
@@ -2241,23 +2318,23 @@ def _spawn_item(player, vk, user_id: int):
     is_rare = random.randint(1, 100) <= player.rare_find_chance
 
     if bias_items and random.random() < bias_chance:
-        # Пытаемся найти предмет из бонусного списка
+        bias_candidates = []
         for bias_name in bias_items:
             for item in items_in_category:
                 if bias_name.lower() in item['name'].lower():
-                    found_item = item
-                    break
-            if found_item:
-                break
+                    bias_candidates.append(item)
+        if bias_candidates:
+            found_item = _pick_by_location_chance(bias_candidates, player.current_location_id)
 
     # Если не нашли бонусный — выбираем случайно
     if not found_item:
         if is_rare and category in ['weapons', 'armor']:
-            items_in_category = sorted(items_in_category, key=lambda x: x.get('price', 0), reverse=True)
-            found_item = items_in_category[0] if items_in_category else None
-            rarity_text = "РЕДКАЯ НАХОДКА!\n\n"
+            expensive = sorted(items_in_category, key=lambda x: x.get('price', 0), reverse=True)
+            top_expensive = expensive[: max(1, min(12, len(expensive)))]
+            found_item = _pick_by_location_chance(top_expensive, player.current_location_id)
+            rarity_text = "РЕДКАЯ НАХОДКА!\n\n" if found_item else ""
         else:
-            found_item = random.choice(items_in_category)
+            found_item = _pick_by_location_chance(items_in_category, player.current_location_id)
             rarity_text = ""
     else:
         rarity_text = "🎯 **ТЕМАТИЧЕСКАЯ НАХОДКА!**\n\n"

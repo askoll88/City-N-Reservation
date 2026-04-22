@@ -21,6 +21,7 @@ from psycopg2.extras import RealDictCursor
 
 from infra import config
 from game.item_pool import ITEMS_POOL
+from game.constants import ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION
 from game.weapon_progression import (
     calc_weapon_attack,
     clamp_weapon_level,
@@ -270,7 +271,9 @@ def init_db():
                 rarity        VARCHAR(20)  DEFAULT 'common',
                 anomaly_type  VARCHAR(30),
                 bonus_type    VARCHAR(30),
-                bonus_value   INTEGER      DEFAULT 0
+                bonus_value   INTEGER      DEFAULT 0,
+                drop_chance   INTEGER      DEFAULT 0,
+                location_drop_chances JSONB DEFAULT '{}'::jsonb
             )
         """)
 
@@ -510,6 +513,8 @@ def _migrate_legacy_schema():
 
         cursor.execute("ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS item_level INTEGER DEFAULT 1")
         cursor.execute("ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS item_rank VARCHAR(20) DEFAULT 'common'")
+        cursor.execute("ALTER TABLE items ADD COLUMN IF NOT EXISTS drop_chance INTEGER DEFAULT 0")
+        cursor.execute("ALTER TABLE items ADD COLUMN IF NOT EXISTS location_drop_chances JSONB DEFAULT '{}'::jsonb")
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +556,57 @@ def _balanced_item_price(category: str, price: int, attack: int = 0, defense: in
         return max(price, int(base * rarity_mult))
 
     return price
+
+
+def _coerce_percent(value: Any) -> int:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(100, int(round(num))))
+
+
+def _default_location_drop_chances(category: str) -> dict[str, int]:
+    category = (category or "").strip().lower()
+    result: dict[str, int] = {}
+    for location_id, category_map in ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION.items():
+        pct = _coerce_percent((category_map or {}).get(category, 0))
+        if pct > 0:
+            result[str(location_id)] = pct
+    return result
+
+
+def _normalize_location_drop_chances(location_drop_chances: Any, category: str) -> dict[str, int]:
+    raw = location_drop_chances
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw.strip() else {}
+        except Exception:
+            raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+
+    result: dict[str, int] = {}
+    for location_id, pct_raw in raw.items():
+        key = str(location_id or "").strip()
+        if not key:
+            continue
+        pct = _coerce_percent(pct_raw)
+        if pct > 0:
+            result[key] = pct
+
+    if result:
+        return result
+    return _default_location_drop_chances(category)
+
+
+def _resolve_drop_profile(category: str, drop_chance: Any = None, location_drop_chances: Any = None) -> tuple[int, dict[str, int]]:
+    normalized_location = _normalize_location_drop_chances(location_drop_chances, category)
+    if drop_chance is None:
+        resolved_drop_chance = max(normalized_location.values(), default=0)
+    else:
+        resolved_drop_chance = _coerce_percent(drop_chance)
+    return resolved_drop_chance, normalized_location
 
 
 def _with_lore_description(name: str, category: str, description: str) -> str:
@@ -605,30 +661,38 @@ def _insert_item(cursor, item: tuple):
         name, category, description, price, attack, defense, weight = item
         description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense)
+        drop_chance, location_drop_chances = _resolve_drop_profile(category)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
-                               rarity, anomaly_type, bonus_type, bonus_value)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,'common',NULL,NULL,0)
+                               rarity, anomaly_type, bonus_type, bonus_value,
+                               drop_chance, location_drop_chances)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,'common',NULL,NULL,0,%s,%s::jsonb)
             ON CONFLICT (name) DO UPDATE SET
                 category=EXCLUDED.category, description=EXCLUDED.description,
                 price=EXCLUDED.price, attack=EXCLUDED.attack,
-                defense=EXCLUDED.defense, weight=EXCLUDED.weight
-        """, (name, category, description, price, attack, defense, weight))
+                defense=EXCLUDED.defense, weight=EXCLUDED.weight,
+                drop_chance=EXCLUDED.drop_chance,
+                location_drop_chances=EXCLUDED.location_drop_chances
+        """, (name, category, description, price, attack, defense, weight, drop_chance, json.dumps(location_drop_chances, ensure_ascii=False)))
 
     elif len(item) == 8:
         name, category, description, price, attack, defense, weight, backpack_bonus = item
         description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense)
+        drop_chance, location_drop_chances = _resolve_drop_profile(category)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
-                               backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'common',NULL,NULL,0)
+                               backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value,
+                               drop_chance, location_drop_chances)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'common',NULL,NULL,0,%s,%s::jsonb)
             ON CONFLICT (name) DO UPDATE SET
                 category=EXCLUDED.category, description=EXCLUDED.description,
                 price=EXCLUDED.price, attack=EXCLUDED.attack,
                 defense=EXCLUDED.defense, weight=EXCLUDED.weight,
-                backpack_bonus=EXCLUDED.backpack_bonus
-        """, (name, category, description, price, attack, defense, weight, backpack_bonus))
+                backpack_bonus=EXCLUDED.backpack_bonus,
+                drop_chance=EXCLUDED.drop_chance,
+                location_drop_chances=EXCLUDED.location_drop_chances
+        """, (name, category, description, price, attack, defense, weight, backpack_bonus, drop_chance, json.dumps(location_drop_chances, ensure_ascii=False)))
 
     elif len(item) == 11:
         name, category, description, price, attack, defense, weight, \
@@ -636,24 +700,35 @@ def _insert_item(cursor, item: tuple):
         # этот формат не используется — оставлен для совместимости
         pass
 
-    elif len(item) == 12:
+    elif len(item) in {12, 13, 14}:
         name, category, description, price, attack, defense, weight, \
-            backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value = item
+            backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value = item[:12]
+        drop_chance = item[12] if len(item) >= 13 else None
+        location_drop_chances = item[13] if len(item) >= 14 else None
         description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense, rarity)
+        resolved_drop_chance, resolved_location_drop_chances = _resolve_drop_profile(
+            category,
+            drop_chance=drop_chance,
+            location_drop_chances=location_drop_chances,
+        )
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
-                               backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                               backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value,
+                               drop_chance, location_drop_chances)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
             ON CONFLICT (name) DO UPDATE SET
                 category=EXCLUDED.category, description=EXCLUDED.description,
                 price=EXCLUDED.price, attack=EXCLUDED.attack,
                 defense=EXCLUDED.defense, weight=EXCLUDED.weight,
                 backpack_bonus=EXCLUDED.backpack_bonus,
                 rarity=EXCLUDED.rarity, anomaly_type=EXCLUDED.anomaly_type,
-                bonus_type=EXCLUDED.bonus_type, bonus_value=EXCLUDED.bonus_value
+                bonus_type=EXCLUDED.bonus_type, bonus_value=EXCLUDED.bonus_value,
+                drop_chance=EXCLUDED.drop_chance,
+                location_drop_chances=EXCLUDED.location_drop_chances
         """, (name, category, description, price, attack, defense, weight,
-              backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value))
+              backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value,
+              resolved_drop_chance, json.dumps(resolved_location_drop_chances, ensure_ascii=False)))
 
 
 # ---------------------------------------------------------------------------
@@ -2559,6 +2634,21 @@ def admin_cancel_market_listing(listing_id: int) -> dict:
 def get_item_by_name(item_name: str) -> dict | None:
     items, _, _ = _get_cached_items()
     return items.get(item_name)
+
+
+def get_item_location_drop_chance(item: dict | None, location_id: str | None) -> int:
+    """Вернуть шанс выпадения предмета в конкретной локации (0..100)."""
+    if not item or not location_id:
+        return 0
+    raw = item.get("location_drop_chances") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw.strip() else {}
+        except Exception:
+            raw = {}
+    if not isinstance(raw, dict):
+        return 0
+    return _coerce_percent(raw.get(location_id, 0))
 
 
 def get_items_by_category(category: str) -> list[dict]:
