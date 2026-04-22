@@ -175,8 +175,8 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
 # Если локации нет в таблице — используем fallback: min=1, max=100.
 LOCATION_LEVEL_THRESHOLDS = {
     LocationType.MILITARY_ROAD.value: {"min": 1, "max": 5},
-    LocationType.NII_ROAD.value: {"min": 6, "max": 25},
-    LocationType.INFECTED_FOREST.value: {"min": 20, "max": 70},
+    LocationType.NII_ROAD.value: {"min": 1, "max": 5},
+    LocationType.INFECTED_FOREST.value: {"min": 3, "max": 7},
 }
 
 # === Баланс дропа по фарм-локациям ===
