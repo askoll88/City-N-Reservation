@@ -2211,11 +2211,11 @@ def _spawn_item(player, vk, user_id: int):
 
     lvl = max(1, int(getattr(player, "level", 1) or 1))
     if lvl <= 10:
-        categories = ['meds', 'consumables', 'food', 'other', 'weapons', 'armor', 'artifacts']
-        weights = [24, 20, 12, 18, 10, 10, 6]
+        categories = ['meds', 'consumables', 'food', 'other', 'trash', 'weapons', 'armor', 'artifacts']
+        weights = [22, 18, 12, 14, 14, 9, 8, 3]
     else:
-        categories = ['weapons', 'armor', 'artifacts', 'other', 'meds', 'consumables', 'food']
-        weights = [20, 20, 18, 18, 10, 8, 6]
+        categories = ['weapons', 'armor', 'artifacts', 'other', 'trash', 'meds', 'consumables', 'food']
+        weights = [18, 18, 15, 16, 16, 8, 5, 4]
     category = random.choices(categories, weights=weights, k=1)[0]
     items_in_category = database.get_items_by_category(category)
     if category in {"weapons", "rare_weapons"}:
