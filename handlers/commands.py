@@ -34,6 +34,7 @@ from handlers.keyboards import (
     create_scientist_shop_keyboard
 )
 from models.npcs import get_npc_by_location
+from models.classes import get_class
 from infra.state_manager import (
     is_in_combat,
     is_in_dialog, get_dialog_info, clear_dialog_state,
@@ -249,17 +250,25 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
         if _use_combat_item(player, vk, user_id, target):
             return True
 
-    # Использование навыка по имени
-    skill_keywords = [
-        'двойной выстрел', 'точный выстрел', 'очередь', 'подавление',
-        'прицельный выстрел', 'незримый', 'шквал огня', 'бронирование',
-        'клинок в сердце', 'уклонение', 'заградительный огонь',
-        'слабое место', 'заслон', 'полевой шов', 'полевая доработка',
-        'срыв контура', 'ложный след',
-    ]
-    if any(skill_name in text for skill_name in skill_keywords):
-        use_skill(player, vk, user_id, original_text)
-        return True
+    # Использование навыка по имени/кнопке
+    player_class = get_class(player.player_class) if player.player_class else None
+    if player_class and player_class.active_skills:
+        normalized_original = (original_text or "").strip().lower()
+        candidates = [text]
+        if normalized_original and normalized_original not in candidates:
+            candidates.append(normalized_original)
+
+        for skill in player_class.active_skills:
+            skill_name = str(skill.get("name", "")).strip().lower()
+            if not skill_name:
+                continue
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                # Кнопки приходят с приписками вроде "(20 эн)" или "(перезарядка ...)"
+                if skill_name in candidate or (len(candidate) >= 6 and candidate in skill_name):
+                    use_skill(player, vk, user_id, original_text)
+                    return True
 
     # Возврат в бой
     if text == 'назад':
