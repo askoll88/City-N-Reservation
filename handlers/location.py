@@ -669,6 +669,33 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
     if from_location == "инвентарь" and player.previous_location:
         from_location = player.previous_location
 
+    if location_id == from_location:
+        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
+        vk.messages.send(
+            user_id=user_id,
+            message="Ты уже находишься в этой локации.",
+            keyboard=create_location_keyboard(from_location, player.level).get_keyboard(),
+            random_id=0,
+        )
+        return
+
+    try:
+        from game.map_access import can_enter_location
+        access = can_enter_location(player, location_id)
+    except Exception:
+        logger.exception("Ошибка проверки доступа к локации: user_id=%s location=%s", user_id, location_id)
+        access = None
+
+    if access and access.blocked:
+        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
+        vk.messages.send(
+            user_id=user_id,
+            message=access.format_message(),
+            keyboard=create_location_keyboard(from_location, player.level).get_keyboard(),
+            random_id=0,
+        )
+        return
+
     if not bypass_risk_confirm:
         try:
             from game.emission import prompt_emission_risk_exit_confirmation
@@ -683,16 +710,6 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
         mark_emission_safe_exit_during_impact(user_id, from_location, location_id)
     except Exception:
         logger.exception("Не удалось отметить выход из safe в impact: user_id=%s", user_id)
-
-    if location_id == from_location:
-        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
-        vk.messages.send(
-            user_id=user_id,
-            message="Ты уже находишься в этой локации.",
-            keyboard=create_location_keyboard(from_location, player.level).get_keyboard(),
-            random_id=0,
-        )
-        return
 
     if location_id in SAFE_LOCATIONS:
         from game.emission import is_emission_safe_entry_blocked_for_user

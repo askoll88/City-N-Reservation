@@ -52,6 +52,8 @@ REQUIREMENT_KEYS = {
     "radiation_max",
     "artifact_slots",
     "money",
+    "defense",
+    "total_defense",
 }
 
 RESEARCH_ACTIVITIES = {"research"}
@@ -236,6 +238,9 @@ def validate_location_requires(location_id: str, requires: dict[str, Any]) -> li
             errors.append(f"{location_id}: unknown requirement '{key}'")
             continue
         if key in {"level", "level_min", "rank_tier", "radiation_max", "artifact_slots", "money"}:
+            if not isinstance(value, int) or value < 0:
+                errors.append(f"{location_id}: requirement '{key}' must be non-negative int")
+        elif key in {"defense", "total_defense"}:
             if not isinstance(value, int) or value < 0:
                 errors.append(f"{location_id}: requirement '{key}' must be non-negative int")
         elif key in {"key", "item", "flag", "quest_flag"}:

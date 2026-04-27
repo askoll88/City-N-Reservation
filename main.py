@@ -58,6 +58,7 @@ from handlers.commands import (
 )
 
 from handlers.location import go_to_location, go_back, handle_travel_commands, travel_tick
+from handlers.map_screen import handle_map_command
 from handlers.admin import handle_admin_commands
 from infra.state_manager import (
     is_in_combat, is_in_dialog,
@@ -300,6 +301,10 @@ def handle_message(event, vk):
             keyboard=create_character_keyboard().get_keyboard(),
             random_id=0
         )
+        return
+
+    # === Приоритет 4.6: Карта маршрутов ===
+    if handle_map_command(player, vk, user_id, text):
         return
 
     ui_screen = get_ui_current_screen(user_id).get("name", "location")

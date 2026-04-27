@@ -25,8 +25,10 @@ from models.npcs import get_npc_by_location, get_npc
 # Helper — стандартный нижний ряд (всегда одинаковый)
 # ============================================================
 
-def _add_meta_row(keyboard):
-    """Добавить нижний ряд: Персонаж."""
+def _add_meta_row(keyboard, include_map: bool = True):
+    """Добавить нижний ряд: Карта/Персонаж."""
+    if include_map:
+        keyboard.add_button("Карта", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("Персонаж", color=VkKeyboardColor.SECONDARY)
 
 
@@ -161,6 +163,109 @@ def create_location_keyboard(location_id: str, player_level: int = None):
 
 
 # ============================================================
+# Карта
+# ============================================================
+
+def create_map_overview_keyboard(current_location_id: str = None):
+    """Карта: выбор региона без списка всех локаций."""
+    keyboard = VkKeyboard(one_time=False)
+    current = current_location_id or "город"
+    keyboard.add_button("Карта: Город", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Карта: Военный сектор", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("Карта: НИИ", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Карта: Лес", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    if current == "город":
+        keyboard.add_button("КПП", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+    elif current in {"больница", "убежище", "черный рынок"}:
+        keyboard.add_button("В город", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+    elif current in RESEARCH_LOCATIONS:
+        keyboard.add_button("В КПП", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_map_region_keyboard(region_id: str, current_location_id: str = None):
+    """Карта выбранного региона: кнопки ведут только к ближайшему шагу маршрута."""
+    keyboard = VkKeyboard(one_time=False)
+    current = current_location_id or "город"
+
+    if region_id == "city":
+        if current == "город":
+            keyboard.add_button("Больница", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_button("Убежище", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+            keyboard.add_button("Черный рынок", color=VkKeyboardColor.SECONDARY)
+            keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in {"больница", "убежище", "черный рынок", "кпп"}:
+            keyboard.add_button("В город", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in RESEARCH_LOCATIONS:
+            keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+    elif region_id == "military":
+        if current == "дорога_военная_часть":
+            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+        elif current == "кпп":
+            keyboard.add_button("Дорога на военную часть", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in RESEARCH_LOCATIONS:
+            keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in {"больница", "убежище", "черный рынок"}:
+            keyboard.add_button("В город", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        else:
+            keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+    elif region_id == "science":
+        if current == "дорога_нии":
+            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+        elif current == "кпп":
+            keyboard.add_button("Дорога на НИИ", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in RESEARCH_LOCATIONS:
+            keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in {"больница", "убежище", "черный рынок"}:
+            keyboard.add_button("В город", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        else:
+            keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+    elif region_id == "forest":
+        if current == "дорога_зараженный_лес":
+            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+        elif current == "кпп":
+            keyboard.add_button("Дорога на зараженный лес", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+        elif current in RESEARCH_LOCATIONS:
+            keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in {"больница", "убежище", "черный рынок"}:
+            keyboard.add_button("В город", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        else:
+            keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+
+    keyboard.add_button("Карта", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+# ============================================================
 # Инвентарь (отдельная клавиатура)
 # ============================================================
 
@@ -208,7 +313,7 @@ def create_travel_keyboard():
     keyboard.add_button("Ускориться", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("Отмена пути", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
-    _add_meta_row(keyboard)
+    _add_meta_row(keyboard, include_map=False)
     return keyboard
 
 
