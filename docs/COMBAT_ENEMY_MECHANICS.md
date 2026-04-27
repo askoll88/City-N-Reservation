@@ -84,7 +84,7 @@
 
 Из `models/player.py`:
 
-- `max_health = effective_stamina * 25 + max_health_bonus + hp_upgrade_bonus`
+- `max_health = PLAYER_HP_BASE + level * PLAYER_HP_PER_LEVEL + effective_stamina * PLAYER_HP_PER_STAMINA + max_health_bonus`
 - `melee_damage = 5 + effective_strength + passive_strength_bonus` (+% от артефактов на damage_boost)
 - `crit_chance = 5 + (effective_luck - 1) * 2 + artifact_crit + passive_crit`
 - `dodge_chance = 10 + passive_dodge + artifact_dodge`
@@ -187,4 +187,3 @@
 - Защита, криты, уклонение и классовые пассивки реально участвуют в формулах каждого хода.
 - Темп боя задают энергия + кулдауны + шанс побега 50%.
 - Коридор/ивенты могут прерывать путь и вставлять бой в общий цикл исследования.
-

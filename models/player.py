@@ -112,6 +112,27 @@ def calculate_radiation_hp_loss(radiation: int, current_hp: int) -> int:
     return max(35, int(hp * 0.85))
 
 
+def calculate_player_max_health(
+    level: int,
+    stamina: int,
+    max_health_bonus: int = 0,
+) -> int:
+    """
+    Максимальное HP как производная характеристика персонажа.
+
+    Модель ближе к классическим RPG: уровень даёт гарантированный рост
+    живучести, выносливость усиливает этот рост билдом, а артефакты/пассивки
+    добавляются сверху. Расходники лечат, но не являются системой прокачки.
+    """
+    lvl = max(1, int(level or 1))
+    sta = max(1, int(stamina or 1))
+    bonus = int(max_health_bonus or 0)
+    base = max(1, int(getattr(game_config, "PLAYER_HP_BASE", 56) or 56))
+    per_level = max(0, int(getattr(game_config, "PLAYER_HP_PER_LEVEL", 4) or 4))
+    per_stamina = max(1, int(getattr(game_config, "PLAYER_HP_PER_STAMINA", 10) or 10))
+    return max(1, base + lvl * per_level + sta * per_stamina + bonus)
+
+
 class Inventory:
     """Класс инвентаря игрока"""
 
@@ -273,7 +294,6 @@ class Player:
         self.max_weight = self._data['max_weight']   # Максимальный переносимый вес
         self.artifact_slots = self._data.get('artifact_slots', 3)  # Слоты для артефактов
         self.max_health_bonus = self._data.get('max_health_bonus', 0)  # Бонус к HP от артефактов
-        self.hp_upgrade_level = int(self._data.get('hp_upgrade_level', 0) or 0)
         self.inventory_section = self._data.get('inventory_section')  # Текущий раздел инвентаря
         self.previous_location = self._data.get('previous_location')  # Предыдущая локация для возврата
         raw_player_class = self._data.get('player_class')  # Класс персонажа
@@ -353,7 +373,6 @@ class Player:
             self.equipped_armor = self._data.get('equipped_armor')
             self.equipped_device = self._data.get('equipped_device')
             self.newbie_kit_received = self._data.get('newbie_kit_received', 0)
-            self.hp_upgrade_level = int(self._data.get('hp_upgrade_level', 0) or 0)
             self.inventory_section = self._data.get('inventory_section')
             self.previous_location = self._data.get('previous_location')
             self.is_admin = self._data.get('is_admin', 0)
@@ -468,29 +487,8 @@ class Player:
 
     @property
     def max_health(self) -> int:
-        """Максимальное здоровье: 25 HP за единицу выносливости"""
-        return self.effective_stamina * 25 + self.max_health_bonus + self.hp_upgrade_bonus
-
-    def _get_hp_upgrade_settings(self) -> tuple[int, int]:
-        """Получить параметры прокачки HP с безопасными дефолтами."""
-        try:
-            from infra import config as game_config
-            per_level = max(1, int(getattr(game_config, "HP_UPGRADE_PER_LEVEL", 3) or 3))
-            max_level = max(0, int(getattr(game_config, "HP_UPGRADE_MAX_LEVEL", 10) or 10))
-            return per_level, max_level
-        except Exception:
-            return 3, 10
-
-    @property
-    def hp_upgrade_bonus(self) -> int:
-        """Перманентный бонус к максимальному HP от прокачки."""
-        per_level, max_level = self._get_hp_upgrade_settings()
-        return min(max_level, self.hp_upgrade_level) * per_level
-
-    @property
-    def hp_upgrade_max_level(self) -> int:
-        _, max_level = self._get_hp_upgrade_settings()
-        return max_level
+        """Максимальное здоровье от уровня, выносливости и постоянных бонусов."""
+        return calculate_player_max_health(self.level, self.effective_stamina, self.max_health_bonus)
 
     @property
     def total_defense(self) -> int:
@@ -541,8 +539,6 @@ class Player:
         }
         if target_tier >= 4:
             req["has_class"] = 1
-        if target_tier >= 4:
-            req["hp_upgrade_level"] = min(10, 1 + (target_tier - 4) // 3)
         if target_tier >= 6:
             req["shells"] = min(5000, max(0, (target_tier - 5) * 40))
         if target_tier >= 12:
@@ -558,7 +554,6 @@ class Player:
             "money": int(self.money),
             "stat_total": int(self.strength + self.stamina + self.perception + self.luck),
             "has_class": 1 if self.player_class else 0,
-            "hp_upgrade_level": int(self.hp_upgrade_level),
             "shells": int(database.get_user_shells(self.user_id)),
             "artifact_slots": int(self.artifact_slots),
         }
@@ -574,7 +569,6 @@ class Player:
             "money": "Деньги",
             "stat_total": "Сумма характеристик",
             "has_class": "Класс",
-            "hp_upgrade_level": "Прокачка HP",
             "shells": "Гильзы",
             "artifact_slots": "Слоты артефактов",
         }
@@ -835,7 +829,11 @@ class Player:
         strength_damage_bonus = self.effective_strength * strength_per_level
         lines.append(f"⚔️ Сила: {self.effective_strength} (+{strength_damage_bonus} урона)  |  🏃 Выносливость: {self.effective_stamina}")
         lines.append(f"👁️ Восприятие: {self.effective_perception}  |  🍀 Удача: {self.effective_luck}")
-        lines.append(f"🧬 Прокачка HP: {self.hp_upgrade_level}/{self.hp_upgrade_max_level} (+{self.hp_upgrade_bonus} HP)")
+        base_hp = calculate_player_max_health(self.level, self.effective_stamina, 0)
+        if self.max_health_bonus:
+            lines.append(f"❤️ Макс. HP: {base_hp} + {self.max_health_bonus} от артефактов")
+        else:
+            lines.append(f"❤️ Макс. HP: {self.max_health} (уровень + выносливость)")
         lines.append("")
         lines.append(f"📊 Урон: {self.melee_damage}  |  Броня: {self.total_defense}")
         lines.append(f"🎯 Крит: {self.crit_chance}%  |  Уклонение: {self.dodge_chance}%")
@@ -1404,6 +1402,7 @@ class Player:
             "боевой стимулятор упак": 80,
             "чистая вода": 30,
             "лечебная трава": 25,
+            "витамины": 15,
         }
         energy_restore = {
             "супер энергетик": 9999,  # полный заряд
@@ -1411,6 +1410,7 @@ class Player:
             "энергетик": 30,
             "кофе": 15,
             "вода": 10,
+            "витамины": 10,
             "хлеб": 15,
             "колбаса": 20,
             "консервы": 25,
@@ -1423,28 +1423,7 @@ class Player:
             "чистая вода": -10,
         }
 
-        if item_key == "витамины":
-            per_upgrade_hp, max_upgrade_level = self._get_hp_upgrade_settings()
-            if self.hp_upgrade_level >= max_upgrade_level:
-                return False, (
-                    "🧬 Витамины больше не дают эффект.\n"
-                    f"Достигнут лимит прокачки HP: {self.hp_upgrade_level}/{max_upgrade_level}."
-                )
-            self.hp_upgrade_level += 1
-            self.health = min(self.max_health, self.health + per_upgrade_hp)
-            database.update_user_stats(
-                self.user_id,
-                hp_upgrade_level=self.hp_upgrade_level,
-                health=self.health,
-            )
-            msg = (
-                f"🧬 Витамины приняты!\n"
-                f"Макс. HP: {old_max_health} -> {self.max_health}\n"
-                f"Текущее HP: {old_health} -> {self.health}\n"
-                f"Прокачка: {self.hp_upgrade_level}/{max_upgrade_level}"
-            )
-            used = True
-        elif item_key in hp_restore_percent or item_key in hp_restore or item_key in energy_restore or item_key in radiation_delta:
+        if item_key in hp_restore_percent or item_key in hp_restore or item_key in energy_restore or item_key in radiation_delta:
             hp_percent_text = ""
             if item_key in hp_restore_percent:
                 restore_pct = hp_restore_percent[item_key]

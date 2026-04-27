@@ -895,7 +895,7 @@ _ALLOWED_USER_FIELDS = frozenset({
     "health", "energy", "radiation", "money",
     "level", "experience",
     "strength", "stamina", "perception", "luck",
-    "armor_defense", "max_weight", "max_health_bonus", "hp_upgrade_level",
+    "armor_defense", "max_weight", "max_health_bonus",
     "artifact_slots", "shells",
     "player_class", "location", "previous_location",
     "hospital_treatments", "newbie_kit_received",
@@ -3768,8 +3768,6 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
     }
     max_weight = int(user_row.get("max_weight", 10) or 10)
     max_health_bonus = int(user_row.get("max_health_bonus", 0) or 0)
-    hp_upgrade_level = int(user_row.get("hp_upgrade_level", 0) or 0)
-
     while level < max_level and level < rank_level_cap:
         exp_needed = int(levels.get(level + 1, levels.get(max_level, 0)) or 0)
         if exp_needed <= 0 or experience < exp_needed:
@@ -3786,11 +3784,8 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
     if level == old_level:
         return None
 
-    max_health = (
-        stats["stamina"] * 25
-        + max_health_bonus
-        + hp_upgrade_level * int(getattr(config, "HP_UPGRADE_PER_LEVEL", 3) or 3)
-    )
+    from models.player import calculate_player_max_health
+    max_health = calculate_player_max_health(level, stats["stamina"], max_health_bonus)
 
     cursor.execute(
         """
@@ -3851,7 +3846,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             cursor.execute("""
                 SELECT id, level, rank_tier, experience,
                        health, energy, strength, stamina, perception, luck,
-                       max_weight, max_health_bonus, hp_upgrade_level
+                       max_weight, max_health_bonus
                 FROM users
                 WHERE vk_id = %s
                 FOR UPDATE
@@ -3954,7 +3949,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 WHERE vk_id = %s
                 RETURNING id, money, experience, level, rank_tier,
                           health, energy, strength, stamina, perception, luck,
-                          max_weight, max_health_bonus, hp_upgrade_level
+                          max_weight, max_health_bonus
             """, (total_money, total_xp, vk_id))
             user_row = cursor.fetchone()
             level_up = _apply_level_ups_after_xp(cursor, vk_id, user_row) if user_row else None
