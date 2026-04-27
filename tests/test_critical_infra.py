@@ -415,12 +415,12 @@ class TestLocationModifiers(unittest.TestCase):
     # --- Energy cost ---
 
     def test_energy_cost_mult_values(self):
-        # Военная: +10%
-        self.assertAlmostEqual(get_energy_cost_mult("дорога_военная_часть"), 1.1, places=2)
+        # Военная: +8%
+        self.assertAlmostEqual(get_energy_cost_mult("дорога_военная_часть"), 1.08, places=2)
         # НИИ: норма
         self.assertAlmostEqual(get_energy_cost_mult("дорога_нии"), 1.0, places=2)
-        # Лес: +15%
-        self.assertAlmostEqual(get_energy_cost_mult("дорога_зараженный_лес"), 1.15, places=2)
+        # Лес: +10%
+        self.assertAlmostEqual(get_energy_cost_mult("дорога_зараженный_лес"), 1.10, places=2)
         # Без модификатора: 1.0
         self.assertAlmostEqual(get_energy_cost_mult("город"), 1.0, places=2)
 
@@ -428,22 +428,22 @@ class TestLocationModifiers(unittest.TestCase):
 
     def test_find_chance_mult_values(self):
         self.assertAlmostEqual(get_find_chance_mult("дорога_военная_часть"), 1.0, places=2)
-        self.assertAlmostEqual(get_find_chance_mult("дорога_нии"), 1.2, places=2)  # +20%
-        self.assertAlmostEqual(get_find_chance_mult("дорога_зараженный_лес"), 1.1, places=2)
+        self.assertAlmostEqual(get_find_chance_mult("дорога_нии"), 1.12, places=2)  # +12%
+        self.assertAlmostEqual(get_find_chance_mult("дорога_зараженный_лес"), 1.08, places=2)
 
     # --- Danger ---
 
     def test_danger_mult_values(self):
-        self.assertAlmostEqual(get_danger_mult("дорога_военная_часть"), 1.1, places=2)
+        self.assertAlmostEqual(get_danger_mult("дорога_военная_часть"), 1.06, places=2)
         self.assertAlmostEqual(get_danger_mult("дорога_нии"), 1.0, places=2)
-        self.assertAlmostEqual(get_danger_mult("дорога_зараженный_лес"), 1.25, places=2)
+        self.assertAlmostEqual(get_danger_mult("дорога_зараженный_лес"), 1.15, places=2)
 
     # --- Radiation ---
 
     def test_radiation_mult_values(self):
         self.assertAlmostEqual(get_radiation_mult("дорога_военная_часть"), 1.0, places=2)
-        self.assertAlmostEqual(get_radiation_mult("дорога_нии"), 1.15, places=2)
-        self.assertAlmostEqual(get_radiation_mult("дорога_зараженный_лес"), 1.2, places=2)
+        self.assertAlmostEqual(get_radiation_mult("дорога_нии"), 1.10, places=2)
+        self.assertAlmostEqual(get_radiation_mult("дорога_зараженный_лес"), 1.12, places=2)
 
     # --- Anomaly weights ---
 
@@ -560,7 +560,7 @@ class TestUniqueMechanics(unittest.TestCase):
             if result and result["active"]:
                 break
 
-        base_find = 1.2  # НИИ базовый
+        base_find = 1.12  # НИИ базовый
         state = _zone_mutation_state["дорога_нии"]
         actual = get_find_chance_mult("дорога_нии")
         self.assertAlmostEqual(actual, base_find + state["bonus_find"], places=3)
@@ -586,16 +586,16 @@ class TestUniqueMechanics(unittest.TestCase):
         check_mutant_hunt()
 
     def test_mutant_hunt_probability_in_range(self):
-        """20% шанс охоты мутантов"""
+        """12% шанс охоты мутантов"""
         hits = sum(1 for _ in range(1000) if check_mutant_hunt())
         rate = hits / 1000
-        self.assertGreater(rate, 0.12)
-        self.assertLess(rate, 0.30)
+        self.assertGreater(rate, 0.06)
+        self.assertLess(rate, 0.20)
 
     def test_mutant_hunt_count_range(self):
         for _ in range(100):
             count = get_mutant_hunt_count()
-            self.assertIn(count, [2, 3])
+            self.assertEqual(count, 2)
 
     # --- Loot bias ---
 
@@ -625,7 +625,7 @@ class TestLocationDataIntegrity(unittest.TestCase):
                           ["ambush", "zone_mutation", "mutant_hunt"])
 
     def test_all_anomaly_weights_valid(self):
-        from anomalies import ANOMALIES
+        from game.anomalies import ANOMALIES
         for loc_id, mod in LOCATION_MODIFIERS.items():
             weights = mod["anomaly_weights"]
             for anomaly_type in weights:

@@ -2745,11 +2745,16 @@ def use_skill(player, vk, user_id: int, skill_name: str):
         # Проверяем победу
         if combat['enemy_hp'] <= 0:
             database.update_user_stats(user_id, energy=player.energy)
-            result_msg += _handle_victory(player, combat, user_id, vk=vk)
-            from handlers.keyboards import create_resume_keyboard
             vk.messages.send(
                 user_id=user_id,
                 message=result_msg,
+                random_id=0
+            )
+            victory_message = _handle_victory(player, combat, user_id, vk=vk)
+            from handlers.keyboards import create_resume_keyboard
+            vk.messages.send(
+                user_id=user_id,
+                message=victory_message,
                 keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
                 random_id=0
             )
@@ -3202,9 +3207,21 @@ def handle_combat_attack(player, vk, user_id: int):
 
     if combat['enemy_hp'] <= 0:
         database.update_user_stats(user_id, energy=player.energy)
-        message += _handle_victory(player, combat, user_id, vk=vk)
+        vk.messages.send(
+            user_id=user_id,
+            message=message,
+            random_id=0
+        )
+        victory_message = _handle_victory(player, combat, user_id, vk=vk)
         from handlers.keyboards import create_resume_keyboard
         keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id)
+        vk.messages.send(
+            user_id=user_id,
+            message=victory_message,
+            keyboard=keyboard.get_keyboard(),
+            random_id=0
+        )
+        return
     else:
         enemy_damage = combat['enemy_damage']
         if combat.get("enemy_role") == "bruiser":
