@@ -1,13 +1,17 @@
 import json
+import random
 import unittest
 from unittest.mock import patch
 
 from handlers.combat import (
     _hide_lower_keyboard_for_combat,
+    _select_research_event_by_chance,
+    _spawn_item,
     _will_continue_mutant_hunt,
     create_anomaly_keyboard,
     create_combat_keyboard,
     create_skills_keyboard,
+    RESEARCH_EVENTS,
 )
 from infra.state_manager import clear_combat_state, set_combat_state
 
@@ -67,6 +71,61 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         self.assertTrue(_will_continue_mutant_hunt({"mutant_hunt": 1, "location_id": "зараженный_лес"}))
         self.assertFalse(_will_continue_mutant_hunt({"mutant_hunt": 0, "location_id": "зараженный_лес"}))
         self.assertFalse(_will_continue_mutant_hunt({"mutant_hunt": 1, "location_id": "город"}))
+
+    def test_research_item_events_are_not_drowned_by_combat_events(self):
+        random.seed(7)
+        with patch("game.limited_events.get_active_limited_event", return_value=None):
+            events = [
+                _select_research_event_by_chance(45, 1.0, 1.0, "дорога_зараженный_лес", None)
+                for _ in range(5000)
+            ]
+
+        item_events = sum(1 for event in events if RESEARCH_EVENTS.get(event, {}).get("type") == "item")
+        self.assertGreater(item_events / len(events), 0.12)
+
+    def test_spawn_item_uses_location_drop_chance_as_weight_not_second_failure_roll(self):
+        class Inventory:
+            total_weight = 0
+
+            def reload(self):
+                pass
+
+        class Player:
+            current_location_id = "дорога_зараженный_лес"
+            level = 5
+            rare_find_chance = 0
+            max_weight = 20
+            inventory = Inventory()
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 1
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        trash_item = {
+            "name": "Пустая банка",
+            "category": "trash",
+            "price": 1,
+            "weight": 0.05,
+            "location_drop_chances": {"дорога_зараженный_лес": 1},
+        }
+        vk = Vk()
+
+        with patch("handlers.combat.database.get_item_by_name", return_value=None), \
+                patch("handlers.combat.database.get_items_by_category", side_effect=lambda category: [trash_item] if category == "trash" else []), \
+                patch("handlers.combat.database.get_item_location_drop_chance", return_value=1), \
+                patch("handlers.combat.database.add_item_to_inventory", return_value=True) as add_item:
+            _spawn_item(Player(), vk, 1)
+
+        add_item.assert_called_once_with(1, "Пустая банка", 1)
+        self.assertIn("Пустая банка", vk.messages.sent[0]["message"])
 
     def test_anomaly_buttons_are_callbacks(self):
         keyboard = json.loads(create_anomaly_keyboard(shells=1).get_keyboard())

@@ -139,6 +139,7 @@ ANOMALY_GUARANTEE_FLAG = "research_no_anomaly_streak"
 ANOMALY_BLIND_MISSTEP_CHANCE = 10
 ANOMALY_BLIND_ITEM_LOSS_CHANCE = 45
 SAWDUST_SOUP_RESEARCH_DROP_CHANCE = 2  # 2% среди событий "предмет": очень редкий странный лут
+RESEARCH_ITEM_EVENT_WEIGHT_MULT = 1.65
 
 
 # === События исследования ===
@@ -1313,6 +1314,8 @@ def _select_research_event_by_chance(
                 weight *= loop_event_weights[event_type]
 
         event_type = str(event_data.get("type") or "")
+        if event_type == "item":
+            weight *= RESEARCH_ITEM_EVENT_WEIGHT_MULT
         if event_type in {"enemy"}:
             weight *= limited_enemy_mult
         if event_type in {"artifact", "artifact_cluster"}:
@@ -2840,11 +2843,10 @@ def _spawn_item(player, vk, user_id: int):
         return category_items
 
     def _pick_by_location_chance(items: list[dict], location_id: str | None) -> dict | None:
-        roll = random.randint(1, 100)
         passed: list[tuple[dict, int]] = []
         for item in items:
             chance = database.get_item_location_drop_chance(item, location_id)
-            if chance > 0 and roll <= chance:
+            if chance > 0:
                 passed.append((item, chance))
         if not passed:
             return None
