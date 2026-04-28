@@ -31,19 +31,19 @@ class AccessResult:
         if self.allowed:
             if not self.warnings:
                 return ""
-            return "⚠️ Предупреждение по маршруту:\n" + "\n".join(f"• {line}" for line in self.warnings)
+            return "⚠️ Маршрут открыт, но Зона предупреждает:\n" + "\n".join(f"• {line}" for line in self.warnings)
 
         lines = [
-            "⛔ Проход закрыт.",
+            "⛔ На этот маршрут тебя пока не выпускают.",
             "",
             f"Локация: {self.location_name}",
             "",
-            "Не хватает:",
+            "Что нужно закрыть перед выходом:",
         ]
         lines.extend(f"• {reason}" for reason in self.reasons)
         if self.warnings:
             lines.append("")
-            lines.append("Дополнительно:")
+            lines.append("Что ещё стоит учесть:")
             lines.extend(f"• {warning}" for warning in self.warnings)
         return "\n".join(lines)
 

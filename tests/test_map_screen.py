@@ -51,7 +51,7 @@ class MapScreenTests(unittest.TestCase):
 
         self.assertEqual(command, "КПП")
         self.assertIn("КПП", text)
-        self.assertIn("Следующий шаг", text)
+        self.assertIn("Ближайший шаг", text)
 
     def test_danger_region_opens_road_from_kpp(self):
         command, text = get_next_map_step("science", "кпп")
@@ -63,7 +63,7 @@ class MapScreenTests(unittest.TestCase):
         command, text = get_next_map_step("science", "больница")
 
         self.assertEqual(command, "В город")
-        self.assertIn("затем иди на КПП", text)
+        self.assertIn("через КПП", text)
 
     def test_region_screen_shows_access_reason_for_locked_zone(self):
         player = DummyPlayer(level=1, rank_tier=1, current_location_id="кпп")
@@ -71,7 +71,7 @@ class MapScreenTests(unittest.TestCase):
 
         self.assertIn("закрыто", text)
         self.assertIn("уровень 3+", text)
-        self.assertIn("Кнопка маршрута: Дорога на зараженный лес", text)
+        self.assertIn("Ближайшая кнопка маршрута: Дорога на зараженный лес", text)
 
     def test_map_buttons_are_available_from_location_and_region_screen(self):
         location_keyboard = create_location_keyboard("город").get_keyboard()

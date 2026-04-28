@@ -148,7 +148,7 @@ LOCATION_METADATA: dict[str, dict[str, Any]] = {
         "tags": ["research", "military", "interior", "patrol", "ambush", "weapons", "armor"],
         "requires": {},
         "activities": ["research", "combat", "stash", "raid"],
-        "loot_profile": "military",
+        "loot_profile": "military_base",
     },
     "дорога_нии": {
         "region": "science",
@@ -170,7 +170,7 @@ LOCATION_METADATA: dict[str, dict[str, Any]] = {
         "tags": ["research", "science", "interior", "anomaly", "radiation", "data", "artifacts"],
         "requires": {},
         "activities": ["research", "combat", "anomaly", "intel"],
-        "loot_profile": "scientific",
+        "loot_profile": "nii_core",
     },
     "дорога_зараженный_лес": {
         "region": "forest",
@@ -192,7 +192,7 @@ LOCATION_METADATA: dict[str, dict[str, Any]] = {
         "tags": ["research", "forest", "interior", "mutants", "organic", "hunt", "radiation"],
         "requires": {},
         "activities": ["research", "combat", "hunt", "trophy"],
-        "loot_profile": "organic",
+        "loot_profile": "deep_forest",
     },
 }
 

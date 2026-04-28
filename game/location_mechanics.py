@@ -69,11 +69,20 @@ LOCATION_MODIFIERS = {
             "bandit": 1.05,
             "military": 1.65,
             "artifact": 0.85,
-            "stash": 1.35,
-            "trap": 1.45,
-            "military_cache": 1.85,
-            "field_lab_data": 0.65,
+            "armory_locker": 1.7,
+            "garrison_orders": 1.25,
+            "drone_alarm": 1.45,
+            "live_minefield": 1.35,
         },
+        "event_pool": [
+            "common_item",
+            "rare_item",
+            "military",
+            "armory_locker",
+            "garrison_orders",
+            "drone_alarm",
+            "live_minefield",
+        ],
         "unique_mechanic": "ambush",
         "ambush_chance": 0.10,
     },
@@ -134,15 +143,23 @@ LOCATION_MODIFIERS = {
         },
         "event_weights": {
             "mutant": 1.15,
-            "bandit": 0.55,
-            "military": 0.75,
             "artifact": 1.3,
             "anomaly": 1.45,
-            "radiation": 1.4,
-            "field_lab_data": 2.0,
-            "artifact_cluster": 1.45,
-            "psi_echo": 1.35,
+            "sealed_archive": 1.65,
+            "specimen_vault": 1.35,
+            "reactor_leak": 1.35,
+            "containment_breach": 1.5,
         },
+        "event_pool": [
+            "common_item",
+            "rare_item",
+            "artifact",
+            "anomaly",
+            "sealed_archive",
+            "specimen_vault",
+            "reactor_leak",
+            "containment_breach",
+        ],
         "unique_mechanic": "zone_mutation",
         "zone_mutation_chance": 0.10,
     },
@@ -203,14 +220,23 @@ LOCATION_MODIFIERS = {
         },
         "event_weights": {
             "mutant": 1.65,
-            "bandit": 0.55,
-            "military": 0.45,
             "artifact": 1.15,
-            "enemy": 1.25,
             "anomaly": 1.2,
-            "abandoned_camp": 1.15,
-            "blood_trail": 1.75,
+            "spore_grove": 1.3,
+            "brood_nest": 1.55,
+            "bone_cache": 1.35,
+            "pack_stalk": 1.5,
         },
+        "event_pool": [
+            "common_item",
+            "rare_item",
+            "artifact",
+            "anomaly",
+            "spore_grove",
+            "brood_nest",
+            "bone_cache",
+            "pack_stalk",
+        ],
         "unique_mechanic": "mutant_hunt",
         "mutant_hunt_chance": 0.15,
         "mutant_hunt_count": [2, 3],
@@ -306,15 +332,18 @@ REGION_GAMEPLAY_LOOPS = {
             "trap": 14,
             "bandit": 8,
             "mutant": 6,
-            "military_cache": -14,
-            "stash": -8,
+            "drone_alarm": 20,
+            "live_minefield": 16,
+            "armory_locker": -14,
+            "garrison_orders": -10,
             "survivor": -6,
             "nothing": -3,
         },
         "pressure_weights": {
             "military": 0.007,
-            "trap": 0.004,
-            "military_cache": 0.002,
+            "drone_alarm": 0.006,
+            "live_minefield": 0.004,
+            "armory_locker": 0.002,
         },
         "force_threshold": 82,
     },
@@ -352,14 +381,17 @@ REGION_GAMEPLAY_LOOPS = {
             "psi_echo": 18,
             "artifact_cluster": 14,
             "artifact": 10,
-            "field_lab_data": -10,
+            "sealed_archive": -10,
+            "specimen_vault": 10,
+            "reactor_leak": 18,
+            "containment_breach": 20,
             "nothing": -2,
         },
         "pressure_weights": {
             "anomaly": 0.006,
-            "radiation": 0.005,
-            "psi_echo": 0.004,
-            "field_lab_data": 0.003,
+            "reactor_leak": 0.005,
+            "containment_breach": 0.005,
+            "sealed_archive": 0.003,
         },
         "force_threshold": 84,
         "breakthrough_data": 3,
@@ -390,15 +422,19 @@ REGION_GAMEPLAY_LOOPS = {
         "event_deltas": {
             "blood_trail": 24,
             "mutant": 18,
-            "abandoned_camp": -10,
+            "spore_grove": 10,
+            "brood_nest": 22,
+            "pack_stalk": 20,
+            "bone_cache": -10,
             "survivor": -6,
             "nothing": -3,
             "artifact": 5,
         },
         "pressure_weights": {
             "mutant": 0.007,
-            "blood_trail": 0.006,
-            "abandoned_camp": 0.002,
+            "brood_nest": 0.006,
+            "pack_stalk": 0.006,
+            "bone_cache": 0.002,
         },
         "force_threshold": 82,
     },
@@ -510,42 +546,42 @@ def apply_region_loop_event(user_id: int | None, location_id: str, event_id: str
 
     if config.get("field") == "alert":
         if before < 55 <= pressure:
-            messages.append("📻 Патрули насторожились: в эфире больше коротких военных переговоров.")
+            messages.append("📻 В эфире стало тесно: короткие военные переговоры идут чаще, патрули стягиваются к маршруту.")
         if pressure >= int(config.get("force_threshold", 85)) and event_id not in {"military"}:
             override_event = "military"
             effects["forced_ambush"] = True
-            messages.append("🚨 Тревога сорвалась: патруль перекрывает маршрут, боя не избежать.")
+            messages.append("🚨 Тревога сорвалась: сирена захлебнулась и стихла. Патруль уже перекрывает проход, назад без боя не выйти.")
             pressure = max(35, pressure - 38)
 
     elif config.get("field") == "instability":
         data = int(state.get("data", 0) or 0)
-        if event_id == "field_lab_data":
+        if event_id in {"field_lab_data", "sealed_archive"}:
             data += 1
-            messages.append(f"🧾 Данные НИИ сохранены: {data}/{config.get('breakthrough_data', 3)} пакетов.")
+            messages.append(f"🧾 Накопители НИИ собраны в связный пакет: {data}/{config.get('breakthrough_data', 3)}.")
         if before < 60 <= pressure:
-            messages.append("🌀 НИИ нестабилен: приборы ловят всплески, аномалии становятся ближе.")
+            messages.append("🌀 Приборы ловят всплески один за другим. Корпуса НИИ будто меняют планировку прямо за спиной.")
         if pressure >= int(config.get("force_threshold", 88)) and event_id != "anomaly":
             override_event = "anomaly"
             effects["force_mutation"] = True
-            messages.append("☢️ Нестабильность достигла пика: маршрут проваливается в аномальный карман.")
+            messages.append("☢️ Нестабильность сорвалась в пик: коридор впереди провалился в аномальный карман.")
             pressure = max(45, pressure - 34)
         if data >= int(config.get("breakthrough_data", 3)):
             data -= int(config.get("breakthrough_data", 3))
             pressure = max(0, pressure - 24)
             effects["science_breakthrough"] = True
-            messages.append("🔬 Собран комплект данных: ученые смогут выжать из него практическую пользу.")
+            messages.append("🔬 Пакет данных полный. Учёные смогут вытащить из него не слухи, а рабочие координаты.")
         state["data"] = data
         _set_loop_value(user_id, location_id, "data", data)
 
     elif config.get("field") == "trail":
-        if event_id in {"blood_trail", "mutant"}:
+        if event_id in {"blood_trail", "mutant", "brood_nest", "pack_stalk"}:
             effects["organic_trophy"] = True
         if before < 55 <= pressure:
-            messages.append("🐾 Следы сходятся: стая явно ходит рядом с маршрутом.")
+            messages.append("🐾 Следы начинают сходиться в одну дугу. Стая не случайно рядом, она ведёт маршрут.")
         if pressure >= int(config.get("force_threshold", 86)) and event_id != "mutant":
             override_event = "mutant"
             effects["force_hunt"] = True
-            messages.append("🐺 Стая взяла след: тихий поиск превращается в охоту.")
+            messages.append("🐺 Лес стих. Стая взяла след, и тихий поиск превратился в охоту.")
             pressure = max(38, pressure - 40)
 
     _set_loop_value(user_id, location_id, field, pressure)
@@ -635,7 +671,14 @@ def get_event_weights(location_id: str) -> dict:
     mod = LOCATION_MODIFIERS.get(location_id)
     if not mod:
         return None
-    return mod.get("event_weights")
+    weights = dict(mod.get("event_weights") or {})
+    if "event_pool" in mod:
+        weights["__event_pool"] = set(mod.get("event_pool") or [])
+    if "required_event_tags" in mod:
+        weights["__required_tags"] = set(mod.get("required_event_tags") or [])
+    if "blocked_event_tags" in mod:
+        weights["__blocked_tags"] = set(mod.get("blocked_event_tags") or [])
+    return weights
 
 
 def get_energy_cost_mult(location_id: str) -> float:

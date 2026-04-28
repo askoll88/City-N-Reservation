@@ -1820,14 +1820,14 @@ def get_random_event(user_id: int = None) -> dict | None:
 
 # Фразы-вступления для контекста ивента
 _EVENT_INTROS = [
-    "Ты шёл по дороге... и вдруг заметил:",
-    "Что-то привлекло твоё внимание:",
-    "Зона решила напомнить о себе:",
-    "Тишина нарушилась странным событием:",
-    "Неожиданно на твоём пути:",
-    "Впереди произошло нечто необычное:",
-    "Зона живёт своей жизнью. Сегодня она показывает тебе:",
-    "Ты остановился. Впереди что-то происходит:",
+    "Дорога на миг стихла, и ты заметил:",
+    "Среди шума Зоны выделилась деталь:",
+    "Зона решила напомнить, что маршрут не бывает пустым:",
+    "Тишина треснула, как лёд под ботинком:",
+    "На пути возникло то, что лучше не игнорировать:",
+    "Впереди шевельнулась чужая история:",
+    "Зона живёт своей жизнью. Сегодня она вывела тебя к этому:",
+    "Ты остановился: впереди что-то нарушило привычный порядок дороги.",
 ]
 
 
@@ -1847,7 +1847,7 @@ def format_event_message(event: dict, stage_index: int = 0) -> str:
             stage_index = len(stages) - 1
         stage = stages[stage_index]
         msg = f"{stage['text']}\n\n"
-        msg += "Выбери действие:\n"
+        msg += "Как поступишь:\n"
         for i, choice in enumerate(stage.get("choices", []), 1):
             msg += f"{i}. {choice['label']}\n"
         # Показать номер этапа
@@ -1858,7 +1858,7 @@ def format_event_message(event: dict, stage_index: int = 0) -> str:
     # Обычное событие
     intro = get_event_intro()
     msg = f"{intro}\n\n{event['text']}\n\n"
-    msg += "Выбери действие:\n"
+    msg += "Как поступишь:\n"
     for i, choice in enumerate(event["choices"], 1):
         msg += f"{i}. {choice['label']}\n"
     return msg
@@ -1901,7 +1901,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     Если передан user_id — продвигает квестовые цепочки.
     """
     if choice_index < 0:
-        return {"message": "Неверный выбор.", "next_stage": None, "invalid": True}
+        return {"message": "Ты не успел принять решение. Дорога не любит пустых жестов.", "next_stage": None, "invalid": True}
 
     # Многоэтапное событие
     if event.get("type") == "multi_stage":
@@ -1913,7 +1913,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         choices = stage.get("choices", [])
 
         if choice_index >= len(choices):
-            return {"message": "Неверный выбор.", "next_stage": None, "invalid": True}
+            return {"message": "Такого хода здесь нет. Зона ждёт конкретного решения.", "next_stage": None, "invalid": True}
 
         choice = choices[choice_index]
 
@@ -1962,7 +1962,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
     # Обычное событие
     if choice_index >= len(event.get("choices", [])):
-        return {"message": "Неверный выбор.", "next_stage": None, "invalid": True}
+        return {"message": "Такого хода здесь нет. Зона ждёт конкретного решения.", "next_stage": None, "invalid": True}
 
     choice = event["choices"][choice_index]
     effect = choice.get("effect", {})
@@ -2008,7 +2008,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         if "money" in effect:
             player.money += effect["money"]
             loot_data["money_reward"] += effect["money"]
-        msg_tpl = effect.get("message", "Ты нашёл припасы.")
+        msg_tpl = effect.get("message", "В схроне нашлись припасы: +{money} руб., +{item}")
         return {
             "message": _render_event_message(msg_tpl, loot_data),
             "next_stage": None,
@@ -2023,7 +2023,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     # Случайный артефакт
     if effect.get("random_artifact"):
         msg = _apply_random_artifact(player)
-        return {"message": msg or effect.get("message", "Ты нашёл артефакт."), "next_stage": None, "is_final": True}
+        return {"message": msg or effect.get("message", "Артефактный след оказался настоящим."), "next_stage": None, "is_final": True}
 
     # Случайный диалог
     if effect.get("random_dialog"):
@@ -2060,7 +2060,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     if "energy" in effect:
         player.energy = max(0, player.energy + effect["energy"])
 
-    return {"message": effect.get("message", "Ничего не произошло."), "next_stage": None, "is_final": True}
+    return {"message": effect.get("message", "Дорога проглотила событие без следа. Ты идёшь дальше."), "next_stage": None, "is_final": True}
 
 
 # --- Вспомогательные функции для apply_event_choice ---
@@ -2105,8 +2105,8 @@ def _apply_random_artifact(player):
         database.add_item_to_inventory(player_id, artifact, 1)
         from handlers.quests import track_quest_artifact
         track_quest_artifact(player_id)
-        return f"Ты нашёл {artifact}!"
-    return "Артефакт рассыпался в руках..."
+        return f"Детектор вывел тебя к артефакту: {artifact}."
+    return "Артефактный след рассыпался прямо в руках, оставив только тепло на перчатках."
 
 
 def _apply_artifact_chance(player, effect=None):
@@ -2122,11 +2122,11 @@ def _apply_artifact_chance(player, effect=None):
             database.add_item_to_inventory(player_id, artifact, 1)
             from handlers.quests import track_quest_artifact
             track_quest_artifact(player_id)
-        msg_tpl = effect.get("message_ok", f"Ты нашёл {artifact or 'артефакт'}!") if effect else f"Ты нашёл {artifact or 'артефакт'}!"
+        msg_tpl = effect.get("message_ok", f"В аномальном следе проявился {artifact or 'артефакт'}.") if effect else f"В аномальном следе проявился {artifact or 'артефакт'}."
         return _render_event_message(msg_tpl, {"artifact": artifact or "артефакт"})
     else:
         _apply_hp_delta(player, -25)
-        msg_tpl = effect.get("message_fail", "Буря слишком сильна!") if effect else "Не повезло!"
+        msg_tpl = effect.get("message_fail", "Аномальный фон сорвался раньше, чем ты успел отойти.") if effect else "Аномальный фон сорвался раньше, чем ты успел отойти."
         return _render_event_message(msg_tpl, {"artifact": artifact or "артефакт"})
 
 
@@ -2136,11 +2136,11 @@ def _apply_risk_combat(player, effect=None):
         if effect and "money" in effect:
             money_gain = int(effect.get("money", 0))
             player.money += money_gain
-        msg_tpl = effect.get("message_ok", "Всё прошло успешно!") if effect else "Всё прошло успешно!"
+        msg_tpl = effect.get("message_ok", "Ты вышел из ситуации целым и забрал то, что успел.") if effect else "Ты вышел из ситуации целым и забрал то, что успел."
         return _render_event_message(msg_tpl, {"money": money_gain})
     else:
         _apply_hp_delta(player, -30)
-        msg_tpl = effect.get("message_fail", "Что-то пошло не так!") if effect else "Что-то пошло не так!"
+        msg_tpl = effect.get("message_fail", "Ситуация сорвалась: дорога ударила первой.") if effect else "Ситуация сорвалась: дорога ударила первой."
         return _render_event_message(msg_tpl, {})
 
 
@@ -2148,10 +2148,10 @@ def _apply_risk_damage(player, effect=None):
     if random.randint(1, 100) <= 40:
         _apply_hp_delta(player, -20)
         player.energy = max(0, player.energy - 15)
-        msg_tpl = effect.get("message_fail", "Тебе не повезло!") if effect else "Тебе не повезло!"
+        msg_tpl = effect.get("message_fail", "Зона забрала плату за лишний риск.") if effect else "Зона забрала плату за лишний риск."
         return _render_event_message(msg_tpl, {})
     else:
-        msg_tpl = effect.get("message_ok", "Тебе повезло!") if effect else "Тебе повезло!"
+        msg_tpl = effect.get("message_ok", "В этот раз маршрут отпустил тебя без серьёзной цены.") if effect else "В этот раз маршрут отпустил тебя без серьёзной цены."
         return _render_event_message(msg_tpl, {})
 
 
