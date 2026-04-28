@@ -27,6 +27,7 @@ from infra.state_manager import (
     clear_market_browse_state,
     set_market_my_listings_page,
     get_market_my_listings_page,
+    try_edit_or_send_ui,
     _market_browse_state,
 )
 
@@ -349,11 +350,12 @@ def _show_market_listings_page(player, vk, user_id, page,
         if category:
             msg_parts.append("Попробуй другую категорию или отключи фильтр.")
 
-        vk.messages.send(
-            user_id=user_id,
-            message="\n\n".join(msg_parts),
+        try_edit_or_send_ui(
+            vk,
+            user_id,
+            "market",
+            "\n\n".join(msg_parts),
             keyboard=create_player_market_keyboard().get_keyboard(),
-            random_id=0,
         )
         return
 
@@ -383,12 +385,7 @@ def _show_market_listings_page(player, vk, user_id, page,
                                                    sort=sort, search=search)
     keyboard_payload = _sanitize_keyboard_payload(keyboard.get_keyboard(), max_cols=2)
 
-    vk.messages.send(
-        user_id=user_id,
-        message="\n".join(lines),
-        keyboard=keyboard_payload,
-        random_id=0,
-    )
+    try_edit_or_send_ui(vk, user_id, "market", "\n".join(lines), keyboard=keyboard_payload)
 
 
 def show_market_menu(player, vk, user_id):

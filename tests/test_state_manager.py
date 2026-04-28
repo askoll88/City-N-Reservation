@@ -4,6 +4,25 @@ import unittest
 import infra.state_manager as state_manager
 
 
+class DummyMessages:
+    def __init__(self):
+        self.sent = []
+        self.edited = []
+
+    def send(self, **kwargs):
+        self.sent.append(kwargs)
+        return len(self.sent)
+
+    def edit(self, **kwargs):
+        self.edited.append(kwargs)
+        return 1
+
+
+class DummyVK:
+    def __init__(self):
+        self.messages = DummyMessages()
+
+
 class StateManagerTest(unittest.TestCase):
     def setUp(self):
         state_manager.get_combat_state().clear()
@@ -43,6 +62,18 @@ class StateManagerTest(unittest.TestCase):
         self.assertEqual(removed, 2)
         self.assertNotIn(1, state_manager.get_research_state())
         self.assertNotIn(2, state_manager.get_combat_state())
+
+    def test_try_edit_or_send_ui_is_scoped_by_screen_key(self):
+        vk = DummyVK()
+
+        state_manager.try_edit_or_send_ui(vk, 10, "map", "map-1")
+        state_manager.try_edit_or_send_ui(vk, 10, "market", "market-1")
+        state_manager.try_edit_or_send_ui(vk, 10, "map", "map-2")
+
+        self.assertEqual(len(vk.messages.sent), 2)
+        self.assertEqual(len(vk.messages.edited), 1)
+        self.assertEqual(vk.messages.edited[0]["conversation_message_id"], 1)
+        self.assertEqual(vk.messages.edited[0]["message"], "map-2")
 
 
 if __name__ == "__main__":

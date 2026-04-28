@@ -13,7 +13,7 @@ from game.constants import RESEARCH_LOCATIONS
 from game.map_access import AccessResult, can_enter_location
 from game.map_schema import get_map_location, get_locations_by_region
 from handlers.keyboards import create_inventory_keyboard, create_map_overview_keyboard, create_map_region_keyboard
-from infra.state_manager import get_ui_current_screen, set_ui_screen
+from infra.state_manager import get_ui_current_screen, set_ui_screen, try_edit_or_send_ui
 
 
 @dataclass(frozen=True)
@@ -338,7 +338,7 @@ def show_map(player, vk, user_id: int, region_id: str | None = None):
         message = format_map_overview(player)
         keyboard = create_map_overview_keyboard(current_location).get_keyboard()
 
-    vk.messages.send(user_id=user_id, message=message, keyboard=keyboard, random_id=0)
+    try_edit_or_send_ui(vk, user_id, "map", message, keyboard=keyboard)
 
 
 def handle_map_command(player, vk, user_id: int, text: str) -> bool:

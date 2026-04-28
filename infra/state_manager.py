@@ -671,6 +671,7 @@ def clear_emission_pending(user_id: int):
 
 # === Редактирование последнего сообщения ===
 _last_message_state = LockedDict()  # {user_id: {"msg_id": int, "peer_id": int}}
+_ui_message_state = LockedDict()  # {user_id: {screen_key: {"msg_id": int, "peer_id": int}}}
 
 
 def get_last_message(user_id: int) -> dict | None:
@@ -684,6 +685,48 @@ def set_last_message(user_id: int, msg_id: int, peer_id: int = None):
         "msg_id": msg_id,
         "peer_id": peer_id,
     }
+
+
+def get_ui_message(user_id: int, screen_key: str) -> dict | None:
+    """Получить последнее UI-сообщение конкретного экрана."""
+    state = _ui_message_state.get(user_id) or {}
+    return state.get(screen_key)
+
+
+def set_ui_message(user_id: int, screen_key: str, msg_id: int, peer_id: int = None):
+    """Запомнить последнее UI-сообщение конкретного экрана."""
+    def updater(current):
+        current = dict(current or {})
+        current[screen_key] = {"msg_id": msg_id, "peer_id": peer_id}
+        return current
+    _ui_message_state.update(user_id, updater)
+
+
+def try_edit_or_send_ui(vk, user_id: int, screen_key: str, message: str, keyboard=None):
+    """
+    Попытаться редактировать активное сообщение конкретного UI-экрана.
+    Если не удалось — отправить новое и запомнить его для этого экрана.
+    """
+    from infra import vk_messages
+
+    last_msg = get_ui_message(user_id, screen_key)
+    if last_msg and last_msg.get("msg_id"):
+        try:
+            vk_messages.edit(
+                vk,
+                conversation_message_id=last_msg["msg_id"],
+                message=message,
+                keyboard=keyboard,
+            )
+            return
+        except Exception:
+            pass
+
+    try:
+        msg_id = vk_messages.send(vk, user_id=user_id, message=message, keyboard=keyboard)
+        set_ui_message(user_id, screen_key, msg_id)
+    except Exception:
+        pass
 
 
 def try_edit_or_send(vk, user_id: int, message: str, keyboard=None):
