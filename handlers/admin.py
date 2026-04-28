@@ -340,6 +340,13 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         _send(vk, user_id, "Введи:\n`админ снять лот <id>`", create_admin_market_keyboard()); return True
 
     # === Текстовые команды (работают из любого состояния) ===
+    m = re.match(r"^админ:?\s+маркет\s+(on|off)$", text)
+    if m:
+        enabled = "1" if m.group(1) == "on" else "0"
+        database.set_game_setting("p2p_market_enabled", enabled)
+        message = "✅ P2P рынок включён." if enabled == "1" else "⛔ P2P рынок отключён."
+        _send(vk, user_id, message, create_admin_market_keyboard()); return True
+
     m = re.match(r"^админ\s+пользователи\s+(.+)$", original_text, flags=re.IGNORECASE)
     if m:
         query = m.group(1).strip()

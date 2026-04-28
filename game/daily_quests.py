@@ -290,17 +290,6 @@ def generate_daily_quests(seed: str = None, player_level: int | None = None, cur
     return selected[:3]
 
 
-def calculate_quest_reward(quest: dict, streak: int):
-    bonus = _get_best_streak_bonus(streak)
-    mult = bonus["multiplier"]
-    xp = int(quest["reward_xp"] * mult)
-    money = int(quest["reward_money"] * mult)
-    bonus_item = None
-    if streak in STREAK_BONUSES and STREAK_BONUSES[streak].get("bonus_item"):
-        bonus_item = STREAK_BONUSES[streak]["bonus_item"]
-    return xp, money, bonus_item
-
-
 def resolve_streak_bonus_item(streak: int):
     """
     Вернуть фактический бонусный предмет за конкретный порог стрика.

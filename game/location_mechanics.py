@@ -819,7 +819,7 @@ def get_mutant_hunt_count(location_id: str = "дорога_зараженный_
 
 def get_random_anomaly_for_location(location_id: str) -> dict:
     """Получить случайную аномалию с весами локации"""
-    import anomalies
+    from game import anomalies
 
     weights = get_anomaly_weights(location_id)
     if not weights:

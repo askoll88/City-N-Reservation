@@ -255,10 +255,7 @@ def _is_location_locked(user_id: int, location_id: str) -> bool:
         return False
 
     try:
-        with database.db_cursor() as (cursor, _):
-            cursor.execute("SELECT newbie_kit_received FROM users WHERE vk_id = %s", (user_id,))
-            row = cursor.fetchone()
-            return bool(row and row["newbie_kit_received"] == 1)
+        return bool(database.get_user_flag(user_id, "newbie_kit_received", default=0))
     except Exception:
         logger.exception("Ошибка проверки блокировки локации: user_id=%s location=%s", user_id, location_id)
         # Fail-open: лучше не блокировать игрока из-за временной ошибки БД.

@@ -471,6 +471,14 @@ class TestLocationModifiers(unittest.TestCase):
     def test_anomaly_weights_non_research(self):
         self.assertIsNone(get_anomaly_weights("город"))
 
+    def test_location_anomaly_roll_imports_game_anomalies(self):
+        from game.location_mechanics import get_random_anomaly_for_location
+
+        anomaly = get_random_anomaly_for_location("дорога_нии")
+
+        self.assertIn("type", anomaly)
+        self.assertIn("name", anomaly)
+
     # --- Event weights ---
 
     def test_event_weights_military(self):

@@ -6,12 +6,13 @@ from unittest.mock import Mock
 
 
 class DummyInventory:
-    def __init__(self, total_weight=0.0, weapons=None, armor=None, artifacts=None, backpacks=None, other=None):
+    def __init__(self, total_weight=0.0, weapons=None, armor=None, artifacts=None, backpacks=None, shells_bags=None, other=None):
         self._total_weight = total_weight
         self.weapons = weapons or []
         self.armor = armor or []
         self.artifacts = artifacts or []
         self.backpacks = backpacks or []
+        self.shells_bags = shells_bags or []
         self.other = other or []
         self.reload_calls = 0
 
@@ -26,13 +27,22 @@ class DummyInventory:
 class PlayerTransactionsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Подменяем модуль database до импорта player, чтобы тесты были изолированы
+        # Подменяем infra.database, чтобы тесты были изолированы от реальной БД.
         cls.fake_db = types.ModuleType("database")
         cls.fake_db.get_item_by_name = Mock()
         cls.fake_db.buy_item_transaction = Mock()
         cls.fake_db.sell_item_transaction = Mock()
-        sys.modules["database"] = cls.fake_db
-        cls.player_module = importlib.import_module("player")
+        cls.player_module = importlib.import_module("models.player")
+        import infra
+        cls.real_db = infra.database
+        infra.database = cls.fake_db
+        sys.modules["infra.database"] = cls.fake_db
+
+    @classmethod
+    def tearDownClass(cls):
+        import infra
+        infra.database = cls.real_db
+        sys.modules["infra.database"] = cls.real_db
 
     def setUp(self):
         self.fake_db.get_item_by_name.reset_mock()
@@ -61,7 +71,7 @@ class PlayerTransactionsTest(unittest.TestCase):
 
         self.assertTrue(success)
         self.assertIn("Ты купил ПМ", msg)
-        self.fake_db.buy_item_transaction.assert_called_once_with(42, "ПМ")
+        self.fake_db.buy_item_transaction.assert_called_once_with(42, "ПМ", merchant_id=None)
         self.assertEqual(p.money, 850)
         self.assertGreaterEqual(p.inventory.reload_calls, 1)
 
@@ -94,7 +104,7 @@ class PlayerTransactionsTest(unittest.TestCase):
         self.assertTrue(success)
         self.assertIn("Ты продал пм", msg)
         self.fake_db.sell_item_transaction.assert_called_once_with(
-            42, "ПМ", sell_bonus_pct=20
+            42, "ПМ", merchant_id=None, sell_bonus_pct=20
         )
         self.assertEqual(p.money, 360)
         self.assertGreaterEqual(p.inventory.reload_calls, 2)

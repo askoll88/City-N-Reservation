@@ -686,11 +686,6 @@ def set_last_message(user_id: int, msg_id: int, peer_id: int = None):
     }
 
 
-def clear_last_message(user_id: int):
-    """Очистить последнее сообщение"""
-    _last_message_state.pop(user_id, None)
-
-
 def try_edit_or_send(vk, user_id: int, message: str, keyboard=None):
     """
     Попытаться редактировать последнее сообщение.

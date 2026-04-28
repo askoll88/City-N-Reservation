@@ -850,14 +850,25 @@ def _get_unequip_list(player) -> str:
 
     if player.equipped_weapon:
         msg += f"• Оружие: {player.equipped_weapon} (напиши 'снять оружие')\n"
-    if player.equipped_armor:
-        msg += f"• Броня: {player.equipped_armor} (напиши 'снять броню')\n"
+
+    equipped_armor = [
+        getattr(player, "equipped_armor", None),
+        getattr(player, "equipped_armor_head", None),
+        getattr(player, "equipped_armor_body", None),
+        getattr(player, "equipped_armor_legs", None),
+        getattr(player, "equipped_armor_hands", None),
+        getattr(player, "equipped_armor_feet", None),
+    ]
+    armor_names = [name for idx, name in enumerate(equipped_armor) if name and name not in equipped_armor[:idx]]
+    if armor_names:
+        msg += f"• Броня: {', '.join(armor_names)} (напиши 'снять броню')\n"
+
     if player.equipped_backpack:
         msg += f"• Рюкзак: {player.equipped_backpack} (напиши 'снять рюкзак')\n"
     if player.equipped_device:
         msg += f"• Устройство: {player.equipped_device} (напиши 'снять устройство')\n"
 
-    if not any([player.equipped_weapon, player.equipped_armor,
+    if not any([player.equipped_weapon, armor_names,
                 player.equipped_backpack, player.equipped_device]):
         msg = "У тебя ничего не надето."
 

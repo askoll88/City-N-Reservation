@@ -40,6 +40,7 @@ def _iter_all_inventory_items(player) -> list[dict]:
         player.inventory.armor +
         player.inventory.backpacks +
         player.inventory.artifacts +
+        player.inventory.shells_bags +
         player.inventory.other
     )
 
@@ -729,61 +730,10 @@ def show_artifact_help(player, vk, user_id: int):
     vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
 
-def handle_equip_backpack(player, vk, user_id: int):
-    """Показать доступные рюкзаки"""
-    from main import create_inventory_keyboard
-
-    player.inventory.reload()
-    backpacks = player.inventory.backpacks
-
-    if not backpacks:
-        vk.messages.send(
-            user_id=user_id,
-            message="У тебя нет рюкзаков в инвентаре.",
-            keyboard=create_inventory_keyboard().get_keyboard(),
-            random_id=0
-        )
-        return
-
-    msg = "Доступные рюкзаки:\n\n"
-    for idx, b in enumerate(backpacks, 1):
-        msg += f"{idx}. {b['name']} +{b.get('backpack_bonus', 0)}кг ВЕС:{b.get('weight', 1.0)}кг\n"
-
-    msg += f"\nНадето: {player.equipped_backpack or 'нет'}\n"
-    msg += "\nНажми цифру чтобы надеть."
-
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
-
-
 def handle_unequip_backpack(player, vk, user_id: int):
     """Снять рюкзак"""
     success, msg = player.equip_backpack(None)
     vk.messages.send(user_id=user_id, message=msg, random_id=0)
-
-
-def handle_show_use_items(player, vk, user_id: int):
-    """Показать предметы для использования"""
-    from main import create_inventory_keyboard
-
-    player.inventory.reload()
-    items = player.inventory.other
-
-    if not items:
-        vk.messages.send(
-            user_id=user_id,
-            message="У тебя нет расходуемых предметов.",
-            keyboard=create_inventory_keyboard().get_keyboard(),
-            random_id=0
-        )
-        return
-
-    msg = "Доступно для использования:\n\n"
-    for idx, item in enumerate(items, 1):
-        msg += f"{idx}. {item['name']} x{item['quantity']}\n"
-
-    msg += "\nНажми цифру чтобы использовать."
-
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
 
 
 def handle_buy_item(player, item_name: str, vk, user_id: int):
@@ -1046,6 +996,7 @@ def handle_drop_item(player, item_name: str, vk, user_id: int):
         player.inventory.armor +
         player.inventory.artifacts +
         player.inventory.backpacks +
+        player.inventory.shells_bags +
         player.inventory.other
     )
 
@@ -1074,6 +1025,16 @@ def handle_drop_item(player, item_name: str, vk, user_id: int):
         vk.messages.send(
             user_id=user_id,
             message=f"❌ Сначала сними рюкзак: {item['name']}",
+            keyboard=create_inventory_keyboard().get_keyboard(),
+            random_id=0
+        )
+        return
+
+    user_data = database.get_user_by_vk(user_id) or {}
+    if item['name'] == user_data.get("equipped_shells_bag"):
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Сначала сними мешочек для гильз: {item['name']}",
             keyboard=create_inventory_keyboard().get_keyboard(),
             random_id=0
         )

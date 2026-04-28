@@ -47,18 +47,6 @@ def get_weapon_type(weapon_name):
         return "нож"  # По умолчанию
 
 
-def get_weapon_attack(weapon_name, weapons_list):
-    """Получить атаку надетого оружия"""
-    if not weapon_name:
-        return 5  # Базовый урон без оружия
-
-    for w in weapons_list:
-        if w['name'].lower() == weapon_name.lower():
-            return w.get('attack', 5)
-
-    return 5
-
-
 # Действия оружия в бою
 WEAPON_ACTIONS = {
     "пистолет": {
@@ -104,105 +92,6 @@ WEAPON_ACTIONS = {
         "special": "bleed"  # Кровотечение
     }
 }
-
-
-def perform_attack(weapon_type, weapon_attack, luck, crit_chance=5, melee_damage=5):
-    """
-    Выполнить атаку в зависимости от типа оружия
-
-    Параметры:
-    - weapon_type: тип оружия
-    - weapon_attack: базовый урон оружия
-    - luck: удача игрока
-    - crit_chance: шанс критического удара (%)
-    - melee_damage: урон ближнего боя (если нет оружия)
-    """
-    action = WEAPON_ACTIONS.get(weapon_type, WEAPON_ACTIONS["нож"])
-
-    result = {
-        "total_damage": 0,
-        "hits": 0,
-        "misses": 0,
-        "messages": [],
-        "bleed": False,
-        "crit_damage": 0,
-        "crits": 0
-    }
-
-    # Используем melee_damage если нет оружия (тип "нож")
-    actual_attack = weapon_attack if weapon_type != "нож" else melee_damage
-
-    # Определяем количество выстрелов
-    if isinstance(action["shots"], str):
-        min_shots, max_shots = map(int, action["shots"].split("-"))
-        num_shots = random.randint(min_shots, max_shots)
-    else:
-        num_shots = action["shots"]
-
-    # Базовый шанс промаха (уменьшается от удачи)
-    base_miss_chance = action["miss_chance"]
-    miss_chance = max(5, base_miss_chance - luck * 2)  # Минимум 5%
-
-    # Для дробовика - особый расчёт
-    if action.get("special") == "scatter":
-        # Дробовик - 8 дробинок, каждая с шансом попадания
-        pellets = 8
-        for _ in range(pellets):
-            if random.randint(1, 100) > miss_chance:
-                damage = int(weapon_attack * action["damage_multiplier"])
-
-                # Проверка на крит
-                is_crit = random.randint(1, 100) <= crit_chance
-                if is_crit:
-                    damage = int(damage * 1.5)  # 50% бонус к урону
-                    result["crits"] += 1
-                    result["crit_damage"] += damage - int(weapon_attack * action["damage_multiplier"])
-
-                result["total_damage"] += damage
-                result["hits"] += 1
-            else:
-                result["misses"] += 1
-
-        result["messages"].append(
-            f"💥 Дробовик: {result['hits']}/{pellets} дробин попало ({result['total_damage']} урона)"
-        )
-    else:
-        # Обычное оружие
-        for _ in range(num_shots):
-            if random.randint(1, 100) > miss_chance:
-                damage = int(weapon_attack * action["damage_multiplier"])
-
-                # Проверка на крит
-                is_crit = random.randint(1, 100) <= crit_chance
-                if is_crit:
-                    damage = int(damage * 1.5)  # 50% бонус к урону
-                    result["crits"] += 1
-                    result["crit_damage"] += damage // 2  # Дополнительный урон от крита
-
-                result["total_damage"] += damage
-                result["hits"] += 1
-            else:
-                result["misses"] += 1
-
-        if num_shots == 1:
-            result["messages"].append(f"🔫 Выстрел: {result['hits']} попадание ({result['total_damage']} урона)")
-        else:
-            result["messages"].append(
-                f"📍 Очередь: {result['hits']}/{num_shots} попаданий ({result['total_damage']} урона)"
-            )
-
-    # Добавляем информацию о критических ударах
-    if result["crits"] > 0:
-        result["messages"].append(f"💥КРИТ! x{result['crits']} — +{result['crit_damage']} урона!")
-
-    # Шанс кровотечения для ножа
-    if action.get("special") == "bleed":
-        bleed_chance = 30 + luck * 3  # 30-60%
-        if random.randint(1, 100) <= bleed_chance:
-            result["bleed"] = True
-            result["messages"].append("🔪Кровотечение! Враг истекает кровью.")
-
-    return result
 
 
 ENEMIES = {

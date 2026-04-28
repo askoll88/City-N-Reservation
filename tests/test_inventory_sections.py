@@ -26,6 +26,7 @@ class DummyInventory:
         self.armor = [{"name": "Куртка", "quantity": 1, "defense": 5, "weight": 2.0}]
         self.backpacks = [{"name": "Рюкзак", "quantity": 1, "backpack_bonus": 10, "weight": 1.5}]
         self.artifacts = [{"name": "Медуза", "quantity": 1, "weight": 0.5}]
+        self.shells_bags = []
         self.other = [{"name": "Бинт", "quantity": 2, "weight": 0.1}]
 
 

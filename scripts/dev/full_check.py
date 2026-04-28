@@ -74,19 +74,21 @@ else:
 print("\n📋 3. ПРОВЕРКА ИМПОРТОВ")
 print("-" * 60)
 
-required_modules = [
-    'vk_api',
-    'psycopg2',
-    'dotenv',
-]
+required_modules = {
+    'vk_api': 'vk-api',
+    'psycopg2': 'psycopg2-binary',
+    'dotenv': 'python-dotenv',
+}
+missing_packages = []
 
-for module in required_modules:
+for module, package in required_modules.items():
     try:
         __import__(module)
         print(f"✅ Модуль {module} доступен")
     except ImportError as e:
         msg = f"❌ Модуль {module} не установлен: {e}"
         errors.append(msg)
+        missing_packages.append(package)
         print(f"   {msg}")
 
 # ═══════════════════════════════════════════════════════
@@ -98,6 +100,8 @@ print("-" * 60)
 # Проверка на частые проблемы
 for filepath in python_files:
     try:
+        if os.path.normpath(filepath) == os.path.normpath("./scripts/dev/full_check.py"):
+            continue
         with open(filepath, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         
@@ -178,12 +182,17 @@ if os.path.exists('requirements.txt'):
     with open('requirements.txt', 'r', encoding='utf-8') as f:
         req_content = f.read()
     
-    if 'vk_api' not in req_content:
-        recommendations.append("• Добавить vk_api в requirements.txt")
+    if 'vk-api' not in req_content:
+        recommendations.append("• Добавить vk-api в requirements.txt")
     if 'psycopg2-binary' not in req_content and 'psycopg2' not in req_content:
         recommendations.append("• Добавить psycopg2-binary в requirements.txt")
     if 'python-dotenv' not in req_content:
         recommendations.append("• Добавить python-dotenv в requirements.txt")
+
+for package in missing_packages:
+    recommendation = f"• Установить {package}"
+    if recommendation not in recommendations:
+        recommendations.append(recommendation)
 
 if not recommendations:
     print("✅ Нет дополнительных рекомендаций")

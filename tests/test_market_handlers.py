@@ -19,6 +19,11 @@ class DummyVK:
         self.messages = DummyVKMessages()
 
 
+class DummyPlayer:
+    level = 10
+    money = 1000
+
+
 class MarketHandlersTest(unittest.TestCase):
     def setUp(self):
         self.vk = DummyVK()
@@ -38,20 +43,54 @@ class MarketHandlersTest(unittest.TestCase):
         self.assertTrue(handled)
         create_listing_mock.assert_called_once_with(1, "ПМ", 200, 2)
 
-    @patch("handlers.market.create_player_market_keyboard", return_value=DummyKeyboard())
-    @patch("handlers.market.database.buy_market_listing")
-    def test_handle_market_buy_listing(self, buy_listing_mock, _kbd_mock):
-        buy_listing_mock.return_value = {"success": True, "message": "bought"}
+    @patch("handlers.market.create_purchase_confirm_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.market.database.get_item_by_name", return_value={"name": "ПМ", "category": "weapons", "attack": 15})
+    @patch("handlers.market.database.get_market_listing_info")
+    def test_handle_market_buy_listing_starts_confirmation(self, listing_info_mock, _item_mock, _kbd_mock):
+        listing_info_mock.return_value = {
+            "seller_vk_id": 2,
+            "item_name": "ПМ",
+            "quantity": 1,
+            "price_per_item": 200,
+            "category": "weapons",
+            "rarity": "common",
+        }
 
         handled = market.handle_market_buy_listing(
-            player=None,
+            player=DummyPlayer(),
             vk=self.vk,
             user_id=1,
             text="купить лот 15",
         )
 
         self.assertTrue(handled)
+        listing_info_mock.assert_called_once_with(15)
+        self.vk.messages.send.assert_called_once()
+
+    @patch("handlers.market.create_player_market_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.quests.track_quest_market_buy")
+    @patch("handlers.market.database.buy_market_listing")
+    def test_handle_market_confirm_purchase_buys_listing(self, buy_listing_mock, _quest_mock, _kbd_mock):
+        buy_listing_mock.return_value = {"success": True, "message": "bought"}
+        market.set_pending_purchase(1, {
+            "listing_id": 15,
+            "item_name": "ПМ",
+            "quantity": 1,
+            "price_per_item": 200,
+            "total_price": 200,
+            "seller_vk_id": 2,
+        })
+
+        handled = market.handle_market_confirm_purchase(
+            player=DummyPlayer(),
+            vk=self.vk,
+            user_id=1,
+            text="подтвердить",
+        )
+
+        self.assertTrue(handled)
         buy_listing_mock.assert_called_once_with(1, 15)
+        market.clear_pending_purchase(1)
 
     @patch("handlers.market.create_player_market_keyboard", return_value=DummyKeyboard())
     @patch("handlers.market.database.cancel_market_listing")

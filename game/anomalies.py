@@ -392,27 +392,6 @@ def get_artifact_from_anomaly(anomaly_type: str) -> str | None:
     return random.choice(artifacts_list)
 
 
-def has_anomaly_detector(player) -> bool:
-    """Проверить, есть ли у игрока детектор аномалий"""
-    # Проверяем в экипированных устройствах
-    equipped_device = getattr(player, 'equipped_device', None)
-    if equipped_device:
-        device_lower = equipped_device.lower()
-        for device_name in DEVICES:
-            if device_name.lower() in device_lower or device_lower in device_name.lower():
-                return True
-
-    # Проверяем в инвентаре
-    player.inventory.reload()
-    for item in player.inventory.other:
-        item_name_lower = item['name'].lower()
-        for device_name in DEVICES:
-            if device_name.lower() in item_name_lower:
-                return True
-
-    return False
-
-
 def get_equipped_detector(player) -> dict | None:
     """Получить экипированный детектор и его бонусы"""
     equipped_device = getattr(player, 'equipped_device', None)
@@ -452,11 +431,4 @@ def get_detector_bonus(player, artifact_type: str = None, is_rare: bool = False,
 
     return bonus
 
-
-def get_detector_guaranteed_artifact(player) -> bool:
-    """Проверить, гарантирует ли детектор хотя бы один артефакт"""
-    detector = get_equipped_detector(player)
-    if not detector:
-        return False
-    return detector.get("effect") == "compass"
 

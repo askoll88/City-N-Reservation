@@ -1553,7 +1553,7 @@ def _apply_blind_anomaly_loss(user_id: int, player) -> str:
 
 def _handle_anomaly(player, vk, user_id: int):
     """Обработка попадания в аномалию"""
-    import anomalies as anomalies_module
+    from game import anomalies as anomalies_module
     from infra.state_manager import set_anomaly_state
     _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
 
@@ -1672,7 +1672,7 @@ def _handle_anomaly(player, vk, user_id: int):
 
 def handle_anomaly_action(player, vk, user_id: int, action: str):
     """Обработка действия игрока с аномалией"""
-    import anomalies as anomalies_module
+    from game import anomalies as anomalies_module
     from infra.state_manager import get_anomaly_data, clear_anomaly_state, set_pending_loot_choice
 
     _, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
@@ -2579,16 +2579,6 @@ def _spawn_artifact(player, vk, user_id: int):
 def handle_explore(player, vk, user_id: int):
     """Исследовать локацию - показать меню выбора времени"""
     show_explore_menu(player, vk, user_id)
-
-
-def _handle_found_something(player, vk, user_id: int):
-    """Обработка найденного предмета/врага"""
-    encounter_type = random.randint(1, 100)
-    
-    if encounter_type <= 50:
-        _spawn_enemy(player, vk, user_id)
-    else:
-        _spawn_item(player, vk, user_id)
 
 
 def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: bool = True):

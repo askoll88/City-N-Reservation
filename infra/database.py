@@ -8,7 +8,6 @@ import math
 import os
 import random
 import threading
-import time
 import hashlib
 import json
 from contextlib import contextmanager
@@ -16,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import psycopg2
-from psycopg2 import pool, OperationalError, DatabaseError, InterfaceError
+from psycopg2 import pool, OperationalError, InterfaceError
 from psycopg2.extras import RealDictCursor
 
 from infra import config
@@ -136,40 +135,6 @@ def db_cursor():
         raise
     finally:
         release_connection(conn, close=close_conn)
-
-
-# ---------------------------------------------------------------------------
-# Retry-декоратор для нестабильных соединений
-# ---------------------------------------------------------------------------
-
-def with_retry(max_retries=None, delay=None):
-    if max_retries is None:
-        max_retries = config.DB_MAX_RETRIES
-    if delay is None:
-        delay = config.DB_RETRY_DELAY
-
-    def decorator(func):
-        from functools import wraps
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exc = None
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except (OperationalError, DatabaseError) as e:
-                    last_exc = e
-                    logger.warning(
-                        "БД ошибка в %s, попытка %d/%d: %s",
-                        func.__name__, attempt + 1, max_retries, e,
-                    )
-                    if attempt < max_retries - 1:
-                        time.sleep(delay * (attempt + 1))
-            raise last_exc
-
-        return wrapper
-
-    return decorator
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +285,8 @@ def init_db():
                 item_id         INTEGER     NOT NULL REFERENCES items(id) ON DELETE RESTRICT,
                 item_name       VARCHAR(100) NOT NULL,
                 quantity        INTEGER     NOT NULL CHECK (quantity > 0),
+                item_level      INTEGER     NOT NULL DEFAULT 1,
+                item_rank       VARCHAR(20) NOT NULL DEFAULT 'common',
                 price_per_item  INTEGER     NOT NULL CHECK (price_per_item > 0),
                 listing_fee     INTEGER     NOT NULL DEFAULT 0,
                 sale_fee        INTEGER     NOT NULL DEFAULT 0,
@@ -336,6 +303,14 @@ def init_db():
             ALTER TABLE market_listings
             ADD COLUMN IF NOT EXISTS expired_notified BOOLEAN NOT NULL DEFAULT FALSE
         """)
+        cursor.execute("""
+            ALTER TABLE market_listings
+            ADD COLUMN IF NOT EXISTS item_level INTEGER NOT NULL DEFAULT 1
+        """)
+        cursor.execute("""
+            ALTER TABLE market_listings
+            ADD COLUMN IF NOT EXISTS item_rank VARCHAR(20) NOT NULL DEFAULT 'common'
+        """)
 
         # -- market_transactions -------------------------------------------
         cursor.execute("""
@@ -347,11 +322,21 @@ def init_db():
                 item_id         INTEGER     NOT NULL REFERENCES items(id) ON DELETE RESTRICT,
                 item_name       VARCHAR(100) NOT NULL,
                 quantity        INTEGER     NOT NULL,
+                item_level      INTEGER     NOT NULL DEFAULT 1,
+                item_rank       VARCHAR(20) NOT NULL DEFAULT 'common',
                 price_per_item  INTEGER     NOT NULL,
                 total_price     INTEGER     NOT NULL,
                 sale_fee        INTEGER     NOT NULL,
                 created_at      TIMESTAMP   NOT NULL DEFAULT NOW()
             )
+        """)
+        cursor.execute("""
+            ALTER TABLE market_transactions
+            ADD COLUMN IF NOT EXISTS item_level INTEGER NOT NULL DEFAULT 1
+        """)
+        cursor.execute("""
+            ALTER TABLE market_transactions
+            ADD COLUMN IF NOT EXISTS item_rank VARCHAR(20) NOT NULL DEFAULT 'common'
         """)
 
         # -- npc_shop_stock -----------------------------------------------
@@ -708,12 +693,6 @@ def _insert_item(cursor, item: tuple):
                 location_drop_chances=EXCLUDED.location_drop_chances
         """, (name, category, description, price, attack, defense, weight, backpack_bonus, drop_chance, json.dumps(location_drop_chances, ensure_ascii=False)))
 
-    elif len(item) == 11:
-        name, category, description, price, attack, defense, weight, \
-            backpack_bonus, rarity, anomaly_type, bonus_type = item
-        # этот формат не используется — оставлен для совместимости
-        pass
-
     elif len(item) in {12, 13, 14}:
         name, category, description, price, attack, defense, weight, \
             backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value = item[:12]
@@ -743,6 +722,8 @@ def _insert_item(cursor, item: tuple):
         """, (name, category, description, price, attack, defense, weight,
               backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value,
               resolved_drop_chance, json.dumps(resolved_location_drop_chances, ensure_ascii=False)))
+    else:
+        raise ValueError(f"Unsupported item tuple format for {item[0] if item else '<empty>'}: {len(item)} fields")
 
 
 # ---------------------------------------------------------------------------
@@ -815,12 +796,11 @@ def _build_user_dict(user_row: dict, equipment_rows: list, flags_rows: list) -> 
         "backpack":   "equipped_backpack",
         "device":     "equipped_device",
         "shells_bag": "equipped_shells_bag",
-        "artifact_1": "equipped_artifact_1",
-        "artifact_2": "equipped_artifact_2",
-        "artifact_3": "equipped_artifact_3",
         # legacy поле — оставляем для совместимости
         "armor":      "equipped_armor",
     }
+    for idx in range(1, config.MAX_ARTIFACT_SLOTS + 1):
+        slot_to_field[f"artifact_{idx}"] = f"equipped_artifact_{idx}"
     # Дефолты
     for field in slot_to_field.values():
         result.setdefault(field, None)
@@ -915,10 +895,9 @@ _EQUIPMENT_FIELDS = {
     "equipped_backpack":     "backpack",
     "equipped_device":       "device",
     "equipped_shells_bag":   "shells_bag",
-    "equipped_artifact_1":   "artifact_1",
-    "equipped_artifact_2":   "artifact_2",
-    "equipped_artifact_3":   "artifact_3",
 }
+for _idx in range(1, config.MAX_ARTIFACT_SLOTS + 1):
+    _EQUIPMENT_FIELDS[f"equipped_artifact_{_idx}"] = f"artifact_{_idx}"
 
 
 def update_user_stats(vk_id: int, **fields):
@@ -1218,6 +1197,13 @@ def add_item_to_inventory(
     item_level: int | None = None,
     item_rank: str | None = None,
 ) -> bool:
+    try:
+        safe_qty = int(quantity)
+    except (TypeError, ValueError):
+        return False
+    if safe_qty <= 0:
+        return False
+
     with db_cursor() as (cursor, _):
         cursor.execute("SELECT id, level FROM users WHERE vk_id = %s", (vk_id,))
         user = cursor.fetchone()
@@ -1251,11 +1237,18 @@ def add_item_to_inventory(
                     THEN EXCLUDED.item_rank
                     ELSE user_inventory.item_rank
                 END
-        """, (user["id"], item["id"], quantity, item_level, item_rank))
+        """, (user["id"], item["id"], safe_qty, item_level, item_rank))
     return True
 
 
 def remove_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+    try:
+        safe_qty = int(quantity)
+    except (TypeError, ValueError):
+        return False
+    if safe_qty <= 0:
+        return False
+
     with db_cursor() as (cursor, _):
         cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
         user = cursor.fetchone()
@@ -1271,7 +1264,9 @@ def remove_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) ->
             UPDATE user_inventory
             SET quantity = quantity - %s
             WHERE user_id = %s AND item_id = %s AND quantity >= %s
-        """, (quantity, user["id"], item["id"], quantity))
+        """, (safe_qty, user["id"], item["id"], safe_qty))
+        if cursor.rowcount <= 0:
+            return False
 
         cursor.execute("""
             DELETE FROM user_inventory
@@ -1394,6 +1389,13 @@ def craft_item_transaction(
 
 
 def drop_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> dict:
+    try:
+        safe_qty = int(quantity)
+    except (TypeError, ValueError):
+        return {"success": False, "message": "Количество должно быть числом"}
+    if safe_qty <= 0:
+        return {"success": False, "message": "Количество должно быть больше нуля"}
+
     with db_cursor() as (cursor, _):
         cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
         user = cursor.fetchone()
@@ -1412,10 +1414,10 @@ def drop_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> d
         inv = cursor.fetchone()
         if not inv:
             return {"success": False, "message": f"У тебя нет '{item_name}'"}
-        if inv["quantity"] < quantity:
+        if inv["quantity"] < safe_qty:
             return {"success": False, "message": f"У тебя только {inv['quantity']} шт."}
 
-        if inv["quantity"] == quantity:
+        if inv["quantity"] == safe_qty:
             cursor.execute(
                 "DELETE FROM user_inventory WHERE user_id = %s AND item_id = %s",
                 (user["id"], item["id"]),
@@ -1424,9 +1426,9 @@ def drop_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) -> d
             cursor.execute("""
                 UPDATE user_inventory SET quantity = quantity - %s
                 WHERE user_id = %s AND item_id = %s
-            """, (quantity, user["id"], item["id"]))
+            """, (safe_qty, user["id"], item["id"]))
 
-    return {"success": True, "message": f"✅ Ты выбросил {quantity} шт. '{item_name}'"}
+    return {"success": True, "message": f"✅ Ты выбросил {safe_qty} шт. '{item_name}'"}
 
 
 # ---------------------------------------------------------------------------
@@ -2493,7 +2495,7 @@ def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quant
             }
 
         cursor.execute("""
-            SELECT quantity
+            SELECT quantity, item_level, item_rank
             FROM user_inventory
             WHERE user_id = %s AND item_id = %s
             FOR UPDATE
@@ -2504,6 +2506,21 @@ def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quant
             return {
                 "success": False,
                 "message": f"Недостаточно предметов. У тебя: {have}, нужно: {quantity}.",
+            }
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM user_equipment
+            WHERE user_id = %s AND item_name = %s
+            """,
+            (seller["id"], item["name"]),
+        )
+        equipped_cnt = int((cursor.fetchone() or {}).get("cnt", 0))
+        if equipped_cnt > 0 and int(inv["quantity"]) - int(quantity) < equipped_cnt:
+            return {
+                "success": False,
+                "message": f"Нельзя выставить надетый предмет '{item['name']}'. Сначала сними его.",
             }
 
         total_price = price_per_item * quantity
@@ -2527,16 +2544,22 @@ def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quant
 
         cursor.execute("""
             INSERT INTO market_listings (
-                seller_vk_id, item_id, item_name, quantity, price_per_item,
+                seller_vk_id, item_id, item_name, quantity, item_level, item_rank, price_per_item,
                 listing_fee, expires_at
             )
             VALUES (
-                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s,
                 NOW() + (%s * INTERVAL '1 hour')
             )
             RETURNING id, expires_at
         """, (
-            vk_id, item["id"], item["name"], quantity, price_per_item,
+            vk_id,
+            item["id"],
+            item["name"],
+            quantity,
+            int(inv.get("item_level", 1) or 1),
+            normalize_weapon_rank(inv.get("item_rank"), item),
+            price_per_item,
             listing_fee, config.MARKET_LISTING_TTL_HOURS
         ))
         new_lot = cursor.fetchone()
@@ -2786,11 +2809,25 @@ def buy_market_listing(vk_id: int, listing_id: int) -> dict:
         """, (seller_payout, lot["seller_vk_id"]))
 
         cursor.execute("""
-            INSERT INTO user_inventory (user_id, item_id, quantity)
-            VALUES (%s, %s, %s)
+            INSERT INTO user_inventory (user_id, item_id, quantity, item_level, item_rank)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (user_id, item_id)
-            DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
-        """, (buyer["id"], lot["item_id"], lot["quantity"]))
+            DO UPDATE SET
+                quantity = user_inventory.quantity + EXCLUDED.quantity,
+                item_level = GREATEST(user_inventory.item_level, EXCLUDED.item_level),
+                item_rank = CASE
+                    WHEN array_position(ARRAY['common','uncommon','rare','epic','legendary'], EXCLUDED.item_rank)
+                       > array_position(ARRAY['common','uncommon','rare','epic','legendary'], COALESCE(user_inventory.item_rank, 'common'))
+                    THEN EXCLUDED.item_rank
+                    ELSE user_inventory.item_rank
+                END
+        """, (
+            buyer["id"],
+            lot["item_id"],
+            lot["quantity"],
+            int(lot.get("item_level", 1) or 1),
+            normalize_weapon_rank(lot.get("item_rank"), {"category": "weapons"} if lot.get("item_rank") else None),
+        ))
 
         cursor.execute("""
             UPDATE market_listings
@@ -2804,12 +2841,13 @@ def buy_market_listing(vk_id: int, listing_id: int) -> dict:
         cursor.execute("""
             INSERT INTO market_transactions (
                 listing_id, seller_vk_id, buyer_vk_id, item_id, item_name,
-                quantity, price_per_item, total_price, sale_fee
+                quantity, item_level, item_rank, price_per_item, total_price, sale_fee
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             listing_id, lot["seller_vk_id"], vk_id, lot["item_id"], lot["item_name"],
-            lot["quantity"], lot["price_per_item"], total_price, sale_fee
+            lot["quantity"], int(lot.get("item_level", 1) or 1), lot.get("item_rank", "common"),
+            lot["price_per_item"], total_price, sale_fee
         ))
 
     return {
@@ -2853,11 +2891,25 @@ def cancel_market_listing(vk_id: int, listing_id: int) -> dict:
             return {"success": False, "message": "Продавец не найден."}
 
         cursor.execute("""
-            INSERT INTO user_inventory (user_id, item_id, quantity)
-            VALUES (%s, %s, %s)
+            INSERT INTO user_inventory (user_id, item_id, quantity, item_level, item_rank)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (user_id, item_id)
-            DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
-        """, (seller["id"], lot["item_id"], lot["quantity"]))
+            DO UPDATE SET
+                quantity = user_inventory.quantity + EXCLUDED.quantity,
+                item_level = GREATEST(user_inventory.item_level, EXCLUDED.item_level),
+                item_rank = CASE
+                    WHEN array_position(ARRAY['common','uncommon','rare','epic','legendary'], EXCLUDED.item_rank)
+                       > array_position(ARRAY['common','uncommon','rare','epic','legendary'], COALESCE(user_inventory.item_rank, 'common'))
+                    THEN EXCLUDED.item_rank
+                    ELSE user_inventory.item_rank
+                END
+        """, (
+            seller["id"],
+            lot["item_id"],
+            lot["quantity"],
+            int(lot.get("item_level", 1) or 1),
+            normalize_weapon_rank(lot.get("item_rank"), {"category": "weapons"} if lot.get("item_rank") else None),
+        ))
 
         cursor.execute("""
             UPDATE market_listings
@@ -2975,20 +3027,6 @@ def get_items_by_category(category: str) -> list[dict]:
     return by_category.get(category, [])
 
 
-def get_items_by_rarity(rarity: str) -> list[dict]:
-    all_items, _, _ = _get_cached_items()
-    return [i for i in all_items.values() if i.get("rarity") == rarity]
-
-
-def get_artifacts_by_rarity(rarity: str) -> list[dict]:
-    artifact_categories = {"artifacts", "rare_artifacts", "legendary_artifacts"}
-    all_items, _, _ = _get_cached_items()
-    return [
-        i for i in all_items.values()
-        if i.get("rarity") == rarity and i.get("category") in artifact_categories
-    ]
-
-
 def get_all_items() -> list[dict]:
     all_items, _, _ = _get_cached_items()
     return list(all_items.values())
@@ -3013,13 +3051,6 @@ def get_armor_type(item_name: str) -> str | None:
     if any(k in name for k in ["ботинк", "кед", "туфл", "сапог", "берц"]):
         return "feet"
     return None
-
-
-def get_random_trash(count: int = 3) -> list[dict]:
-    import random
-    _, by_cat, _ = _get_cached_items()
-    trash = by_cat.get("trash", [])
-    return random.sample(trash, min(count, len(trash))) if trash else []
 
 
 def get_shells_info(vk_id: int) -> dict:
@@ -3094,54 +3125,6 @@ def add_shells(vk_id: int, quantity: int) -> tuple[bool, str]:
     return True, f"Добавлено {actual_add} гильз"
 
 
-def get_loot_from_human(player_luck: int = 5) -> list[dict]:
-    import random
-    _, by_cat, _ = _get_cached_items()
-    weapons = by_cat.get("weapons", [])
-    armor   = by_cat.get("armor", [])
-    trash   = by_cat.get("trash", [])
-    consumables = by_cat.get("consumables", [])
-
-    luck_bonus = max(0, player_luck - 10) // 5
-    loot = []
-
-    if trash:
-        loot.extend(random.sample(trash, min(1, len(trash))))
-
-    roll = random.randint(1, 100)
-    weapon_chance = 7 + luck_bonus
-    armor_chance  = 7 + luck_bonus
-    consumable_chance = 31 + luck_bonus
-
-    if roll <= weapon_chance and weapons:
-        loot.append(random.choice(weapons))
-    elif roll <= weapon_chance + armor_chance and armor:
-        loot.append(random.choice(armor))
-    elif roll <= weapon_chance + armor_chance + consumable_chance and consumables:
-        loot.append(random.choice(consumables))
-    elif trash:
-        loot.append(random.choice(trash))
-
-    return loot
-
-
-def get_loot_from_mutant(player_luck: int = 5) -> list[dict]:
-    import random
-    _, by_cat, _ = _get_cached_items()
-    trash = by_cat.get("trash", [])
-    consumables = by_cat.get("consumables", [])
-
-    loot = []
-    if trash:
-        loot.extend(random.sample(trash, min(random.randint(2, 4), len(trash))))
-
-    luck_bonus = max(0, player_luck - 10) // 5
-    if consumables and random.randint(1, 100) <= 40 + luck_bonus:
-        loot.append(random.choice(consumables))
-
-    return loot
-
-
 # ---------------------------------------------------------------------------
 # Артефакты
 # ---------------------------------------------------------------------------
@@ -3188,16 +3171,16 @@ def equip_artifact(vk_id: int, artifact_name: str) -> dict:
     if not in_inv:
         return {"success": False, "message": "Артефакт не найден в инвентаре"}
 
-    equipped = [user.get(f"equipped_artifact_{i}") for i in range(1, 4)]
+    max_slots = max(1, min(config.MAX_ARTIFACT_SLOTS, int(user.get("artifact_slots", 3) or 3)))
+    equipped = [user.get(f"equipped_artifact_{i}") for i in range(1, max_slots + 1)]
     if artifact_name in equipped:
         return {"success": False, "message": "Этот артефакт уже экипирован"}
 
-    max_slots = user.get("artifact_slots", 3)
     used_slots = sum(1 for s in equipped if s)
     if used_slots >= max_slots:
         return {"success": False, "message": f"Недостаточно слотов! Занято: {used_slots}/{max_slots}"}
 
-    for i in range(1, 4):
+    for i in range(1, max_slots + 1):
         if not user.get(f"equipped_artifact_{i}"):
             update_user_stats(vk_id, **{f"equipped_artifact_{i}": artifact_name})
             return {"success": True, "message": f"✅ Артефакт {artifact_name} экипирован!"}
@@ -3210,7 +3193,7 @@ def unequip_artifact(vk_id: int, artifact_name: str) -> dict:
     if not user:
         return {"success": False, "message": "Пользователь не найден"}
 
-    for i in range(1, 4):
+    for i in range(1, config.MAX_ARTIFACT_SLOTS + 1):
         if user.get(f"equipped_artifact_{i}") == artifact_name:
             update_user_stats(vk_id, **{f"equipped_artifact_{i}": ""})
             return {"success": True, "message": f"✅ Артефакт {artifact_name} снят!"}
@@ -3222,7 +3205,11 @@ def get_equipped_artifacts(vk_id: int) -> list:
     user = get_user_by_vk(vk_id)
     if not user:
         return []
-    return [user[f"equipped_artifact_{i}"] for i in range(1, 4) if user.get(f"equipped_artifact_{i}")]
+    return [
+        user[f"equipped_artifact_{i}"]
+        for i in range(1, config.MAX_ARTIFACT_SLOTS + 1)
+        if user.get(f"equipped_artifact_{i}")
+    ]
 
 
 def get_artifact_bonuses(vk_id: int) -> dict:
@@ -3274,7 +3261,7 @@ def get_artifact_bonuses(vk_id: int) -> dict:
 def roll_artifact_from_anomaly(anomaly_type: str, luck: int, detector_bonus: int, chance_multiplier: float = 1.0) -> dict | None:
     """Попытаться получить артефакт из аномалии с броском гильзы"""
     import random
-    from anomalies import ANOMALIES
+    from game.anomalies import ANOMALIES
 
     if anomaly_type not in ANOMALIES:
         return None

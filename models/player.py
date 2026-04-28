@@ -171,14 +171,14 @@ class Inventory:
         """Общий вес инвентаря"""
         total = 0.0
         for item in (self.weapons + self.armor + self.backpacks +
-                     self.artifacts + self.other):
+                     self.artifacts + self.shells_bags + self.other):
             total += item.get('weight', 1.0) * item.get('quantity', 1)
         return round(total, 1)
 
     def is_empty(self) -> bool:
         """Проверить, пуст ли инвентарь"""
         return not (self.weapons or self.armor or self.artifacts or
-                    self.backpacks or self.other)
+                    self.backpacks or self.shells_bags or self.other)
 
     def __str__(self) -> str:
         """Строковое представление инвентаря"""
@@ -314,9 +314,8 @@ class Player:
         self.equipped_armor_feet = self._data.get('equipped_armor_feet')
 
         # Экипированные артефакты
-        self.equipped_artifact_1 = self._data.get('equipped_artifact_1')
-        self.equipped_artifact_2 = self._data.get('equipped_artifact_2')
-        self.equipped_artifact_3 = self._data.get('equipped_artifact_3')
+        for idx in range(1, game_config.MAX_ARTIFACT_SLOTS + 1):
+            setattr(self, f"equipped_artifact_{idx}", self._data.get(f"equipped_artifact_{idx}"))
 
         # Загружаем бонусы от артефактов
         self._artifact_bonuses = self._get_artifact_bonuses()
@@ -438,7 +437,7 @@ class Player:
         detector_bonus = 0
         if self.equipped_device:
             try:
-                from anomalies import get_detector_bonus
+                from game.anomalies import get_detector_bonus
                 detector_bonus = get_detector_bonus(self)
             except:
                 pass
@@ -652,14 +651,11 @@ class Player:
     @property
     def equipped_artifacts(self) -> list:
         """Список экипированных артефактов"""
-        artifacts = []
-        if self.equipped_artifact_1:
-            artifacts.append(self.equipped_artifact_1)
-        if self.equipped_artifact_2:
-            artifacts.append(self.equipped_artifact_2)
-        if self.equipped_artifact_3:
-            artifacts.append(self.equipped_artifact_3)
-        return artifacts
+        return [
+            name
+            for idx in range(1, game_config.MAX_ARTIFACT_SLOTS + 1)
+            if (name := getattr(self, f"equipped_artifact_{idx}", None))
+        ]
 
     @property
     def location(self) -> Location:
@@ -1285,9 +1281,6 @@ class Player:
         # Пересчитываем общую защиту
         self._recalc_armor_defense()
 
-        # Обновляем old-style поле для совместимости
-        self.equipped_armor = armor_name
-
         return True, f"Надета броня: {armor_name}! Защита: +{self.armor_defense}"
 
     def _recalc_armor_defense(self):
@@ -1375,6 +1368,7 @@ class Player:
             self.inventory.armor +
             self.inventory.artifacts +
             self.inventory.backpacks +
+            self.inventory.shells_bags +
             self.inventory.other
         )
         item = next((i for i in all_items if i['name'].lower() == item_name.lower()), None)

@@ -1,40 +1,22 @@
 import ast
-import sys
 import os
+import sys
 
-files = [
-    'main.py',
-    'infra/config.py',
-    'infra/database.py',
-    'infra/state_manager.py',
-    'infra/errors.py',
-    'game/constants.py',
-    'game/anomalies.py',
-    'models/player.py',
-    'models/classes.py',
-    'models/enemies.py',
-    'models/locations.py',
-    'models/npcs.py',
-    'handlers/admin.py',
-    'handlers/combat.py',
-    'handlers/commands.py',
-    'handlers/inventory.py',
-    'handlers/keyboards.py',
-    'handlers/location.py',
-    'handlers/market.py',
-    'handlers/npc.py',
-]
+
+def iter_python_files():
+    skipped_dirs = {".git", "__pycache__", "venv", ".venv"}
+    for root, dirs, filenames in os.walk("."):
+        dirs[:] = [d for d in dirs if d not in skipped_dirs]
+        for filename in filenames:
+            if filename.endswith(".py"):
+                yield os.path.relpath(os.path.join(root, filename), ".")
 
 print("=" * 50)
 print("ПРОВЕРКА СИНТАКСИСА PYTHON")
 print("=" * 50)
 
 errors = []
-for filepath in files:
-    if not os.path.exists(filepath):
-        errors.append(f"❌ НЕ НАЙДЕН: {filepath}")
-        continue
-    
+for filepath in sorted(iter_python_files()):
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             source = f.read()
