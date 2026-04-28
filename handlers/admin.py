@@ -477,15 +477,18 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         target = int(m.group(1))
         from infra.state_manager import has_pending_event, clear_pending_event, set_pending_event
         from game.random_events import get_random_event
+        from game.constants import RESEARCH_LOCATIONS
         from handlers.events import show_random_event
         from models.player import Player
         if has_pending_event(target): clear_pending_event(target)
-        event = get_random_event(user_id=target)
+        target_player = Player(target)
+        corridor_id = target_player.current_location_id if target_player.current_location_id in RESEARCH_LOCATIONS else None
+        event = get_random_event(user_id=target, corridor_id=corridor_id)
         if not event:
             _send(vk, user_id, "❌ Рандомное событие не сгенерировалось."); return True
         set_pending_event(target, event)
         try:
-            show_random_event(Player(target), vk, target, event, prefix="🎲 АДМИНСКИЙ ИВЕНТ")
+            show_random_event(target_player, vk, target, event, prefix="🎲 АДМИНСКИЙ ИВЕНТ")
             _send(vk, user_id, f"✅ Ивент отправлен vk:{target} | Тип: {event.get('type', '?')}")
         except Exception as e:
             _send(vk, user_id, f"❌ Ошибка: {e}")

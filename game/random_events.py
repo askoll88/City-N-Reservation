@@ -8,6 +8,8 @@ from __future__ import annotations
 import copy
 import random
 
+from game.constants import RESEARCH_LOCATIONS
+
 
 # === Пул случайных событий ===
 # Каждое событие: {id, text, type, effect, chance_weight}
@@ -1636,6 +1638,547 @@ RANDOM_EVENTS = [
             },
         ],
     },
+
+    # === НОВЫЕ СОБЫТИЯ: городские и полевые странности ===
+    {
+        "id": "silent_checkpoint_lamp",
+        "text": (
+            "🟡 Над пустым блокпостом мигает жёлтая лампа.\n\n"
+            "Провод оборван, генератора нет, но свет ровный и тёплый. На столе лежит журнал дежурств: "
+            "последняя запись сделана завтра."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Переписать запись", "effect": {"xp": 80, "message": "Ты записал дату и маршрут патруля. Знание тревожит, но пригодится. +80 XP"}},
+            {"label": "Сорвать лампу", "effect": {"risk_damage": True, "message_ok": "Лампа погасла без звука. Ты ушёл с неприятным холодом в пальцах.", "message_fail": "Стекло лопнуло внутрь ладони. Воздух ударил током. -20 HP, -15 энергии."}},
+            {"label": "Не трогать", "effect": {"message": "Ты оставил блокпост светиться. Некоторые вещи в Зоне лучше не выключать."}},
+        ],
+        "chance_weight": 9,
+    },
+    {
+        "id": "black_box_whisper",
+        "text": (
+            "📼 В траве пищит авиационный самописец.\n\n"
+            "Корпус обуглен, лента внутри целая. Из динамика слышно не переговоры, а чей-то спокойный шёпот: "
+            "\"Не отдавай им координаты\"."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Забрать самописец", "effect": {"random_loot": True, "message": "Внутри оказалась карта аварийного сброса. +{money} руб., +{item}"}},
+            {"label": "Прослушать до конца", "effect": {"xp": 120, "energy": -10, "message": "Запись закончилась твоим именем. Ты не понял как, но запомнил обходной путь. +120 XP, -10 энергии."}},
+            {"label": "Разбить", "effect": {"message": "Самописец замолчал. Вдалеке на секунду вспыхнул красный огонь."}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "rusted_iconostasis",
+        "text": (
+            "🕯️ Под навесом из арматуры кто-то собрал иконостас из ржавых жетонов, гильз и стекла.\n\n"
+            "Перед ним лежит свежий бинт. Ни пыли, ни следов рядом."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Оставить монету", "effect": {"money": -25, "xp": 90, "message": "Монета исчезла между жетонами. Тебе стало легче идти. -25 руб., +90 XP"}},
+            {"label": "Взять бинт", "effect": {"random_loot": True, "message": "Ты забрал подношение. Зона промолчала. +{money} руб., +{item}"}},
+            {"label": "Пройти мимо", "effect": {"message": "Ты не стал вмешиваться в чужую память."}},
+        ],
+        "chance_weight": 11,
+    },
+    {
+        "id": "fogged_bus_children",
+        "text": (
+            "🚌 У обочины стоит школьный автобус. Стёкла запотели изнутри.\n\n"
+            "На стекле детским пальцем выведено: \"Мы ждём экскурсию\". В салоне пусто, но сиденья ещё тёплые."
+        ),
+        "type": "danger",
+        "choices": [
+            {"label": "Зайти внутрь", "effect": {"risk_damage": True, "message_ok": "В автобусе ты нашёл старую аптечку и вышел до того, как стёкла покрылись инеем.", "message_fail": "Двери захлопнулись. Детский смех ударил по нервам. -20 HP, -15 энергии."}},
+            {"label": "Проверить багажник", "effect": {"random_loot": True, "message": "В багажнике сохранился аварийный набор. +{money} руб., +{item}"}},
+            {"label": "Обойти автобус", "effect": {"message": "За спиной кто-то тихо попросил не опаздывать. Ты ускорил шаг."}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "dead_drop_locker",
+        "text": (
+            "🔐 В бетонной стене спрятан маленький ящик с кодовым замком.\n\n"
+            "На крышке процарапано: \"для тех, кто возвращается второй раз\". Рядом свежий след ботинка."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Вскрыть замок", "effect": {"random_loot": True, "message": "Замок сдался. Внутри сухой пакет с припасами. +{money} руб., +{item}"}},
+            {"label": "Оставить свой знак", "effect": {"xp": 100, "message": "Ты пометил место своим способом. Если вернёшься, узнаешь стену сразу. +100 XP"}},
+            {"label": "Не задерживаться", "effect": {"message": "Ты решил, что чужие закладки редко бывают бесплатными."}},
+        ],
+        "chance_weight": 12,
+    },
+    {
+        "id": "glass_grass",
+        "text": (
+            "🌾 На поляне растёт трава из тонкого стекла.\n\n"
+            "Она звенит от ветра и повторяет мелодию, которую ты точно слышал в детстве."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Срезать пучок", "effect": {"artifact_chance": True, "message_ok": "В корнях проявился {artifact}. Стеклянная трава рассыпалась пылью.", "message_fail": "Стебли порезали перчатки и кожу. -25 HP."}},
+            {"label": "Слушать мелодию", "effect": {"xp": 140, "energy": 10, "message": "Мелодия выровняла дыхание и мысли. +140 XP, +10 энергии"}},
+            {"label": "Заткнуть уши и уйти", "effect": {"message": "Звон ещё долго жил в зубах, но ты не дал ему вести себя."}},
+        ],
+        "chance_weight": 7,
+    },
+    {
+        "id": "market_receipt_wind",
+        "text": (
+            "🧾 Ветер несёт кассовый чек из магазина, которого в Городе давно нет.\n\n"
+            "В списке покупок: бинт, вода, патроны и строка \"одна удачная ночь\"."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Поймать чек", "effect": {"xp": 70, "money": 40, "message": "На обратной стороне оказался короткий маршрут к сухому карману. +70 XP, +40 руб."}},
+            {"label": "Пойти по ветру", "effect": {"random_loot": True, "message": "Ветер вывел к сорванному рюкзаку. +{money} руб., +{item}"}},
+            {"label": "Сжечь бумагу", "effect": {"message": "Пепел взлетел вверх, хотя ветра уже не было."}},
+        ],
+        "chance_weight": 13,
+    },
+    {
+        "id": "wire_angel",
+        "text": (
+            "🪽 На опоре ЛЭП висит фигура ангела, скрученная из медной проволоки.\n\n"
+            "Она качается против ветра. Под ногами лежат свежие следы мутанта, но дальше они обрываются."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Снять фигурку", "effect": {"random_loot": True, "message": "Внутри проволоки была спрятана записка с координатами. +{money} руб., +{item}"}},
+            {"label": "Поблагодарить и пройти", "effect": {"energy": 8, "xp": 80, "message": "Смешно, но после этого шаг стал легче. +8 энергии, +80 XP"}},
+            {"label": "Развернуть назад", "effect": {"message": "Ты повернул ангела лицом к дороге. Вдалеке коротко взвыл мутант."}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "rain_inside_room",
+        "text": (
+            "🌧️ В комнате без крыши дождь идёт снизу вверх.\n\n"
+            "Капли поднимаются с пола и исчезают в сером небе. В углу сухой ящик, будто дождь его обходит."
+        ),
+        "type": "danger",
+        "choices": [
+            {"label": "Открыть ящик", "effect": {"random_loot": True, "message": "Ящик оказался сухим и полезным. +{money} руб., +{item}"}},
+            {"label": "Встать под дождь", "effect": {"risk_damage": True, "message_ok": "Капли прошли сквозь одежду и унесли усталость. Ты вышел целым.", "message_fail": "Дождь потянул кровь вверх. -20 HP, -15 энергии."}},
+            {"label": "Закрыть дверь", "effect": {"message": "За закрытой дверью дождь стал звучать как аплодисменты."}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "red_thread_map",
+        "text": (
+            "🧶 На асфальте растянута красная нить. Она повторяет карту твоего маршрута точнее, чем любой навигатор.\n\n"
+            "В конце нити завязан узел."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Развязать узел", "effect": {"xp": 130, "message": "Узел распался, и ты внезапно понял, где опасный обход. +130 XP"}},
+            {"label": "Пойти вдоль нити", "effect": {"random_loot": True, "message": "Нить вывела к чужой закладке. +{money} руб., +{item}"}},
+            {"label": "Перерезать", "effect": {"risk_damage": True, "message_ok": "Нить дёрнулась и исчезла. Ничего не случилось.", "message_fail": "Маршрут в голове рассыпался. Ты споткнулся в пустом месте. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 9,
+    },
+    {
+        "id": "frozen_radio_tower",
+        "text": (
+            "📡 Радиовышка покрыта инеем, хотя вокруг тепло.\n\n"
+            "Из динамика на вершине звучит прогноз погоды для города, которого нет на картах."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Настроить частоту", "effect": {"xp": 150, "money": 80, "message": "В шуме ты поймал координаты старого склада. +150 XP, +80 руб."}},
+            {"label": "Снять аккумулятор", "effect": {"random_loot": True, "message": "В техническом ящике нашлись полезные детали. +{money} руб., +{item}"}},
+            {"label": "Не трогать вышку", "effect": {"message": "Прогноз пообещал снег из стекла. Ты решил не проверять."}},
+        ],
+        "chance_weight": 10,
+    },
+    {
+        "id": "mutant_bell_collar",
+        "text": (
+            "🔔 В кустах звенит маленький колокольчик.\n\n"
+            "К нему привязан ошейник мутанта. Самого зверя нет, но земля вокруг продавлена тяжёлыми лапами."
+        ),
+        "type": "danger",
+        "choices": [
+            {"label": "Забрать ошейник", "effect": {"risk_combat": True, "message_ok": "Хозяин ошейника не вернулся. На застёжке была спрятана монета. +{money} руб.", "message_fail": "Звон привёл стаю слишком близко. Ты едва отбился. -30 HP."}},
+            {"label": "Повесить колокольчик выше", "effect": {"xp": 100, "message": "Теперь звон слышен дальше. Возможно, кому-то он спасёт жизнь. +100 XP"}},
+            {"label": "Уйти без звука", "effect": {"message": "Колокольчик звякнул один раз, когда ты уже отошёл."}},
+        ],
+        "chance_weight": 11,
+    },
+    {
+        "id": "canteen_last_menu",
+        "text": (
+            "🍲 В разбитой столовой на стене висит меню последнего дня.\n\n"
+            "Мелом написано: \"суп, хлеб, компот, возвращение домой\". Под стойкой что-то завернуто в клеёнку."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Проверить клеёнку", "effect": {"random_loot": True, "message": "Внутри оказались сухие припасы. +{money} руб., +{item}"}},
+            {"label": "Стереть последнюю строку", "effect": {"xp": 90, "energy": 5, "message": "Мел осыпался, и помещение стало просто столовой. +90 XP, +5 энергии"}},
+            {"label": "Оставить как есть", "effect": {"message": "Некоторые обещания лучше не стирать."}},
+        ],
+        "chance_weight": 12,
+    },
+    {
+        "id": "white_noise_prayer",
+        "text": (
+            "📻 Карманная рация сама включилась на белом шуме.\n\n"
+            "Сквозь треск слышны голоса, читающие имена пропавших. Среди них мелькнуло имя человека, которого ты не знаешь, но почему-то запомнил."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Ответить в эфир", "effect": {"xp": 120, "energy": -8, "message": "Шум на секунду стал тише. Кто-то поблагодарил тебя с другой стороны. +120 XP, -8 энергии"}},
+            {"label": "Записать имена", "effect": {"money": 60, "xp": 80, "message": "Список пригодится дозиметристу и поисковикам. +80 XP, +60 руб."}},
+            {"label": "Выключить рацию", "effect": {"message": "Последний голос успел сказать: \"не все потеряны\"."}},
+        ],
+        "chance_weight": 9,
+    },
+    {
+        "id": "ash_snowman",
+        "text": (
+            "☃️ Посреди тёплой дороги стоит снеговик из серого пепла.\n\n"
+            "Вместо глаз — две гильзы. На груди пальцем написано: \"не стреляй первым\"."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Забрать гильзы", "effect": {"shells": 2, "message": "Ты забрал гильзы. Пепельная голова повернулась вслед, но ничего не произошло. +2 гильзы"}},
+            {"label": "Поставить гильзы обратно", "effect": {"xp": 110, "message": "Пепел осел, открыв безопасный след между воронками. +110 XP"}},
+            {"label": "Развеять снеговика", "effect": {"risk_damage": True, "message_ok": "Пепел разлетелся и показал пустую консерву. Больше ничего.", "message_fail": "Пепел забил фильтр и глаза. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 10,
+    },
+    {
+        "id": "hospital_pager",
+        "text": (
+            "📟 На полу пищит старый больничный пейджер.\n\n"
+            "На экране сообщение: \"пациент вышел из палаты 0\". Следом приходит второе: \"не впускайте его обратно\"."
+        ),
+        "type": "danger",
+        "choices": [
+            {"label": "Ответить: принято", "effect": {"xp": 130, "message": "Пейджер погас. Где-то хлопнула дверь, которую ты не видел. +130 XP"}},
+            {"label": "Пойти по сигналу", "effect": {"random_loot": True, "message": "Сигнал привёл к шкафчику с медикаментами. +{money} руб., +{item}"}},
+            {"label": "Раздавить", "effect": {"risk_damage": True, "message_ok": "Корпус хрустнул, и тишина вернулась.", "message_fail": "Пейджер взвыл прямо в голове. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "negative_shadow",
+        "text": (
+            "◼️ На стене движется твоя тень, но ты стоишь неподвижно.\n\n"
+            "Тень показывает жестами: пригнись, поверни налево, не смотри вверх."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Повторять за тенью", "effect": {"xp": 160, "message": "Через минуту над дорогой бесшумно прошёл выброс осколков. Тень спасла тебя. +160 XP"}},
+            {"label": "Проверить, что наверху", "effect": {"risk_damage": True, "message_ok": "Наверху только ржавые балки. Но тень всё равно не одобрила.", "message_fail": "С балки сорвался кусок металла. -20 HP, -15 энергии."}},
+            {"label": "Уйти против подсказки", "effect": {"message": "Тень отстала на несколько шагов и исчезла."}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "ledger_of_debts",
+        "text": (
+            "📒 В сейфе без дверцы лежит бухгалтерская книга долгов.\n\n"
+            "В ней имена сталкеров, суммы и странные пометки: \"заплатил кровью\", \"отдал голос\", \"вернул дорогу\"."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Вырвать страницу с тайником", "effect": {"random_loot": True, "message": "Страница вывела к старой нычке. +{money} руб., +{item}"}},
+            {"label": "Вписать свой долг", "effect": {"xp": 180, "energy": -15, "message": "Чернила впитались сами. Ты не знаешь цену, но Зона отметила сделку. +180 XP, -15 энергии"}},
+            {"label": "Сжечь книгу", "effect": {"message": "Книга горела зелёным пламенем и пахла мокрым железом."}},
+        ],
+        "chance_weight": 7,
+    },
+    {
+        "id": "tin_can_oracle",
+        "text": (
+            "🥫 На проволоке висит ряд пустых консервных банок.\n\n"
+            "Ветер стучит ими как азбукой Морзе. Если прислушаться, получается фраза: \"три шага назад\"."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Сделать три шага назад", "effect": {"xp": 100, "message": "Впереди под пылью щёлкнула старая растяжка. Ты был уже вне радиуса. +100 XP"}},
+            {"label": "Проверить растяжку", "effect": {"random_loot": True, "message": "Растяжка была приманкой к маленькому схрону. +{money} руб., +{item}"}},
+            {"label": "Снять банки", "effect": {"risk_damage": True, "message_ok": "Банки оказались просто банками. Очень подозрительно.", "message_fail": "Последняя банка была гранатной чекой. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 13,
+    },
+    {
+        "id": "sleeping_detector",
+        "text": (
+            "📡 На камне лежит чужой детектор. Экран показывает сон: график пульса, чужое имя и слово \"не будить\".\n\n"
+            "Прибор тёплый, будто живой."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Разбудить прибор", "effect": {"artifact_chance": True, "message_ok": "Детектор пискнул и вывел тебя к {artifact}.", "message_fail": "Прибор закричал ультразвуком и погас. -25 HP."}},
+            {"label": "Оставить рядом батарейку", "effect": {"xp": 120, "message": "Экран мигнул: \"спасибо\". Ты запомнил частоту. +120 XP"}},
+            {"label": "Унести", "effect": {"random_loot": True, "message": "В чехле детектора был запасной карман. +{money} руб., +{item}"}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "red_water_puddle",
+        "text": (
+            "🩸 В выбоине стоит красная вода. Она отражает не небо, а подземный коридор с горящей лампой.\n\n"
+            "В отражении кто-то оставил ящик прямо у твоих ног."
+        ),
+        "type": "danger",
+        "choices": [
+            {"label": "Опустить руку", "effect": {"random_loot": True, "message": "Пальцы коснулись сухой ручки ящика. Когда ты вытащил руку, рядом лежал пакет. +{money} руб., +{item}"}},
+            {"label": "Бросить камень", "effect": {"risk_damage": True, "message_ok": "Отражение дрогнуло и исчезло.", "message_fail": "Из воды ударила красная вспышка. -20 HP, -15 энергии."}},
+            {"label": "Обойти", "effect": {"message": "В отражении ты всё равно увидел, как кто-то подбирает ящик вместо тебя."}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "mechanical_bees",
+        "text": (
+            "🐝 Над грудой деталей кружат механические насекомые.\n\n"
+            "Они собирают ржавчину с металла и складывают её в аккуратные соты."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Взять соту", "effect": {"random_loot": True, "message": "Сота оказалась набита полезной мелочью. +{money} руб., +{item}"}},
+            {"label": "Не мешать работе", "effect": {"xp": 110, "message": "Насекомые выстроились в стрелку и показали безопасный проход. +110 XP"}},
+            {"label": "Разогнать", "effect": {"risk_damage": True, "message_ok": "Они рассыпались искрами.", "message_fail": "Маленькие жала прошили перчатки током. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 9,
+    },
+    {
+        "id": "telephone_to_kpp",
+        "text": (
+            "☎️ На столбе висит городской телефон. Трубка снята.\n\n"
+            "В ней слышен голос дежурного КПП: \"Докладывай обстановку\". Связи здесь быть не должно."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Доложить честно", "effect": {"xp": 90, "money": 50, "message": "Голос принял координаты и пообещал передать смене. +90 XP, +50 руб."}},
+            {"label": "Попросить помощь", "effect": {"random_loot": True, "message": "Через минуту из трубы выпал пакет с маркировкой КПП. +{money} руб., +{item}"}},
+            {"label": "Повесить трубку", "effect": {"message": "Телефон зазвонил сразу после того, как ты отошёл."}},
+        ],
+        "chance_weight": 10,
+    },
+    {
+        "id": "chalk_circle_trade",
+        "text": (
+            "⚪ На земле начерчен круг мелом. Внутри лежит ржавая гайка, снаружи надпись: \"обмен честный\".\n\n"
+            "Круг не размыло дождём."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Положить 50 руб.", "effect": {"money": -50, "random_loot": True, "message": "Деньги исчезли, гайка стала тяжёлым свёртком. +{money} руб., +{item}"}},
+            {"label": "Забрать гайку бесплатно", "effect": {"risk_damage": True, "message_ok": "Круг погас. Гайка осталась бесполезной.", "message_fail": "Мел вспыхнул белым светом. -20 HP, -15 энергии."}},
+            {"label": "Стереть круг", "effect": {"xp": 100, "message": "Мел оказался тёплым. Ты стёр чужую ловушку. +100 XP"}},
+        ],
+        "chance_weight": 9,
+    },
+    {
+        "id": "elevator_in_field",
+        "text": (
+            "🛗 Среди поля стоит лифт с открытыми дверями. Шахты нет, здания нет.\n\n"
+            "Кнопки подписаны не этажами, а словами: \"вчера\", \"ниже\", \"домой\"."
+        ),
+        "type": "danger",
+        "choices": [
+            {"label": "Нажать \"ниже\"", "effect": {"random_loot": True, "message": "Двери закрылись на секунду. Когда открылись, на полу лежал чужой рюкзак. +{money} руб., +{item}"}},
+            {"label": "Нажать \"вчера\"", "effect": {"xp": 170, "energy": -20, "message": "Ты на миг увидел маршрут до того, как пришёл сюда. +170 XP, -20 энергии"}},
+            {"label": "Нажать \"домой\"", "effect": {"risk_damage": True, "message_ok": "Кнопка не сработала. Наверное, к счастью.", "message_fail": "Лифт дёрнулся вниз без шахты. Ты вывалился в грязь. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 6,
+    },
+    {
+        "id": "singing_powerline",
+        "text": (
+            "🎼 ЛЭП поёт человеческими голосами.\n\n"
+            "Каждый провод держит свою ноту, а вместе они складываются в марш, который военные пели до катастрофы."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Запомнить мелодию", "effect": {"xp": 130, "message": "Мелодия оказалась кодом патрульного сигнала. +130 XP"}},
+            {"label": "Идти в такт", "effect": {"energy": 12, "message": "Шаг сам выровнялся. Дорога далась легче. +12 энергии"}},
+            {"label": "Перебить песню выстрелом", "effect": {"risk_damage": True, "message_ok": "Эхо проглотило звук.", "message_fail": "Провода ответили разрядом. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 8,
+    },
+    {
+        "id": "mirror_well",
+        "text": (
+            "🪞 Старый колодец отражает не твоё лицо, а человека в противогазе.\n\n"
+            "Он показывает тебе ладонь: на ней написано \"не пей\"."
+        ),
+        "type": "danger",
+        "choices": [
+            {"label": "Послушать отражение", "effect": {"xp": 120, "message": "Ты отошёл. Через секунду вода в колодце закипела без огня. +120 XP"}},
+            {"label": "Достать ведро", "effect": {"random_loot": True, "message": "Ведро оказалось сухим, зато на дне лежал свёрток. +{money} руб., +{item}"}},
+            {"label": "Выпить", "effect": {"risk_damage": True, "message_ok": "Вода была обычной. Это пугает сильнее.", "message_fail": "Вода обожгла горло холодом. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 7,
+    },
+    {
+        "id": "paper_cranes",
+        "text": (
+            "🕊️ Из окна заброшенного дома вылетает стая бумажных журавлей.\n\n"
+            "На каждом написана короткая просьба: \"найди\", \"верни\", \"помни\", \"не открывай\"."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Поймать журавля \"найди\"", "effect": {"random_loot": True, "message": "Бумага сложилась в карту маленького схрона. +{money} руб., +{item}"}},
+            {"label": "Поймать журавля \"помни\"", "effect": {"xp": 140, "message": "В голове всплыл чужой маршрут и чужой страх. +140 XP"}},
+            {"label": "Не ловить", "effect": {"message": "Журавли поднялись выше и сгорели без дыма."}},
+        ],
+        "chance_weight": 10,
+    },
+
+    # === КВЕСТОВАЯ ЦЕПОЧКА: Чёрный маяк ===
+    {
+        "id": "black_beacon_signal",
+        "text": (
+            "📡 Ночью на короткой волне появился сигнал без позывного.\n\n"
+            "\"Маяк проснулся. Кто слышит — не отвечайте. Кто ответил — уже отмечен\".\n"
+            "На фоне слышен стук: три коротких, три длинных, снова три коротких."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Ответить коротко", "effect": {"xp": 120, "message": "Сигнал замолчал, а на частоте осталась координата. Началась цепочка: Чёрный маяк. +120 XP"}},
+            {"label": "Записать координату молча", "effect": {"xp": 90, "message": "Ты не выдал себя в эфир, но координата осталась в блокноте. Цепочка началась. +90 XP"}},
+            {"label": "Стереть частоту", "effect": {"message": "Ты сбросил настройку. Но три коротких стука ещё долго жили в рации."}},
+        ],
+        "chance_weight": 5,
+    },
+    {
+        "id": "black_beacon_field_tripod",
+        "text": (
+            "📍 Координата вывела к треноге посреди выжженного поля.\n\n"
+            "На треноге закреплён прожектор без лампы. Внутри корпуса лежит тёплый пепел и металлическая бирка: \"объект слушает свет\"."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Вставить батарею", "effect": {"energy": -15, "xp": 150, "message": "Прожектор дал чёрный луч. Он не осветил поле, а вырезал в нём тропу. -15 энергии, +150 XP"}},
+            {"label": "Забрать бирку", "effect": {"random_loot": True, "message": "Бирка была ключом к маленькому контейнеру в ноге треноги. +{money} руб., +{item}"}},
+            {"label": "Разобрать треногу", "effect": {"risk_damage": True, "message_ok": "Внутри только пепел и провода.", "message_fail": "Пепел вспыхнул чёрным светом. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 4,
+    },
+    {
+        "id": "black_beacon_keeper",
+        "text": (
+            "🧥 У начала чёрной тропы сидит человек в плаще связиста.\n\n"
+            "Лица не видно. Он держит журнал передач и спрашивает: \"Кому принадлежит тишина?\""
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Ответить: тем, кто слушает", "effect": {"xp": 180, "message": "Связист кивнул и поставил в журнале отметку рядом с твоим именем. +180 XP"}},
+            {"label": "Потребовать объяснений", "effect": {"risk_damage": True, "message_ok": "Он рассмеялся и исчез в помехах.", "message_fail": "Помехи ударили по нервам. -20 HP, -15 энергии."}},
+            {"label": "Отдать ему бирку", "effect": {"money": 150, "message": "Бирка растворилась в его перчатке. Он заплатил старыми, но настоящими рублями. +150 руб."}},
+        ],
+        "chance_weight": 4,
+    },
+    {
+        "id": "black_beacon_buried_lens",
+        "text": (
+            "🔎 Под слоем земли нашлась линза размером с крышку люка.\n\n"
+            "Через неё видно не поле, а ночной город с горящим маяком на крыше администрации."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Посмотреть дольше", "effect": {"xp": 220, "energy": -20, "message": "Ты увидел маршрут к крыше и цену каждого шага. +220 XP, -20 энергии"}},
+            {"label": "Завернуть линзу в ткань", "effect": {"artifact_chance": True, "message_ok": "На обратной стороне линзы проступил {artifact}.", "message_fail": "Линза треснула и порезала руки. -25 HP."}},
+            {"label": "Закопать обратно", "effect": {"message": "Земля над линзой стала идеально ровной, будто её никто не трогал."}},
+        ],
+        "chance_weight": 4,
+    },
+    {
+        "id": "black_beacon_final",
+        "text": (
+            "🌑 Чёрный маяк стоит на крыше старой администрации, хотя вчера там была пустая антенна.\n\n"
+            "Он светит тьмой вверх, и облака расходятся вокруг луча. Внизу глохнут рации, детекторы и даже собственные мысли."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Настроить маяк на КПП", "effect": {"xp": 600, "money": 900, "message": "Маяк дал военным чистый коридор связи на одну ночь. КПП выплатил премию. +600 XP, +900 руб. Цепочка завершена."}},
+            {"label": "Настроить маяк на себя", "effect": {"random_artifact": True, "xp": 500, "message": "Маяк запомнил твой силуэт. В ладони остался тёплый артефактный след. +500 XP. Цепочка завершена."}},
+            {"label": "Погасить маяк", "effect": {"xp": 700, "energy": -30, "message": "Ты разбил фокусирующее стекло. Тьма ушла вверх, не забрав город. +700 XP, -30 энергии. Цепочка завершена."}},
+        ],
+        "chance_weight": 3,
+    },
+
+    # === КВЕСТОВАЯ ЦЕПОЧКА: Архив дождя ===
+    {
+        "id": "rain_archive_ticket",
+        "text": (
+            "🎫 В луже плавает сухой бумажный билет: \"Архив дождя. Читальный зал открыт во время осадков\".\n\n"
+            "На обороте — печать НИИ и время, которое наступит через час."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Сохранить билет", "effect": {"xp": 110, "message": "Билет не намокает и не рвётся. Цепочка началась: Архив дождя. +110 XP"}},
+            {"label": "Проверить печать", "effect": {"xp": 80, "money": 40, "message": "Печать настоящая. За такие бланки учёные платят. +80 XP, +40 руб. Цепочка началась."}},
+            {"label": "Выбросить", "effect": {"message": "Билет вернулся в ближайшую лужу раньше, чем ты успел моргнуть."}},
+        ],
+        "chance_weight": 5,
+    },
+    {
+        "id": "rain_archive_reading_room",
+        "text": (
+            "📚 Дождь привёл тебя к подземному читальному залу.\n\n"
+            "С потолка падают капли, но книги сухие. На стойке журнал: \"выдача воспоминаний строго под расписку\"."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Взять книгу маршрутов", "effect": {"xp": 170, "message": "Страницы показали тропы, которые появляются только после дождя. +170 XP"}},
+            {"label": "Взять книгу долгов", "effect": {"random_loot": True, "message": "Между страниц спрятан чужой конверт. +{money} руб., +{item}"}},
+            {"label": "Поставить подпись", "effect": {"risk_damage": True, "message_ok": "Чернила приняли подпись и высохли.", "message_fail": "Чернила впились в кожу холодом. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 4,
+    },
+    {
+        "id": "rain_archive_librarian",
+        "text": (
+            "👤 Между стеллажами стоит библиотекарь в мокром противогазе.\n\n"
+            "Он не говорит, только протягивает три карточки: \"прошлое\", \"потерянное\", \"чужое\"."
+        ),
+        "type": "neutral",
+        "choices": [
+            {"label": "Взять \"прошлое\"", "effect": {"xp": 220, "energy": -15, "message": "Ты увидел карту района до катастрофы. +220 XP, -15 энергии"}},
+            {"label": "Взять \"потерянное\"", "effect": {"random_loot": True, "message": "Карточка вывела к вещи, которую кто-то не успел забрать. +{money} руб., +{item}"}},
+            {"label": "Взять \"чужое\"", "effect": {"risk_damage": True, "message_ok": "Карточка оказалась пустой.", "message_fail": "Чужая память ударила болью за глазами. -20 HP, -15 энергии."}},
+        ],
+        "chance_weight": 4,
+    },
+    {
+        "id": "rain_archive_missing_page",
+        "text": (
+            "📄 В архиве не хватает одной страницы. Её номер совпадает с твоим текущим количеством гильз.\n\n"
+            "На пустом месте в книге проступает фраза: \"страницу надо вернуть мокрой\"."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Подставить книгу под дождь", "effect": {"xp": 260, "message": "Дождь напечатал страницу прямо на воздухе. Ты прочёл координаты безопасного окна. +260 XP"}},
+            {"label": "Вставить свой лист", "effect": {"money": -75, "xp": 180, "message": "Лист принял текст и забрал мелкие деньги из кармана как пошлину. -75 руб., +180 XP"}},
+            {"label": "Закрыть книгу", "effect": {"message": "Книга тихо щёлкнула замком. Дождь за стеной стал сильнее."}},
+        ],
+        "chance_weight": 4,
+    },
+    {
+        "id": "rain_archive_final",
+        "text": (
+            "🌧️ На последней полке стоит банка с дождём.\n\n"
+            "Внутри капли падают вверх. Этикетка: \"для города, когда он забудет дорогу домой\"."
+        ),
+        "type": "reward",
+        "choices": [
+            {"label": "Отдать банку учёным", "effect": {"xp": 650, "money": 1000, "message": "Учёные приняли банку как невозможный образец. +650 XP, +1000 руб. Цепочка завершена."}},
+            {"label": "Открыть банку у КПП", "effect": {"xp": 700, "energy": 25, "message": "Дождь прошёл над КПП и смыл усталость с караула. +700 XP, +25 энергии. Цепочка завершена."}},
+            {"label": "Оставить банку в архиве", "effect": {"xp": 800, "message": "Архив закрылся сам. Иногда лучший трофей — не украсть чудо. +800 XP. Цепочка завершена."}},
+        ],
+        "chance_weight": 3,
+    },
 ]
 
 
@@ -1663,6 +2206,28 @@ QUEST_CHAINS = {
             ["nii_experiment"],                 # Стадия 2 (финал): эксперимент
         ],
     },
+    "black_beacon": {
+        "name": "Чёрный маяк",
+        "cooldown_hours": 96,
+        "stages": [
+            ["black_beacon_signal"],
+            ["black_beacon_field_tripod"],
+            ["black_beacon_keeper"],
+            ["black_beacon_buried_lens"],
+            ["black_beacon_final"],
+        ],
+    },
+    "rain_archive": {
+        "name": "Архив дождя",
+        "cooldown_hours": 96,
+        "stages": [
+            ["rain_archive_ticket"],
+            ["rain_archive_reading_room"],
+            ["rain_archive_librarian"],
+            ["rain_archive_missing_page"],
+            ["rain_archive_final"],
+        ],
+    },
 }
 
 # Маппинг: event_id -> (chain_key, stage_index)
@@ -1671,6 +2236,108 @@ for _chain_key, _chain_data in QUEST_CHAINS.items():
     for _stage_idx, _stage_events in enumerate(_chain_data["stages"]):
         for _event_id in _stage_events:
             _EVENT_TO_QUEST[_event_id] = (_chain_key, _stage_idx)
+
+
+_MILITARY_ROAD = "дорога_военная_часть"
+_MILITARY_BASE = "военная_часть"
+_NII_ROAD = "дорога_нии"
+_NII_MAIN = "главный_корпус_нии"
+_FOREST_ROAD = "дорога_зараженный_лес"
+_FOREST_DEEP = "зараженный_лес"
+_SURFACE_ROADS = (_MILITARY_ROAD, _NII_ROAD, _FOREST_ROAD)
+_MILITARY_CORRIDORS = (_MILITARY_ROAD, _MILITARY_BASE)
+_NII_CORRIDORS = (_NII_ROAD, _NII_MAIN)
+_FOREST_CORRIDORS = (_FOREST_ROAD, _FOREST_DEEP)
+_ANOMALY_CORRIDORS = (_NII_ROAD, _NII_MAIN, _FOREST_ROAD, _FOREST_DEEP)
+
+
+def _corridor_weights(corridors, weight: float = 1.0) -> dict[str, float]:
+    return {corridor: float(weight) for corridor in corridors}
+
+
+EVENT_CORRIDOR_WEIGHTS: dict[str, dict[str, float]] = {}
+
+
+def _assign_corridors(event_ids: list[str], corridors, weight: float = 1.0):
+    for event_id in event_ids:
+        EVENT_CORRIDOR_WEIGHTS.setdefault(event_id, {}).update(_corridor_weights(corridors, weight))
+
+
+_assign_corridors([
+    "stash_find", "stalker_encounter", "radio_intercept", "wounded_stalker",
+    "wandering_trader", "abandoned_campfire", "strange_diary", "philosopher_stalker",
+    "bridge_cache", "campfire_group", "panicker_stalker", "echo_of_past",
+    "info_trader", "bard_stalker", "guide_stalker", "market_receipt_wind",
+    "red_thread_map", "white_noise_prayer", "tin_can_oracle", "paper_cranes",
+    "dead_drop_locker", "ledger_of_debts", "chalk_circle_trade",
+], _SURFACE_ROADS, 1.0)
+
+_assign_corridors([
+    "emission_warning", "military_patrol", "abandoned_bunker", "code_bunker",
+    "weapon_mod_find", "sniper_on_roof", "helicopter_drop", "tech_scrapyard",
+    "ambush_betrayal", "silent_checkpoint_lamp", "black_box_whisper",
+    "frozen_radio_tower", "telephone_to_kpp", "singing_powerline",
+    "abandoned_train",
+], _MILITARY_CORRIDORS, 1.35)
+
+_assign_corridors([
+    "anomaly_storm", "weird_artifact", "psi_emission", "burning_anomaly",
+    "gravity_surge", "radioactive_spring", "anomaly_thunderstorm",
+    "anomaly_mirage", "portal_anomaly", "companion_artifact", "anomaly_drought",
+    "anomaly_eclipse", "mirror_artifact", "anomaly_wind", "glass_grass",
+    "rain_inside_room", "red_water_puddle", "sleeping_detector",
+    "elevator_in_field", "mirror_well", "zone_voice", "artifact_rain",
+    "negative_shadow", "rusted_iconostasis", "ash_snowman",
+], _ANOMALY_CORRIDORS, 1.2)
+
+_assign_corridors([
+    "lone_mutant", "zombified_stalker", "blind_dog_pack", "controller_distance",
+    "living_flower", "bloodsucker_encounter", "abandoned_church", "alpha_mutant",
+    "wire_angel", "mutant_bell_collar", "mechanical_bees", "fogged_bus_children",
+], _FOREST_CORRIDORS, 1.4)
+
+_assign_corridors(["abandoned_hospital", "hospital_pager"], (_NII_ROAD, _NII_MAIN, _FOREST_ROAD), 1.15)
+_assign_corridors(["marauder_encounter"], (_MILITARY_ROAD, _FOREST_ROAD), 1.1)
+_assign_corridors(["canteen_last_menu"], (_MILITARY_BASE, _NII_MAIN), 1.15)
+_assign_corridors(["silent_horror"], (_NII_ROAD, _FOREST_ROAD, _FOREST_DEEP), 1.2)
+_assign_corridors(["legend_stalker"], _SURFACE_ROADS, 0.8)
+
+_assign_corridors(["missing_stalker_letter"], _SURFACE_ROADS, 1.0)
+_assign_corridors(["kedr_trail"], (_FOREST_ROAD, _MILITARY_ROAD), 1.25)
+_assign_corridors(["kedr_rescue"], (_FOREST_DEEP, _MILITARY_BASE), 1.25)
+_assign_corridors(["nii_rumor"], (_NII_ROAD, _MILITARY_ROAD), 1.0)
+_assign_corridors(["nii_entrance"], (_NII_ROAD,), 1.4)
+_assign_corridors(["nii_experiment"], (_NII_MAIN,), 1.6)
+
+_assign_corridors(["black_beacon_signal"], (_MILITARY_ROAD, _NII_ROAD), 1.0)
+_assign_corridors(["black_beacon_field_tripod"], (_MILITARY_ROAD,), 1.35)
+_assign_corridors(["black_beacon_keeper"], (_MILITARY_BASE,), 1.45)
+_assign_corridors(["black_beacon_buried_lens"], (_NII_ROAD, _NII_MAIN), 1.3)
+_assign_corridors(["black_beacon_final"], (_MILITARY_BASE, _NII_MAIN), 1.7)
+
+_assign_corridors(["rain_archive_ticket"], (_NII_ROAD, _FOREST_ROAD), 1.0)
+_assign_corridors(["rain_archive_reading_room"], (_NII_MAIN,), 1.4)
+_assign_corridors(["rain_archive_librarian"], (_NII_MAIN,), 1.5)
+_assign_corridors(["rain_archive_missing_page"], (_NII_MAIN, _FOREST_DEEP), 1.4)
+_assign_corridors(["rain_archive_final"], (_NII_MAIN, _FOREST_DEEP), 1.7)
+
+
+def get_event_corridor_weights(event_id: str) -> dict[str, float]:
+    """Получить коридоры, где событие может появиться, и локальные множители."""
+    return dict(EVENT_CORRIDOR_WEIGHTS.get(event_id, {}))
+
+
+def get_event_corridors(event_id: str) -> list[str]:
+    return list(get_event_corridor_weights(event_id).keys())
+
+
+def _event_weight_for_corridor(event: dict, corridor_id: str | None) -> float:
+    if corridor_id is None:
+        return 1.0
+    weights = EVENT_CORRIDOR_WEIGHTS.get(event.get("id"))
+    if not weights:
+        return 0.0
+    return max(0.0, float(weights.get(corridor_id, 0.0) or 0.0))
 
 
 def _get_quest_stage(user_id: int, chain_key: str) -> int:
@@ -1719,7 +2386,7 @@ def _is_quest_available(user_id: int, chain_key: str) -> bool:
     return True  # Квест в прогрессе или не начат
 
 
-def _get_next_quest_event(user_id: int) -> dict | None:
+def _get_next_quest_event(user_id: int, corridor_id: str | None = None) -> dict | None:
     """
     Получить следующее событие из активной квестовой цепочки.
     Если игрок в середине квеста — вернуть нужный этап.
@@ -1745,7 +2412,7 @@ def _get_next_quest_event(user_id: int) -> dict | None:
             stage_event_ids = chain_data["stages"][stage]
             # Найти событие в RANDOM_EVENTS
             for event in RANDOM_EVENTS:
-                if event["id"] in stage_event_ids:
+                if event["id"] in stage_event_ids and _event_weight_for_corridor(event, corridor_id) > 0:
                     return copy.deepcopy(event)
 
     return None
@@ -1774,6 +2441,8 @@ RARE_WOW_EVENTS = [
     "legend_stalker",      # Сталкер-легенда
     "artifact_rain",       # Дождь из артефактов
     "emission_warning",    # Выброс
+    "elevator_in_field",   # Лифт без здания
+    "mirror_well",         # Колодец-отражение
 ]
 
 
@@ -1781,7 +2450,7 @@ def _is_rare_wow_event(event_id: str) -> bool:
     return event_id in RARE_WOW_EVENTS
 
 
-def get_random_event(user_id: int = None) -> dict | None:
+def get_random_event(user_id: int = None, corridor_id: str | None = None) -> dict | None:
     """
     Получить случайное событие.
     Если передан user_id — учитываются квестовые цепочки.
@@ -1792,15 +2461,22 @@ def get_random_event(user_id: int = None) -> dict | None:
 
     # Сначала квест (если есть)
     if user_id is not None:
-        quest_event = _get_next_quest_event(user_id)
+        quest_event = _get_next_quest_event(user_id, corridor_id=corridor_id)
         if quest_event:
             return copy.deepcopy(quest_event)
 
     # Редкий «вау» — отдельный ролл 5%
     if random.randint(1, 100) <= 5:
-        wow_events = [e for e in RANDOM_EVENTS if _is_rare_wow_event(e["id"])]
+        wow_events = [
+            e for e in RANDOM_EVENTS
+            if _is_rare_wow_event(e["id"]) and _event_weight_for_corridor(e, corridor_id) > 0
+        ]
         if wow_events:
-            return copy.deepcopy(random.choice(wow_events))
+            weights = [
+                e["chance_weight"] * _event_weight_for_corridor(e, corridor_id)
+                for e in wow_events
+            ]
+            return copy.deepcopy(random.choices(wow_events, weights=weights, k=1)[0])
 
     # Обычные события — 18% шанс
     if random.randint(1, 100) > 18:
@@ -1809,8 +2485,15 @@ def get_random_event(user_id: int = None) -> dict | None:
     # Взвешенный выбор из обычных событий (исключая квестовые и вау)
     quest_event_ids = set(_EVENT_TO_QUEST.keys())
     non_quest_events = [e for e in RANDOM_EVENTS
-                        if e["id"] not in quest_event_ids and not _is_rare_wow_event(e["id"])]
-    weights = [e["chance_weight"] for e in non_quest_events]
+                        if (
+                            e["id"] not in quest_event_ids
+                            and not _is_rare_wow_event(e["id"])
+                            and _event_weight_for_corridor(e, corridor_id) > 0
+                        )]
+    weights = [
+        e["chance_weight"] * _event_weight_for_corridor(e, corridor_id)
+        for e in non_quest_events
+    ]
 
     if not non_quest_events:
         return None

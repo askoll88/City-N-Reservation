@@ -369,7 +369,10 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
 
     # 1) Ивент
     if roll <= event_threshold and _check_event_cooldown(user_id):
-        event = get_random_event(user_id=user_id)
+        event_corridor = travel.get("to_location")
+        if event_corridor not in RESEARCH_LOCATIONS:
+            event_corridor = travel.get("from_location")
+        event = get_random_event(user_id=user_id, corridor_id=event_corridor)
         if event:
             set_pending_event(user_id, event)
             database.set_user_flag(user_id, "last_random_event_time", int(time.time()))
