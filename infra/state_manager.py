@@ -691,25 +691,25 @@ def try_edit_or_send(vk, user_id: int, message: str, keyboard=None):
     Попытаться редактировать последнее сообщение.
     Если не удалось — отправить новое.
     """
+    from infra import vk_messages
+
     last_msg = get_last_message(user_id)
-    kwargs = {"message": message}
-    if keyboard:
-        kwargs["keyboard"] = keyboard.get_keyboard() if hasattr(keyboard, "get_keyboard") else keyboard
 
     if last_msg and last_msg.get("msg_id"):
         try:
-            vk.messages.edit(
+            vk_messages.edit(
+                vk,
                 conversation_message_id=last_msg["msg_id"],
-                **kwargs,
+                message=message,
+                keyboard=keyboard,
             )
             return  # Успешно отредактировано
         except Exception:
             pass
 
     # Fallback: отправить новое
-    kwargs["random_id"] = 0
     try:
-        msg_id = vk.messages.send(user_id=user_id, **kwargs)
+        msg_id = vk_messages.send(vk, user_id=user_id, message=message, keyboard=keyboard)
         set_last_message(user_id, msg_id)
     except Exception:
         pass

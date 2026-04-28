@@ -16,6 +16,7 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 
 from infra import config
 from infra import database
+from infra import vk_messages
 from models import player as player_module
 
 # Настройка логирования
@@ -930,18 +931,19 @@ def _do_callback_processing(event, vk):
             logger.exception("Ошибка пассивного регена энергии в callback (user_id=%s)", user_id)
         return_location = payload.get("location") or player.previous_location or 'город'
 
-        vk.messages.send(
+        vk_messages.send(
+            vk,
             user_id=user_id,
             message=f"↩️ Возвращаемся в {return_location}...",
             keyboard=create_location_keyboard(return_location, player.level).get_keyboard(),
-            random_id=0
         )
 
         player.current_location_id = return_location
         database.update_user_location(user_id, return_location)
         _set_shelter_regen_anchor(user_id, in_shelter=(return_location == "убежище"))
 
-    vk.messages.send_message_event_answer(
+    vk_messages.answer_event(
+        vk,
         event_id=event.obj.event_id,
         user_id=event.obj.user_id,
         peer_id=event.obj.peer_id,

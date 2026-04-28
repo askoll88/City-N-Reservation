@@ -15,20 +15,32 @@
 
 ## Этап 1. Базовая обёртка отправки сообщений
 
-Статус: запланировано.
+Статус: реализовано в базовом виде.
 
 Что сделать:
 
-- Ввести единый helper для отправки сообщений.
-- По умолчанию прокидывать безопасные параметры:
+- Ввести единый helper для отправки сообщений. ✅ `infra/vk_messages.py`
+- По умолчанию прокидывать безопасные параметры: ✅
   - `disable_mentions=1`;
   - `dont_parse_links=1`.
-- Централизовать fallback при ошибках VK API.
+- Централизовать fallback при ошибках VK API. ✅ retry без attachment
 - Поддержать единый способ отправки:
-  - обычного текста;
-  - текста с клавиатурой;
-  - текста с attachment;
-  - callback/snackbar-ответа.
+  - обычного текста; ✅
+  - текста с клавиатурой; ✅
+  - текста с attachment; ✅
+  - callback/snackbar-ответа. ✅
+
+Что подключено:
+
+- `infra/state_manager.py`: `try_edit_or_send` теперь использует общий transport helper.
+- `handlers/location.py`: отправка локаций с картинками использует общий fallback без attachment.
+- `main.py`: callback-ответы и возврат из callback используют общий helper.
+- `tests/test_vk_messages.py`: проверяет safe defaults, keyboard payload, fallback без attachment и snackbar payload.
+
+Следующая чистка:
+
+- При доработке каждого обработчика заменять прямые `vk.messages.send(...)` на `vk_messages.send(...)`.
+- После перевода крупных модулей добавить статическую проверку, запрещающую новые прямые `vk.messages.send` вне transport/helper-слоя.
 
 Зачем:
 

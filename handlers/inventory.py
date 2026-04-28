@@ -13,6 +13,82 @@ def _fmt_weight(item: dict, default: float = 1.0) -> str:
     return f"{float(item.get('weight', default)):.1f}кг"
 
 
+def _short_text(value: object, limit: int = 48) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _line(parts: list[str]) -> str:
+    return " | ".join(part for part in parts if part)
+
+
+def _inventory_card(
+    idx: int,
+    item: dict,
+    icon: str,
+    stats: list[str],
+    *,
+    equipped: bool = False,
+    default_weight: float = 1.0,
+) -> str:
+    mark = " [ЭКИП]" if equipped else ""
+    qty = int(item.get("quantity", 1) or 1)
+    meta = _line([*stats, f"Вес {_fmt_weight(item, default=default_weight)}", f"x{qty}"])
+    return f"{idx}. {icon} {item.get('name', 'Предмет')}{mark}\n   {meta}\n"
+
+
+def _price_line(item: dict, price: int | None = None) -> str:
+    current = int(item.get("price", 0) if price is None else price)
+    base = int(item.get("base_price", current) or current)
+    if item.get("is_featured") and base != current:
+        return f"Цена: {current} руб. (было {base})"
+    return f"Цена: {current} руб."
+
+
+def _shop_card(
+    idx: int,
+    item: dict,
+    icon: str,
+    stats: list[str],
+    *,
+    desc_limit: int = 46,
+    price: int | None = None,
+    include_stock: bool = True,
+) -> str:
+    featured = " ⭐ ТОВАР ДНЯ" if item.get("is_featured") else ""
+    lines = [f"{idx}. {icon} {item.get('name', 'Предмет')}{featured}"]
+    stat_line = _line(stats)
+    if stat_line:
+        lines.append(f"   {stat_line}")
+    desc = _short_text(item.get("description"), desc_limit)
+    if desc:
+        lines.append(f"   {desc}")
+    lines.append(f"   {_price_line(item, price=price)}")
+    if include_stock:
+        stock_left = int(item.get("stock_left", 0) or 0)
+        lines.append(f"   Остаток: {stock_left} шт.")
+    return "\n".join(lines) + "\n\n"
+
+
+def _artifact_bonus_text(item: dict) -> str:
+    bonuses = []
+    if item.get('crit_bonus'):
+        bonuses.append(f"крит +{item['crit_bonus']}%")
+    if item.get('find_bonus'):
+        bonuses.append(f"находка +{item['find_bonus']}%")
+    if item.get('radiation'):
+        bonuses.append(f"рад {item['radiation']}")
+    if item.get('energy_bonus'):
+        bonuses.append(f"энергия +{item['energy_bonus']}")
+    if item.get('defense_bonus'):
+        bonuses.append(f"защита +{item['defense_bonus']}%")
+    if item.get('dodge_bonus'):
+        bonuses.append(f"уклон +{item['dodge_bonus']}%")
+    return ", ".join(bonuses) if bonuses else "без бонусов"
+
+
 def _screen_header(title: str, player) -> str:
     total_weight = float(getattr(player.inventory, "total_weight", 0.0) or 0.0)
     max_weight = float(getattr(player, "max_weight", 0.0) or 0.0)
@@ -393,13 +469,16 @@ def show_weapons(player, vk, user_id: int):
     if items:
         msg = _screen_header("Инвентарь: оружие", player) + "\n"
         for idx, item in enumerate(items, 1):
-            equipped_mark = " [ЭКИП]" if item['name'] == player.equipped_weapon else ""
-            msg += (
-                f"{idx}. 🔫 {item['name']}{equipped_mark}\n"
-                f"   Урон {item.get('attack', 0)} | "
-                f"L{item.get('item_level', 1)}/{item.get('required_level', 1)} | "
-                f"Ранг {item.get('item_rank', 'common')} | "
-                f"Вес {_fmt_weight(item)} | x{item.get('quantity', 1)}\n"
+            msg += _inventory_card(
+                idx,
+                item,
+                "🔫",
+                [
+                    f"Урон {item.get('attack', 0)}",
+                    f"L{item.get('item_level', 1)}/{item.get('required_level', 1)}",
+                    f"Ранг {item.get('item_rank', 'common')}",
+                ],
+                equipped=item['name'] == player.equipped_weapon,
             )
         msg += _screen_footer("надеть/снять")
     else:
@@ -420,22 +499,17 @@ def show_armor(player, vk, user_id: int):
     if items:
         msg = _screen_header("Инвентарь: броня", player) + "\n"
         for idx, item in enumerate(items, 1):
-            equipped_mark = ""
             item_name = item['name']
             # Проверяем, экипирована ли броня в любом слоте
-            if item_name in [
+            equipped = item_name in [
                 getattr(player, "equipped_armor", None),
                 getattr(player, "equipped_armor_head", None),
                 getattr(player, "equipped_armor_body", None),
                 getattr(player, "equipped_armor_legs", None),
                 getattr(player, "equipped_armor_hands", None),
                 getattr(player, "equipped_armor_feet", None),
-            ]:
-                equipped_mark = " [ЭКИП]"
-            msg += (
-                f"{idx}. 🛡️ {item_name}{equipped_mark}\n"
-                f"   Защита {item.get('defense', 0)} | Вес {_fmt_weight(item)} | x{item.get('quantity', 1)}\n"
-            )
+            ]
+            msg += _inventory_card(idx, item, "🛡️", [f"Защита {item.get('defense', 0)}"], equipped=equipped)
         msg += _screen_footer("надеть/снять")
     else:
         msg = _screen_header("Инвентарь: броня", player) + "\nПусто."
@@ -454,10 +528,12 @@ def show_backpacks(player, vk, user_id: int):
     if player.inventory.backpacks:
         msg = _screen_header("Инвентарь: рюкзаки", player) + "\n"
         for idx, b in enumerate(player.inventory.backpacks, 1):
-            equipped_mark = " [ЭКИП]" if b['name'] == player.equipped_backpack else ""
-            msg += (
-                f"{idx}. 🎒 {b['name']}{equipped_mark}\n"
-                f"   Бонус веса +{b.get('backpack_bonus', 0)}кг | Вес {_fmt_weight(b)} | x{b.get('quantity', 1)}\n"
+            msg += _inventory_card(
+                idx,
+                b,
+                "🎒",
+                [f"Бонус веса +{b.get('backpack_bonus', 0)}кг"],
+                equipped=b['name'] == player.equipped_backpack,
             )
         msg += f"\nНадето: {player.equipped_backpack or 'нет'}"
         msg += _screen_footer("надеть/снять")
@@ -485,44 +561,18 @@ def show_artifacts(player, vk, user_id: int):
         for idx, art_name in enumerate(equipped, 1):
             art_info = database.get_item_by_name(art_name)
             if art_info:
-                bonuses = []
-                if art_info.get('crit_bonus'):
-                    bonuses.append(f"крит:+{art_info['crit_bonus']}%")
-                if art_info.get('find_bonus'):
-                    bonuses.append(f"находка:+{art_info['find_bonus']}%")
-                if art_info.get('radiation'):
-                    bonuses.append(f"рад:{art_info['radiation']}")
-                if art_info.get('energy_bonus'):
-                    bonuses.append(f"энергия:+{art_info['energy_bonus']}")
-                if art_info.get('defense_bonus'):
-                    bonuses.append(f"защита:+{art_info['defense_bonus']}%")
-                if art_info.get('dodge_bonus'):
-                    bonuses.append(f"уклон:+{art_info['dodge_bonus']}%")
-
-                bonus_str = ", ".join(bonuses) if bonuses else "без бонусов"
+                bonus_str = _artifact_bonus_text(art_info)
                 msg += f"{idx}. 🔮 {art_name} [ЭКИП]\n   {bonus_str}\n"
 
     if artifacts:
         msg += f"\n{ui.section('В рюкзаке')}\n"
         for idx, art in enumerate(artifacts, len(equipped) + 1):
-            bonuses = []
-            if art.get('crit_bonus'):
-                bonuses.append(f"крит:+{art['crit_bonus']}%")
-            if art.get('find_bonus'):
-                bonuses.append(f"находка:+{art['find_bonus']}%")
-            if art.get('radiation'):
-                bonuses.append(f"рад:{art['radiation']}")
-            if art.get('energy_bonus'):
-                bonuses.append(f"энергия:+{art['energy_bonus']}")
-            if art.get('defense_bonus'):
-                bonuses.append(f"защита:+{art['defense_bonus']}%")
-            if art.get('dodge_bonus'):
-                bonuses.append(f"уклон:+{art['dodge_bonus']}%")
-
-            bonus_str = ", ".join(bonuses) if bonuses else "без бонусов"
-            msg += (
-                f"{idx}. 🔸 {art['name']}\n"
-                f"   {bonus_str} | Вес {_fmt_weight(art, default=0.5)} | x{art.get('quantity', 1)}\n"
+            msg += _inventory_card(
+                idx,
+                art,
+                "🔸",
+                [_artifact_bonus_text(art)],
+                default_weight=0.5,
             )
         msg += _screen_footer("надеть/снять")
     elif not equipped:
@@ -543,11 +593,7 @@ def show_other(player, vk, user_id: int):
     if items:
         msg = _screen_header("Инвентарь: другое", player) + "\n"
         for idx, item in enumerate(items, 1):
-            equipped_mark = " [ЭКИП]" if item['name'] == player.equipped_device else ""
-            msg += (
-                f"{idx}. 📦 {item['name']}{equipped_mark}\n"
-                f"   Вес {_fmt_weight(item, default=0.5)} | x{item.get('quantity', 1)}\n"
-            )
+            msg += _inventory_card(idx, item, "📦", [], equipped=item['name'] == player.equipped_device, default_weight=0.5)
         msg += _screen_footer("использовать/экипировать")
     else:
         msg = _screen_header("Инвентарь: другое", player) + "\nПусто."
@@ -578,27 +624,27 @@ def show_resources_shop(player, vk, user_id: int):
 
     msg += f"{ui.section('Гильзы')}\n"
     for idx, item in enumerate(resources, 1):
-        price = item.get('price', 0)
-        name = item['name']
-        desc = item.get('description', '')[:50]
-        weight = item.get('weight', 0.1)
-        msg += f"{idx}. {name}\n"
-        msg += f"   Цена: {price} руб. | Вес: {weight}кг\n"
-        if desc:
-            msg += f"   {desc}\n"
-        msg += "\n"
+        msg += _shop_card(
+            idx,
+            item,
+            "🎯",
+            [f"Вес {_fmt_weight(item, default=0.1)}"],
+            desc_limit=54,
+            include_stock=False,
+        )
 
     if shells_bags:
         msg += f"{ui.section('Мешочки для гильз')}\n"
         start_idx = len(resources) + 1
         for idx, item in enumerate(shells_bags, start_idx):
-            price = item.get('price', 0)
-            name = item['name']
-            capacity = item.get('backpack_bonus', 0)  # Вместимость
-            weight = item.get('weight', 0.1)
-            msg += f"{idx}. {name}\n"
-            msg += f"   Вместимость: {capacity} гильз | Вес: {weight}кг\n"
-            msg += f"   Цена: {price} руб.\n\n"
+            capacity = item.get('backpack_bonus', 0)
+            msg += _shop_card(
+                idx,
+                item,
+                "👝",
+                [f"Вместимость {capacity} гильз", f"Вес {_fmt_weight(item, default=0.1)}"],
+                include_stock=False,
+            )
 
     msg += f"{ui.section('Баланс')}\n"
     msg += f"💰 Деньги: {player.money} руб.\n"
@@ -1318,26 +1364,13 @@ def show_soldier_weapons(player, vk, user_id: int):
             msg += f"📣 {event_text}\n\n"
 
         for idx, weapon in enumerate(weapons, 1):
-            name = weapon['name']
-            price = weapon.get('price', 0)
-            base_price = weapon.get('base_price', price)
-            attack = weapon.get('attack', 0)
-            weight = weapon.get('weight', 1.0)
-            desc = weapon.get('description', '')[:40]
-            stock_left = weapon.get('stock_left', 0)
-            is_featured = weapon.get('is_featured', False)
-            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
-
-            msg += f"{idx}. {name}{featured}\n"
-            level_text = f" | Ур. L{weapon.get('item_level')}" if weapon.get('item_level') else ""
-            req_text = f" | Треб. L{weapon.get('required_level')}" if weapon.get('required_level') else ""
-            msg += f"   🔫 Урон: {attack}{level_text}{req_text} | Вес: {weight}кг\n"
-            msg += f"   📝 {desc}\n"
-            if is_featured and base_price != price:
-                msg += f"   💵 Цена: {price} руб. (было {base_price})\n"
-            else:
-                msg += f"   💵 Цена: {price} руб.\n"
-            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
+            stats = [f"Урон {weapon.get('attack', 0)}"]
+            if weapon.get('item_level'):
+                stats.append(f"Ур. L{weapon.get('item_level')}")
+            if weapon.get('required_level'):
+                stats.append(f"Треб. L{weapon.get('required_level')}")
+            stats.append(f"Вес {_fmt_weight(weapon)}")
+            msg += _shop_card(idx, weapon, "🔫", stats, desc_limit=42)
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'"
 
@@ -1416,24 +1449,13 @@ def show_soldier_armor(player, vk, user_id: int):
             msg += f"📣 {event_text}\n\n"
 
         for idx, armor in enumerate(armor_list, 1):
-            name = armor['name']
-            price = armor.get('price', 0)
-            base_price = armor.get('base_price', price)
-            defense = armor.get('defense', 0)
-            weight = armor.get('weight', 1.0)
-            desc = armor.get('description', '')[:40]
-            stock_left = armor.get('stock_left', 0)
-            is_featured = armor.get('is_featured', False)
-            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
-
-            msg += f"{idx}. {name}{featured}\n"
-            msg += f"   🛡️ Защита: {defense} | Вес: {weight}кг\n"
-            msg += f"   📝 {desc}\n"
-            if is_featured and base_price != price:
-                msg += f"   💵 Цена: {price} руб. (было {base_price})\n"
-            else:
-                msg += f"   💵 Цена: {price} руб.\n"
-            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
+            msg += _shop_card(
+                idx,
+                armor,
+                "🛡️",
+                [f"Защита {armor.get('defense', 0)}", f"Вес {_fmt_weight(armor)}"],
+                desc_limit=42,
+            )
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'"
 
@@ -1535,21 +1557,14 @@ def show_scientist_shop(player, vk, user_id: int, category: str = 'all'):
             msg += f"📣 {event_text}\n\n"
 
         for idx, item in enumerate(items, 1):
-            name = item['name']
-            price = item.get('price', 0)
-            base_price = item.get('base_price', price)
-            weight = item.get('weight', 0.1)
-            desc = item.get('description', '')[:35]
-            stock_left = item.get('stock_left', 0)
-            is_featured = item.get('is_featured', False)
-            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
-            msg += f"{idx}. {name}{featured}\n"
-            msg += f"   📝 {desc}\n"
-            if is_featured and base_price != price:
-                msg += f"   💵 Цена: {price} руб. (было {base_price}) | Вес: {weight}кг\n"
-            else:
-                msg += f"   💵 Цена: {price} руб. | Вес: {weight}кг\n"
-            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
+            icon = "💊" if category == "meds" else "⚡"
+            msg += _shop_card(
+                idx,
+                item,
+                icon,
+                [f"Вес {_fmt_weight(item, default=0.1)}"],
+                desc_limit=40,
+            )
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'\n"
         msg += "\nНажми 'Назад' для выбора категории"
@@ -1748,36 +1763,23 @@ def show_trader_shop_all(player, vk, user_id: int):
 
         for idx, item in enumerate(items, 1):
             icon = cat_emoji.get(str(item.get("category") or "").lower(), "📦")
-            name = item.get('name', 'Предмет')
-            price = int(item.get('price', 0) or 0)
-            base_price = int(item.get('base_price', price) or price)
-            stock_left = int(item.get('stock_left', 0) or 0)
             attack = int(item.get('attack', 0) or 0)
             defense = int(item.get('defense', 0) or 0)
-            weight = item.get('weight', 0.1)
-            desc = str(item.get('description', '') or '')[:42]
-            is_featured = bool(item.get('is_featured', False))
-            featured = " ⭐ ТОВАР ДНЯ" if is_featured else ""
 
             stat_parts = []
             if attack > 0:
-                stat_parts.append(f"урон {attack}")
+                stat_parts.append(f"Урон {attack}")
             if item.get("item_level"):
                 stat_parts.append(f"L{item.get('item_level')}/{item.get('required_level', 1)}")
             if item.get("item_rank"):
-                stat_parts.append(f"ранг {item.get('item_rank')}")
+                stat_parts.append(f"Ранг {item.get('item_rank')}")
             if defense > 0:
-                stat_parts.append(f"защита {defense}")
-            stat_line = " | ".join(stat_parts) if stat_parts else "универсал"
+                stat_parts.append(f"Защита {defense}")
+            if not stat_parts:
+                stat_parts.append("Универсал")
+            stat_parts.append(f"Вес {_fmt_weight(item, default=0.1)}")
 
-            msg += f"{idx}. {icon} {name}{featured}\n"
-            msg += f"   📊 {stat_line} | Вес: {weight}кг\n"
-            msg += f"   📝 {desc}\n"
-            if is_featured and base_price != price:
-                msg += f"   💵 Цена: {price} руб. (было {base_price})\n"
-            else:
-                msg += f"   💵 Цена: {price} руб.\n"
-            msg += f"   📦 Остаток: {stock_left} шт.\n\n"
+            msg += _shop_card(idx, item, icon, stat_parts, desc_limit=44)
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'"
 
@@ -1824,23 +1826,20 @@ def show_trader_sell_all(player, vk, user_id: int):
             'sell_all': sellables,
         })
 
-        msg = "💰 СКУПКА БАРЫГИ (ВСЕ ПРЕДМЕТЫ)\n\n"
+        msg = f"{ui.title('Скупка Барыги')}\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
         event_text = database.get_shop_event_text(database.NPC_MERCHANT_TRADER)
         if event_text:
             msg += f"📣 {event_text}\n\n"
 
         for idx, item in enumerate(sellables, 1):
-            name = item['name']
-            qty = int(item.get('quantity', 1) or 1)
             preview = database.get_npc_sell_price_preview(
-                name,
+                item['name'],
                 merchant_id=database.NPC_MERCHANT_TRADER,
                 sell_bonus_pct=player.sell_bonus,
             )
             price = int((preview or {}).get("sell_price", 0) or 0)
-            msg += f"{idx}. {name} x{qty}\n"
-            msg += f"   💵 Продам за: ~{price} руб./шт\n\n"
+            msg += _inventory_card(idx, item, "📦", [f"Продажа ~{price} руб./шт"], default_weight=0.5)
 
         msg += "Напиши 'продать <номер>' или 'продать <название>'"
 
@@ -1870,7 +1869,7 @@ def show_sell_artifacts(player, vk, user_id: int):
         if not artifacts:
             vk.messages.send(
                 user_id=user_id,
-                message="💰ПРОДАЖА АРТЕФАКТОВ\n\nУ тебя нет артефактов для продажи.\n\n"
+                message=f"{ui.title('Продажа артефактов')}\n\nУ тебя нет артефактов для продажи.\n\n"
                         "Артефакты можно найти в аномалиях на дорогах.",
                 random_id=0
             )
@@ -1882,7 +1881,7 @@ def show_sell_artifacts(player, vk, user_id: int):
             'sell_artifacts': artifacts,
         })
 
-        msg = "💰ПРОДАЖА АРТЕФАКТОВ\n\n"
+        msg = f"{ui.title('Продажа артефактов')}\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
         event_text = database.get_shop_event_text(database.NPC_MERCHANT_TRADER)
         if event_text:
@@ -1896,21 +1895,19 @@ def show_sell_artifacts(player, vk, user_id: int):
                 sell_bonus_pct=player.sell_bonus,
             )
             base_price = price_preview["sell_price"] if price_preview else 50
-            weight = art.get('weight', 0.1)
-
             bonuses = []
             item_info = database.get_item_by_name(name)
             if item_info and item_info.get('crit_bonus'):
-                bonuses.append(f"крит:+{item_info['crit_bonus']}%")
+                bonuses.append(f"крит +{item_info['crit_bonus']}%")
             if item_info and item_info.get('find_bonus'):
-                bonuses.append(f"находка:+{item_info['find_bonus']}%")
+                bonuses.append(f"находка +{item_info['find_bonus']}%")
             if item_info and item_info.get('radiation'):
-                bonuses.append(f"рад:{item_info['radiation']}")
+                bonuses.append(f"рад {item_info['radiation']}")
 
-            bonus_str = f" ({', '.join(bonuses)})" if bonuses else ""
-            msg += f"{idx}. {name}{bonus_str}\n"
-            msg += f"   💵 Продам за: ~{base_price} руб.\n"
-            msg += f"   ⚖️ Вес: {weight}кг\n\n"
+            stats = [f"Продажа ~{base_price} руб."]
+            if bonuses:
+                stats.insert(0, ", ".join(bonuses))
+            msg += _inventory_card(idx, art, "🔮", stats, default_weight=0.1)
 
         msg += "Напиши 'продать <номер>' или 'продать <название>'\n"
         msg += "\nНажми 'Назад' для возврата в магазин"

@@ -9,6 +9,7 @@ import random
 import time
 from typing import Optional
 from infra import database
+from infra import vk_messages
 from game.constants import RESEARCH_LOCATIONS, NPC_LOCATIONS, SAFE_LOCATIONS
 
 logger = logging.getLogger(__name__)
@@ -99,25 +100,14 @@ def _upload_location_image(vk, user_id: int, location_id: str) -> str | None:
 
 def _send_location_message(vk, user_id: int, location_id: str, message: str, keyboard):
     """Отправить описание локации с картинкой, если она есть."""
-    send_kwargs = {
-        "user_id": user_id,
-        "message": message,
-        "keyboard": keyboard,
-        "random_id": 0,
-    }
-
     attachment = _upload_location_image(vk, user_id, location_id)
-    if attachment:
-        send_kwargs["attachment"] = attachment
-
-    try:
-        vk.messages.send(**send_kwargs)
-    except Exception:
-        if "attachment" not in send_kwargs:
-            raise
-        logger.exception("Не удалось отправить локацию с картинкой, повторяю без attachment")
-        send_kwargs.pop("attachment", None)
-        vk.messages.send(**send_kwargs)
+    vk_messages.send(
+        vk,
+        user_id=user_id,
+        message=message,
+        keyboard=keyboard,
+        attachment=attachment,
+    )
 
 
 def _should_use_travel_corridor(from_location: str, to_location: str) -> bool:
