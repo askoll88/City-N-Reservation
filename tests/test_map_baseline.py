@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from game.constants import (
     ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION,
@@ -11,6 +12,9 @@ from game.location_mechanics import LOCATION_LOOT_BIAS, LOCATION_MODIFIERS
 from handlers.combat import RESEARCH_EVENTS
 from models.enemies import ENEMIES
 from models.locations import LOCATIONS
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class MapBaselineTests(unittest.TestCase):
@@ -51,6 +55,20 @@ class MapBaselineTests(unittest.TestCase):
                     LOCATIONS,
                     f"{location_id}: exit '{alias}' points to missing location '{target_id}'",
                 )
+
+    def test_location_images_exist(self):
+        for location_id, location in LOCATIONS.items():
+            image_name = location.get("image")
+            if not image_name:
+                continue
+            candidates = [
+                PROJECT_ROOT / "img" / image_name,
+                PROJECT_ROOT / "Img" / image_name,
+            ]
+            self.assertTrue(
+                any(path.exists() for path in candidates),
+                f"{location_id}: missing image asset '{image_name}'",
+            )
 
     def test_safe_locations_are_known_locations(self):
         for location_id in SAFE_LOCATIONS:
