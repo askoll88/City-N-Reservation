@@ -1086,6 +1086,17 @@ def _do_callback_processing(event, vk):
         handle_anomaly_action(player, vk, user_id, action_text)
         return
 
+    if payload.get("command") == "random_event":
+        from infra.state_manager import has_pending_event
+        if not has_pending_event(user_id):
+            _answer_callback(event, vk, "Событие уже закрыто")
+            return
+        _answer_callback(event, vk, "Событие обновлено")
+        player = get_player(user_id)
+        from handlers.events import handle_event_callback
+        handle_event_callback(player, vk, user_id, payload)
+        return
+
     if payload.get("command") == "heal_confirm":
         action = payload.get("action")
         _answer_callback(event, vk, "Лечение обработано")

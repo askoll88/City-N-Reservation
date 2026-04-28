@@ -592,12 +592,12 @@ def create_daily_quests_keyboard():
 # Случайные события
 # ============================================================
 
-def create_random_event_keyboard(event: dict, stage_index: int = 0):
+def create_random_event_keyboard(event: dict, stage_index: int = 0, *, inline: bool = False):
     """Выбор в случайном событии
 
     Для мульти-стадийных событий берёт choices из текущей стадии.
     """
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
 
     # Мульти-стадийные события: choices внутри каждой стадии
     if event.get("type") == "multi_stage":
@@ -616,9 +616,15 @@ def create_random_event_keyboard(event: dict, stage_index: int = 0):
             color = VkKeyboardColor.NEGATIVE
         else:
             color = VkKeyboardColor.PRIMARY
-        keyboard.add_button(choice["label"], color=color)
+        if inline:
+            _add_callback_button(keyboard, choice["label"], command="random_event", action="choice", choice=i - 1, color=color)
+        else:
+            keyboard.add_button(choice["label"], color=color)
         keyboard.add_line()
-    keyboard.add_button("Пропустить", color=VkKeyboardColor.SECONDARY)
+    if inline:
+        _add_callback_button(keyboard, "Пропустить", command="random_event", action="skip", color=VkKeyboardColor.SECONDARY)
+    else:
+        keyboard.add_button("Пропустить", color=VkKeyboardColor.SECONDARY)
     return keyboard
 
 

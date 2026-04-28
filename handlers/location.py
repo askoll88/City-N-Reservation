@@ -356,8 +356,8 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
     Возвращает True если сгенерирован интерактивный контент (бой/ивент).
     """
     from infra.state_manager import set_pending_event, update_travel_data
-    from game.random_events import get_random_event, format_event_message
-    from handlers.keyboards import create_random_event_keyboard
+    from game.random_events import get_random_event
+    from handlers.events import show_random_event
     from handlers.combat import _spawn_enemy
     from game.emission import is_emission_rare_enemy_bonus
 
@@ -373,15 +373,7 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
         if event:
             set_pending_event(user_id, event)
             database.set_user_flag(user_id, "last_random_event_time", int(time.time()))
-            vk.messages.send(
-                user_id=user_id,
-                message=(
-                    "🧭 В пути происходит событие...\n\n"
-                    f"{format_event_message(event)}"
-                ),
-                keyboard=create_random_event_keyboard(event).get_keyboard(),
-                random_id=0,
-            )
+            show_random_event(player, vk, user_id, event, prefix="🧭 В пути происходит событие...")
             return True
 
     # 2) Бой в пути
