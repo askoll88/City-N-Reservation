@@ -38,6 +38,25 @@ def _send_combat_screen(vk, user_id: int, message: str, keyboard=None):
     try_edit_or_send_ui(vk, user_id, "combat", message, keyboard=keyboard)
 
 
+def show_current_combat_screen(player, vk, user_id: int, prefix: str | None = None):
+    """Вернуть активный экран боя к текущему HUD."""
+    combat = _combat_state.get(user_id)
+    if not combat:
+        return False
+
+    message = _format_combat_hud(combat, player)
+    if prefix:
+        message = f"{prefix}\n\n{message}"
+
+    _send_combat_screen(
+        vk,
+        user_id,
+        message,
+        keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
+    )
+    return True
+
+
 def _send_anomaly_screen(vk, user_id: int, message: str, keyboard=None):
     """Обновить активный экран аномалии."""
     try_edit_or_send_ui(vk, user_id, "anomaly", message, keyboard=keyboard)
@@ -3004,6 +3023,29 @@ def create_combat_keyboard(player=None, user_id=None, *, inline: bool = True):
             color=VkKeyboardColor.NEGATIVE,
             payload={**base_payload, "action": "flee"},
         )
+    return keyboard
+
+
+def create_combat_inventory_keyboard(user_id=None, *, inline: bool = True):
+    """Клавиатура боевого инвентаря: только возврат к бою."""
+    from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+
+    combat_id = None
+    if user_id is not None:
+        combat = _combat_state.get(user_id)
+        if combat:
+            combat_id = combat.get("combat_id")
+
+    payload = {"command": "combat_action", "action": "back"}
+    if combat_id:
+        payload["combat_id"] = combat_id
+
+    keyboard = VkKeyboard(one_time=False, inline=inline)
+    keyboard.add_callback_button(
+        "Назад к бою",
+        color=VkKeyboardColor.NEGATIVE,
+        payload=payload,
+    )
     return keyboard
 
 

@@ -14,7 +14,10 @@ from handlers.location import (
 )
 from handlers.combat import (
     handle_explore, handle_combat_attack, handle_combat_flee,
-    show_skills_in_combat, use_skill, create_combat_keyboard as create_dynamic_combat_keyboard
+    show_skills_in_combat, use_skill,
+    create_combat_inventory_keyboard,
+    create_combat_keyboard as create_dynamic_combat_keyboard,
+    show_current_combat_screen,
 )
 from handlers.keyboards import (
     create_location_keyboard,
@@ -293,12 +296,7 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
 
     # Возврат в бой
     if text == 'назад':
-        vk.messages.send(
-            user_id=user_id,
-            message="⚔️ Возвращаемся в бой!",
-            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-            random_id=0
-        )
+        show_current_combat_screen(player, vk, user_id, prefix="⚔️ Возвращаемся в бой.")
         return True
 
     # Блок любых переходов/экранов во время боя
@@ -328,28 +326,33 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
 
 def _show_combat_inventory(player, vk, user_id: int):
     """Показать расходники, которые можно использовать прямо в бою."""
+    from infra.state_manager import try_edit_or_send_ui
+
     player.inventory.reload()
     items = player.inventory.other
+    keyboard = create_combat_inventory_keyboard(user_id).get_keyboard()
 
     if not items:
-        vk.messages.send(
-            user_id=user_id,
-            message="🎒 В боевом кармане пусто.\nНет расходников для использования.",
-            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-            random_id=0
+        try_edit_or_send_ui(
+            vk,
+            user_id,
+            "combat",
+            "🎒 В боевом кармане пусто.\nНет расходников для использования.",
+            keyboard=keyboard,
         )
         return
 
     msg = "🎒 БОЕВОЙ ИНВЕНТАРЬ\n\n"
     for idx, item in enumerate(items, 1):
         msg += f"{idx}. {item['name']} x{item.get('quantity', 1)}\n"
-    msg += "\nИспользуй: 'использовать <номер>' или 'использовать <название>'\nНазад — вернуться в бой."
+    msg += "\nИспользуй текстом: использовать <номер> или использовать <название>."
 
-    vk.messages.send(
-        user_id=user_id,
-        message=msg,
-        keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-        random_id=0
+    try_edit_or_send_ui(
+        vk,
+        user_id,
+        "combat",
+        msg,
+        keyboard=keyboard,
     )
 
 

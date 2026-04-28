@@ -10,10 +10,11 @@ from handlers.combat import (
     _will_continue_mutant_hunt,
     create_anomaly_keyboard,
     create_combat_keyboard,
+    create_combat_inventory_keyboard,
     create_skills_keyboard,
     RESEARCH_EVENTS,
 )
-from infra.state_manager import clear_combat_state, set_combat_state
+from infra.state_manager import clear_combat_state, invalidate_edit_targets, set_combat_state, set_ui_message
 
 
 class DummyClassPlayer:
@@ -27,6 +28,8 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
 
     def tearDown(self):
         clear_combat_state(1)
+        clear_combat_state(77)
+        invalidate_edit_targets(77)
 
     def test_combat_attack_button_is_callback(self):
         keyboard = json.loads(create_combat_keyboard(DummyClassPlayer(), user_id=1).get_keyboard())
@@ -147,6 +150,67 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         keyboard = json.loads(create_combat_keyboard(DummyClassPlayer(), user_id=1).get_keyboard())
 
         self.assertNotIn("Назад", json.dumps(keyboard, ensure_ascii=False))
+
+    def test_combat_inventory_keyboard_has_only_back_button(self):
+        set_combat_state(1, {"combat_id": "fight-1"})
+
+        keyboard = json.loads(create_combat_inventory_keyboard(user_id=1).get_keyboard())
+
+        self.assertTrue(keyboard["inline"])
+        self.assertEqual(len(keyboard["buttons"]), 1)
+        self.assertEqual(len(keyboard["buttons"][0]), 1)
+        button = keyboard["buttons"][0][0]
+        self.assertEqual(button["action"]["label"], "Назад к бою")
+        self.assertEqual(
+            json.loads(button["action"]["payload"]),
+            {"command": "combat_action", "action": "back", "combat_id": "fight-1"},
+        )
+
+    def test_combat_inventory_edits_active_combat_message(self):
+        from handlers.commands import handle_combat_commands
+
+        class Inventory:
+            other = [{"name": "Бинт", "quantity": 2}]
+
+            def reload(self):
+                pass
+
+        class Player:
+            inventory = Inventory()
+            player_class = None
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+                self.edited = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 101
+
+            def edit(self, **kwargs):
+                self.edited.append(kwargs)
+                return 1
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        vk = Vk()
+        set_combat_state(77, {"combat_id": "fight-77"})
+        set_ui_message(77, "combat", 55, peer_id=77)
+
+        handled = handle_combat_commands(Player(), vk, 77, "инвентарь", "Инвентарь")
+
+        self.assertTrue(handled)
+        self.assertEqual(vk.messages.sent, [])
+        self.assertEqual(len(vk.messages.edited), 1)
+        edited = vk.messages.edited[0]
+        self.assertEqual(edited["message_id"], 55)
+        self.assertIn("БОЕВОЙ ИНВЕНТАРЬ", edited["message"])
+        self.assertIn("Бинт x2", edited["message"])
+        self.assertNotIn("Атаковать", edited["keyboard"])
+        self.assertIn("Назад к бою", edited["keyboard"])
 
     def test_many_skills_fall_back_to_lower_keyboard(self):
         class FakeClass:
