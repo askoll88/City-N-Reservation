@@ -44,6 +44,11 @@ def _add_meta_row(keyboard, include_map: bool = True):
     keyboard.add_button("Персонаж", color=VkKeyboardColor.SECONDARY)
 
 
+def _add_callback_button(keyboard, label: str, *, command: str, color=VkKeyboardColor.SECONDARY, **payload):
+    """Добавить callback-кнопку с единым payload."""
+    keyboard.add_callback_button(label, color=color, payload={"command": command, **payload})
+
+
 def create_character_keyboard():
     """Экран персонажа: статус, инвентарь, задания."""
     keyboard = VkKeyboard(one_time=False)
@@ -188,11 +193,11 @@ def create_map_overview_keyboard(current_location_id: str = None):
     """Карта: выбор региона без списка всех локаций."""
     keyboard = VkKeyboard(one_time=False)
     current = current_location_id or "город"
-    keyboard.add_button("Карта: Город", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Карта: Военный сектор", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Карта: Город", command="map", region="city", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Карта: Военный сектор", command="map", region="military", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
-    keyboard.add_button("Карта: НИИ", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Карта: Лес", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Карта: НИИ", command="map", region="science", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Карта: Лес", command="map", region="forest", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     if current == "город":
         keyboard.add_button("КПП", color=VkKeyboardColor.SECONDARY)
@@ -206,7 +211,7 @@ def create_map_overview_keyboard(current_location_id: str = None):
     elif current in RESEARCH_LOCATIONS:
         keyboard.add_button("В КПП", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
-    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "Назад", command="back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -308,8 +313,8 @@ def create_map_region_keyboard(region_id: str, current_location_id: str = None):
             keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
             keyboard.add_line()
 
-    keyboard.add_button("Карта", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "Карта", command="map", region="overview", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "Назад", command="back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 

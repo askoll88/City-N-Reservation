@@ -1,4 +1,5 @@
 import unittest
+import json
 
 from handlers.keyboards import create_location_keyboard, create_map_overview_keyboard, create_map_region_keyboard
 from handlers.map_screen import (
@@ -83,6 +84,22 @@ class MapScreenTests(unittest.TestCase):
         self.assertNotIn("КПП", overview_from_service)
         self.assertIn("Дорога на НИИ", region_keyboard)
         self.assertIn("Назад", region_keyboard)
+
+    def test_map_region_buttons_are_callbacks(self):
+        keyboard = json.loads(create_map_overview_keyboard("город").get_keyboard())
+        first_button = keyboard["buttons"][0][0]
+        payload = json.loads(first_button["action"]["payload"])
+
+        self.assertEqual(first_button["action"]["type"], "callback")
+        self.assertEqual(payload, {"command": "map", "region": "city"})
+
+    def test_map_back_button_is_callback(self):
+        keyboard = json.loads(create_map_region_keyboard("science", "кпп").get_keyboard())
+        back_button = keyboard["buttons"][-1][-1]
+        payload = json.loads(back_button["action"]["payload"])
+
+        self.assertEqual(back_button["action"]["type"], "callback")
+        self.assertEqual(payload["command"], "back")
 
 
 if __name__ == "__main__":

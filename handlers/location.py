@@ -239,19 +239,6 @@ def _get_travel_duration_seconds(from_location: str, to_location: str) -> int:
     return max(TRAVEL_MIN_SECONDS, base + jitter)
 
 
-def _is_location_locked(user_id: int, location_id: str) -> bool:
-    """Проверка ограничений входа в локацию."""
-    if location_id != "убежище":
-        return False
-
-    try:
-        return bool(database.get_user_flag(user_id, "newbie_kit_received", default=0))
-    except Exception:
-        logger.exception("Ошибка проверки блокировки локации: user_id=%s location=%s", user_id, location_id)
-        # Fail-open: лучше не блокировать игрока из-за временной ошибки БД.
-        return False
-
-
 def _validate_travel_state(travel: dict | None) -> tuple[bool, str]:
     """Быстрая валидация структуры travel-state перед тиками/командами."""
     if not isinstance(travel, dict):
@@ -717,21 +704,6 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
                 random_id=0,
             )
             return
-
-    if _is_location_locked(user_id, location_id):
-        set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
-        vk.messages.send(
-            user_id=user_id,
-            message=(
-                "УБЕЖИЩЕ ЗАКРЫТО\n\n"
-                "Вход закрыт. Местный житель предупреждал — после получения набора "
-                "ты должен выживать в Зоне сам.\n\n"
-                "Иди на КПП -> в Зону."
-            ),
-            keyboard=create_location_keyboard("город").get_keyboard(),
-            random_id=0,
-        )
-        return
 
     # Безопасные переходы (внутри города/хабов) оставляем мгновенными.
     if not _should_use_travel_corridor(from_location, location_id):

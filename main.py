@@ -59,7 +59,7 @@ from handlers.commands import (
 )
 
 from handlers.location import go_to_location, go_back, handle_travel_commands, travel_tick
-from handlers.map_screen import handle_map_command
+from handlers.map_screen import handle_map_command, show_map
 from handlers.admin import handle_admin_commands
 from infra.state_manager import (
     is_in_combat, is_in_dialog,
@@ -920,10 +920,26 @@ def _process_callback_event(event, vk):
 
 def _do_callback_processing(event, vk):
     """Основная логика обработки callback-события."""
-    payload = event.obj.payload
+    payload = event.obj.payload or {}
+    user_id = getattr(event.obj, "user_id", 0)
 
-    if payload and payload.get("command") == "back":
-        user_id = getattr(event.obj, "user_id", 0)
+    if payload.get("command") == "map":
+        region = payload.get("region")
+        if region == "overview":
+            region = None
+        player = get_player(user_id)
+        show_map(player, vk, user_id, region)
+        vk_messages.answer_event(
+            vk,
+            event_id=event.obj.event_id,
+            user_id=event.obj.user_id,
+            peer_id=event.obj.peer_id,
+            text="Карта обновлена",
+            show_snackbar=True,
+        )
+        return
+
+    if payload.get("command") == "back":
         player = get_player(user_id)
         try:
             _apply_shelter_passive_energy_regen(player, user_id)
@@ -941,12 +957,23 @@ def _do_callback_processing(event, vk):
         player.current_location_id = return_location
         database.update_user_location(user_id, return_location)
         _set_shelter_regen_anchor(user_id, in_shelter=(return_location == "убежище"))
+        vk_messages.answer_event(
+            vk,
+            event_id=event.obj.event_id,
+            user_id=event.obj.user_id,
+            peer_id=event.obj.peer_id,
+            text="Возврат",
+            show_snackbar=True,
+        )
+        return
 
     vk_messages.answer_event(
         vk,
         event_id=event.obj.event_id,
         user_id=event.obj.user_id,
         peer_id=event.obj.peer_id,
+        text="Действие устарело",
+        show_snackbar=True,
     )
 
 
