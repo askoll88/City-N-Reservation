@@ -100,6 +100,7 @@ class MapScreenTests(unittest.TestCase):
 
         self.assertTrue(keyboard["inline"])
         self.assertNotIn("Назад", json.dumps(keyboard, ensure_ascii=False))
+        self.assertTrue(all(len(row) == 1 for row in keyboard["buttons"]))
 
     def test_map_back_button_is_callback(self):
         keyboard = json.loads(create_map_region_keyboard("science", "кпп").get_keyboard())
@@ -113,6 +114,7 @@ class MapScreenTests(unittest.TestCase):
         keyboard = json.loads(create_map_region_keyboard("science", "кпп", inline=True).get_keyboard())
 
         self.assertNotIn("Назад", json.dumps(keyboard, ensure_ascii=False))
+        self.assertTrue(all(len(row) == 1 for row in keyboard["buttons"]))
 
 
 if __name__ == "__main__":

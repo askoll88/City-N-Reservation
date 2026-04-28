@@ -193,12 +193,16 @@ def create_map_overview_keyboard(current_location_id: str = None, *, inline: boo
     """Карта: выбор региона без дублирования навигации локаций."""
     keyboard = VkKeyboard(one_time=False, inline=inline)
     _add_callback_button(keyboard, "Город", command="map", region="city", color=VkKeyboardColor.PRIMARY)
+    if inline:
+        keyboard.add_line()
     _add_callback_button(keyboard, "Военный сектор", command="map", region="military", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     _add_callback_button(keyboard, "НИИ", command="map", region="science", color=VkKeyboardColor.PRIMARY)
+    if inline:
+        keyboard.add_line()
     _add_callback_button(keyboard, "Лес", command="map", region="forest", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_line()
     if not inline:
+        keyboard.add_line()
         _add_callback_button(keyboard, "Назад", command="back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
@@ -215,7 +219,9 @@ def create_map_region_keyboard(region_id: str, current_location_id: str = None, 
     for idx, (label, tab_region) in enumerate(region_tabs, 1):
         color = VkKeyboardColor.POSITIVE if tab_region == region_id else VkKeyboardColor.SECONDARY
         _add_callback_button(keyboard, label, command="map", region=tab_region, color=color)
-        if idx == 2:
+        if inline and idx < len(region_tabs):
+            keyboard.add_line()
+        elif not inline and idx == 2:
             keyboard.add_line()
     keyboard.add_line()
     _add_callback_button(keyboard, "Обзор", command="map", region="overview", color=VkKeyboardColor.PRIMARY)
