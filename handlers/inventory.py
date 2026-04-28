@@ -491,7 +491,7 @@ def show_weapons(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: оружие", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_armor(player, vk, user_id: int):
@@ -521,7 +521,7 @@ def show_armor(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: броня", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_backpacks(player, vk, user_id: int):
@@ -547,7 +547,7 @@ def show_backpacks(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: рюкзаки", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_artifacts(player, vk, user_id: int):
@@ -585,7 +585,7 @@ def show_artifacts(player, vk, user_id: int):
     elif not equipped:
         msg = _screen_header("Инвентарь: артефакты", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_other(player, vk, user_id: int):
@@ -605,7 +605,7 @@ def show_other(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: другое", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_resources_shop(player, vk, user_id: int):
@@ -681,7 +681,7 @@ def show_all(player, vk, user_id: int):
         + "\nОткрой нужную категорию кнопками ниже — так читать проще."
     )
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_equipped_artifacts(player, vk, user_id: int):
@@ -695,7 +695,7 @@ def show_equipped_artifacts(player, vk, user_id: int):
             "У тебя нет надетых артефактов...\n\n"
             "Зайди в раздел 'Артефакты' чтобы надеть артефакты из инвентаря."
         )
-        _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+        _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
         return
 
     msg = "Надетые артефакты:\n\n"
@@ -722,7 +722,7 @@ def show_equipped_artifacts(player, vk, user_id: int):
 
     msg += "\nНажми цифру чтобы снять артефакт"
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_artifact_slots(player, vk, user_id: int):
@@ -759,7 +759,7 @@ def show_artifact_slots(player, vk, user_id: int):
         else:
             msg += "✅ Условия выполнены. Можно покупать."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_artifact_help(player, vk, user_id: int):
@@ -787,7 +787,7 @@ def show_artifact_help(player, vk, user_id: int):
         "Базово 3 слота. Дополнительные слоты покупаются у Барыги на Черном рынке."
     )
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard(inline=True).get_keyboard())
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def handle_unequip_backpack(player, vk, user_id: int):

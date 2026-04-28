@@ -182,7 +182,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
         vk.messages.send(
             user_id=user_id,
             message="❌ Выставление лота отменено.",
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -194,7 +194,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
             vk.messages.send(
                 user_id=user_id,
                 message="Напиши название предмета из инвентаря. Пример: АК-74",
-                keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+                keyboard=create_market_search_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -221,7 +221,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
                 "Шаг 2/3: укажи цену за 1 шт. (целое число)\n"
                 f"Пример: 1500{price_hint}"
             ),
-            keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+            keyboard=create_market_search_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -231,7 +231,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
             vk.messages.send(
                 user_id=user_id,
                 message="Цена должна быть положительным числом. Пример: 1500",
-                keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+                keyboard=create_market_search_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -246,7 +246,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
                     f"Цена вне диапазона: {int(min_p):,}..{int(max_p):,} руб/шт.\n"
                     "Введи корректную цену."
                 ),
-                keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+                keyboard=create_market_search_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -260,7 +260,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
                 f"📦 {flow['item_name']} | 💵 {flow['price']:,} руб/шт\n\n"
                 "Шаг 3/3: укажи количество (или напиши 'пропустить' для 1 шт.)"
             ),
-            keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+            keyboard=create_market_search_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -272,7 +272,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
                 vk.messages.send(
                     user_id=user_id,
                     message="Количество должно быть положительным числом или 'пропустить'.",
-                    keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+                    keyboard=create_market_search_keyboard().get_keyboard(),
                     random_id=0,
                 )
                 return True
@@ -286,7 +286,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
             vk.messages.send(
                 user_id=user_id,
                 message="⚠️ Данные выставления повреждены. Начни заново: «Выставить лот».",
-                keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+                keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -299,7 +299,7 @@ def _handle_listing_flow(player, vk, user_id: int, text: str, state: dict) -> bo
         vk.messages.send(
             user_id=user_id,
             message=result.get("message", "Не удалось выставить лот."),
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -360,7 +360,7 @@ def _show_market_listings_page(player, vk, user_id, page,
             user_id,
             "market",
             "\n\n".join(msg_parts),
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
         )
         return
 
@@ -386,14 +386,17 @@ def _show_market_listings_page(player, vk, user_id, page,
     lines.append(f"💡 Чтобы выставить: выставить <предмет> <цена> [кол-во]")
     lines.append(f"💡 Чтобы снять: снять лот <id>")
 
-    keyboard = create_market_pagination_keyboard(
-        cur_page,
-        pages,
-        category=category,
-        sort=sort,
-        search=search,
-        inline=True,
-    )
+    if pages > 1:
+        keyboard = create_market_pagination_keyboard(
+            cur_page,
+            pages,
+            category=category,
+            sort=sort,
+            search=search,
+            inline=True,
+        )
+    else:
+        keyboard = create_player_market_keyboard()
     keyboard_payload = _sanitize_keyboard_payload(keyboard.get_keyboard(), max_cols=2)
 
     _send_market_screen(vk, user_id, "\n".join(lines), keyboard=keyboard_payload)
@@ -406,7 +409,7 @@ def show_market_menu(player, vk, user_id):
             vk,
             user_id,
             "⛔ P2P рынок временно находится на техническом обслуживании.",
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
         )
         return
 
@@ -427,7 +430,7 @@ def show_market_menu(player, vk, user_id):
             "• Продать: «Выставить лот» (пошагово) или командой\n"
             "• Купить: купить лот <id>"
         ),
-        keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+        keyboard=create_player_market_keyboard().get_keyboard(),
     )
 
 
@@ -508,7 +511,7 @@ def show_my_market_listings(player, vk, user_id, page=1, status="active"):
             vk,
             user_id,
             f"📭 У тебя нет {status_name} лотов." if status_name else "📭 У тебя нет лотов.",
-            keyboard=create_my_listings_keyboard(cur_page, pages, inline=True).get_keyboard(),
+            keyboard=create_my_listings_keyboard(cur_page, pages).get_keyboard(),
         )
         return
 
@@ -529,7 +532,7 @@ def show_my_market_listings(player, vk, user_id, page=1, status="active"):
     if status == "active":
         lines.append(f"\n💡 Снять лот: снять лот <id>")
 
-    keyboard = create_my_listings_keyboard(cur_page, pages, inline=True)
+    keyboard = create_my_listings_keyboard(cur_page, pages)
     _send_market_screen(
         vk,
         user_id,
@@ -546,7 +549,7 @@ def show_my_market_transactions(player, vk, user_id):
             vk,
             user_id,
             "📭 Сделок пока нет.",
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
         )
         return
 
@@ -562,7 +565,7 @@ def show_my_market_transactions(player, vk, user_id):
         vk,
         user_id,
         "\n".join(lines),
-        keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+        keyboard=create_player_market_keyboard().get_keyboard(),
     )
 
 
@@ -583,7 +586,7 @@ def handle_market_create_listing(player, vk, user_id, text):
     vk.messages.send(
         user_id=user_id,
         message=result.get("message", "Не удалось выставить лот."),
-        keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+        keyboard=create_player_market_keyboard().get_keyboard(),
         random_id=0,
     )
     return True
@@ -610,7 +613,7 @@ def handle_market_buy_listing(player, vk, user_id, text):
         vk.messages.send(
             user_id=user_id,
             message="❌ Лот не найден или уже недоступен.",
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -619,7 +622,7 @@ def handle_market_buy_listing(player, vk, user_id, text):
         vk.messages.send(
             user_id=user_id,
             message="❌ Нельзя купить свой лот.",
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -628,7 +631,7 @@ def handle_market_buy_listing(player, vk, user_id, text):
         vk.messages.send(
             user_id=user_id,
             message=f"❌ Рынок доступен с {config.MARKET_MIN_LEVEL} уровня. У тебя {player.level}.",
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -645,7 +648,7 @@ def handle_market_buy_listing(player, vk, user_id, text):
                     f"❌ {lot_info['item_name']} относится к оружию {required_level} уровня.\n"
                     f"Твой уровень: {player.level}. Это оружие пока нельзя купить."
                 ),
-                keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+                keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -654,7 +657,7 @@ def handle_market_buy_listing(player, vk, user_id, text):
         vk.messages.send(
             user_id=user_id,
             message=f"❌ Не хватает денег. Нужно {total_price:,} руб., у тебя {player.money:,} руб.",
-            keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+            keyboard=create_player_market_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -707,7 +710,7 @@ def handle_market_confirm_purchase(player, vk, user_id, text):
                     f"❌ Покупка отменена.\n\n"
                     f"📦 {pending['item_name']} x{pending['quantity']} — {pending['total_price']:,} руб."
                 ),
-                keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+                keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
             )
         return True
@@ -719,7 +722,7 @@ def handle_market_confirm_purchase(player, vk, user_id, text):
             vk.messages.send(
                 user_id=user_id,
                 message="⚠️ Данные о покупке устарели. Попробуй снова.",
-                keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+                keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -732,7 +735,7 @@ def handle_market_confirm_purchase(player, vk, user_id, text):
             vk.messages.send(
                 user_id=user_id,
                 message=f"❌ Не хватает денег. Нужно {total_price:,} руб., у тебя {player.money:,} руб.",
-                keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+                keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -746,7 +749,7 @@ def handle_market_confirm_purchase(player, vk, user_id, text):
             vk.messages.send(
                 user_id=user_id,
                 message=f"✅ {result['message']}",
-                keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+                keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
             )
             seller_vk_id = int(result.get("seller_vk_id", 0) or 0)
@@ -768,7 +771,7 @@ def handle_market_confirm_purchase(player, vk, user_id, text):
             vk.messages.send(
                 user_id=user_id,
                 message=f"❌ {result.get('message', 'Не удалось купить лот.')}",
-                keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+                keyboard=create_player_market_keyboard().get_keyboard(),
                 random_id=0,
             )
         return True
@@ -787,7 +790,7 @@ def handle_market_cancel_listing(player, vk, user_id, text):
     vk.messages.send(
         user_id=user_id,
         message=result.get("message", "Не удалось снять лот."),
-        keyboard=create_player_market_keyboard(inline=True).get_keyboard(),
+        keyboard=create_player_market_keyboard().get_keyboard(),
         random_id=0,
     )
     if result.get("success"):
@@ -834,7 +837,7 @@ def handle_market_input(player, vk, user_id, text):
                 "Пример: АК-74\n\n"
                 "Для отмены: «Отмена»"
             ),
-            keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+            keyboard=create_market_search_keyboard().get_keyboard(),
             random_id=0,
         )
         return True
@@ -858,7 +861,7 @@ def handle_market_input(player, vk, user_id, text):
             vk.messages.send(
                 user_id=user_id,
                 message="Введи текст для поиска (например: АК-74, Медуза, Аптечка) или нажми «Отмена».",
-                keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+                keyboard=create_market_search_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -867,7 +870,7 @@ def handle_market_input(player, vk, user_id, text):
             vk.messages.send(
                 user_id=user_id,
                 message="Запрос слишком короткий. Введи минимум 2 символа.",
-                keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+                keyboard=create_market_search_keyboard().get_keyboard(),
                 random_id=0,
             )
             return True
@@ -946,7 +949,7 @@ def handle_market_input(player, vk, user_id, text):
                     "Введи название предмета для поиска.\n"
                     "Например: АК-74, Аптечка, Медуза\n\n"
                     "Нажми «Отмена», чтобы вернуться к списку.",
-            keyboard=create_market_search_keyboard(inline=True).get_keyboard(),
+            keyboard=create_market_search_keyboard().get_keyboard(),
             random_id=0,
         )
         # Атомарно обновляем состояние с флагом поиска

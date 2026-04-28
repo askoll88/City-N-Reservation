@@ -72,17 +72,19 @@ class MapScreenTests(unittest.TestCase):
 
         self.assertIn("закрыто", text)
         self.assertIn("уровень 3+", text)
-        self.assertIn("Ближайшая кнопка маршрута: Дорога на зараженный лес", text)
+        self.assertIn("Следующий шаг маршрута: Дорога на зараженный лес", text)
+        self.assertIn("нижнюю клавиатуру", text)
 
-    def test_map_buttons_are_available_from_location_and_region_screen(self):
+    def test_map_buttons_do_not_duplicate_location_navigation(self):
         location_keyboard = create_location_keyboard("город").get_keyboard()
         overview_from_service = create_map_overview_keyboard("больница").get_keyboard()
         region_keyboard = create_map_region_keyboard("science", "кпп").get_keyboard()
 
         self.assertIn("Карта", location_keyboard)
-        self.assertIn("В город", overview_from_service)
+        self.assertNotIn("В город", overview_from_service)
         self.assertNotIn("КПП", overview_from_service)
-        self.assertIn("Дорога на НИИ", region_keyboard)
+        self.assertNotIn("Дорога на НИИ", region_keyboard)
+        self.assertIn("Обзор", region_keyboard)
         self.assertIn("Назад", region_keyboard)
 
     def test_map_region_buttons_are_callbacks(self):
@@ -97,6 +99,7 @@ class MapScreenTests(unittest.TestCase):
         keyboard = json.loads(create_map_overview_keyboard("город", inline=True).get_keyboard())
 
         self.assertTrue(keyboard["inline"])
+        self.assertNotIn("Назад", json.dumps(keyboard, ensure_ascii=False))
 
     def test_map_back_button_is_callback(self):
         keyboard = json.loads(create_map_region_keyboard("science", "кпп").get_keyboard())
@@ -105,6 +108,11 @@ class MapScreenTests(unittest.TestCase):
 
         self.assertEqual(back_button["action"]["type"], "callback")
         self.assertEqual(payload["command"], "back")
+
+    def test_map_inline_region_has_no_back_button(self):
+        keyboard = json.loads(create_map_region_keyboard("science", "кпп", inline=True).get_keyboard())
+
+        self.assertNotIn("Назад", json.dumps(keyboard, ensure_ascii=False))
 
 
 if __name__ == "__main__":

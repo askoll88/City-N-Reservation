@@ -190,131 +190,37 @@ def create_location_keyboard(location_id: str, player_level: int = None):
 # ============================================================
 
 def create_map_overview_keyboard(current_location_id: str = None, *, inline: bool = False):
-    """Карта: выбор региона без списка всех локаций."""
+    """Карта: выбор региона без дублирования навигации локаций."""
     keyboard = VkKeyboard(one_time=False, inline=inline)
-    current = current_location_id or "город"
-    _add_callback_button(keyboard, "Карта: Город", command="map", region="city", color=VkKeyboardColor.PRIMARY)
-    _add_callback_button(keyboard, "Карта: Военный сектор", command="map", region="military", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Город", command="map", region="city", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Военный сектор", command="map", region="military", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
-    _add_callback_button(keyboard, "Карта: НИИ", command="map", region="science", color=VkKeyboardColor.PRIMARY)
-    _add_callback_button(keyboard, "Карта: Лес", command="map", region="forest", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "НИИ", command="map", region="science", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Лес", command="map", region="forest", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
-    if current == "город":
-        keyboard.add_button("КПП", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-    elif current in {"больница", "убежище", "черный рынок"}:
-        keyboard.add_button("В город", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-    elif current in INNER_TO_ROAD_LOCATION:
-        keyboard.add_button(INNER_TO_ROAD_LOCATION[current], color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-    elif current in RESEARCH_LOCATIONS:
-        keyboard.add_button("В КПП", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-    _add_callback_button(keyboard, "Назад", command="back", color=VkKeyboardColor.NEGATIVE)
+    if not inline:
+        _add_callback_button(keyboard, "Назад", command="back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
 def create_map_region_keyboard(region_id: str, current_location_id: str = None, *, inline: bool = False):
-    """Карта выбранного региона: кнопки ведут только к ближайшему шагу маршрута."""
+    """Карта выбранного региона: только вкладки карты, без кнопок перемещения."""
     keyboard = VkKeyboard(one_time=False, inline=inline)
-    current = current_location_id or "город"
-
-    if region_id == "city":
-        if current == "город":
-            keyboard.add_button("Больница", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_button("Убежище", color=VkKeyboardColor.PRIMARY)
+    region_tabs = [
+        ("Город", "city"),
+        ("Военный", "military"),
+        ("НИИ", "science"),
+        ("Лес", "forest"),
+    ]
+    for idx, (label, tab_region) in enumerate(region_tabs, 1):
+        color = VkKeyboardColor.POSITIVE if tab_region == region_id else VkKeyboardColor.SECONDARY
+        _add_callback_button(keyboard, label, command="map", region=tab_region, color=color)
+        if idx == 2:
             keyboard.add_line()
-            keyboard.add_button("Черный рынок", color=VkKeyboardColor.SECONDARY)
-            keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in {"больница", "убежище", "черный рынок", "кпп"}:
-            keyboard.add_button("В город", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in RESEARCH_LOCATIONS:
-            keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-    elif region_id == "military":
-        if current == "дорога_военная_часть":
-            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
-            keyboard.add_button("Военная часть", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-            keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
-            keyboard.add_line()
-        elif current == "военная_часть":
-            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
-            keyboard.add_button("Дорога на военную часть", color=VkKeyboardColor.NEGATIVE)
-            keyboard.add_line()
-        elif current == "кпп":
-            keyboard.add_button("Дорога на военную часть", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in INNER_TO_ROAD_LOCATION:
-            keyboard.add_button(INNER_TO_ROAD_LOCATION[current], color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in RESEARCH_LOCATIONS:
-            keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in {"больница", "убежище", "черный рынок"}:
-            keyboard.add_button("В город", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        else:
-            keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-    elif region_id == "science":
-        if current == "дорога_нии":
-            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
-            keyboard.add_button("Главный корпус НИИ", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-            keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
-            keyboard.add_line()
-        elif current == "главный_корпус_нии":
-            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
-            keyboard.add_button("Дорога на НИИ", color=VkKeyboardColor.NEGATIVE)
-            keyboard.add_line()
-        elif current == "кпп":
-            keyboard.add_button("Дорога на НИИ", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in INNER_TO_ROAD_LOCATION:
-            keyboard.add_button(INNER_TO_ROAD_LOCATION[current], color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in RESEARCH_LOCATIONS:
-            keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in {"больница", "убежище", "черный рынок"}:
-            keyboard.add_button("В город", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        else:
-            keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-    elif region_id == "forest":
-        if current == "дорога_зараженный_лес":
-            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
-            keyboard.add_button("Зараженный лес", color=VkKeyboardColor.NEGATIVE)
-            keyboard.add_line()
-            keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
-            keyboard.add_line()
-        elif current == "зараженный_лес":
-            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
-            keyboard.add_button("Дорога на зараженный лес", color=VkKeyboardColor.NEGATIVE)
-            keyboard.add_line()
-        elif current == "кпп":
-            keyboard.add_button("Дорога на зараженный лес", color=VkKeyboardColor.NEGATIVE)
-            keyboard.add_line()
-        elif current in INNER_TO_ROAD_LOCATION:
-            keyboard.add_button(INNER_TO_ROAD_LOCATION[current], color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in RESEARCH_LOCATIONS:
-            keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        elif current in {"больница", "убежище", "черный рынок"}:
-            keyboard.add_button("В город", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-        else:
-            keyboard.add_button("КПП", color=VkKeyboardColor.PRIMARY)
-            keyboard.add_line()
-
-    _add_callback_button(keyboard, "Карта", command="map", region="overview", color=VkKeyboardColor.SECONDARY)
-    _add_callback_button(keyboard, "Назад", command="back", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    _add_callback_button(keyboard, "Обзор", command="map", region="overview", color=VkKeyboardColor.PRIMARY)
+    if not inline:
+        _add_callback_button(keyboard, "Назад", command="back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -323,8 +229,8 @@ def create_map_region_keyboard(region_id: str, current_location_id: str = None, 
 # ============================================================
 
 def create_inventory_keyboard(*, inline: bool = False):
-    """Клавиатура инвентаря (дублирующая)"""
-    keyboard = VkKeyboard(one_time=False, inline=inline)
+    """Клавиатура инвентаря. Всегда нижняя, не inline."""
+    keyboard = VkKeyboard(one_time=False)
     _add_callback_button(keyboard, "Оружие", command="inventory_section", section="weapons", color=VkKeyboardColor.PRIMARY)
     _add_callback_button(keyboard, "Броня", command="inventory_section", section="armor", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
@@ -333,9 +239,8 @@ def create_inventory_keyboard(*, inline: bool = False):
     keyboard.add_line()
     _add_callback_button(keyboard, "Рюкзаки", command="inventory_section", section="backpacks", color=VkKeyboardColor.PRIMARY)
     _add_callback_button(keyboard, "Все", command="inventory_section", section="all", color=VkKeyboardColor.SECONDARY)
-    if not inline:
-        keyboard.add_line()
-        _add_callback_button(keyboard, "Назад", command="inventory_back", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    _add_callback_button(keyboard, "Назад", command="inventory_back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -467,20 +372,8 @@ def create_artifact_shop_keyboard():
 # ============================================================
 
 def create_player_market_keyboard(*, inline: bool = False):
-    """Главная клавиатура P2P рынка"""
-    keyboard = VkKeyboard(one_time=False, inline=inline)
-
-    if inline:
-        _add_callback_button(keyboard, "📈 Все лоты", command="market_open", color=VkKeyboardColor.PRIMARY)
-        _add_callback_button(keyboard, "🧾 Мои лоты", command="market_my_listings", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-        _add_callback_button(keyboard, "🔫 Оружие", command="market_category", category="weapons", color=VkKeyboardColor.PRIMARY)
-        _add_callback_button(keyboard, "🛡️ Броня", command="market_category", category="armor", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_line()
-        _add_callback_button(keyboard, "💎 Артефакты", command="market_category", category="artifacts", color=VkKeyboardColor.PRIMARY)
-        _add_callback_button(keyboard, "📒 Сделки", command="market_transactions", color=VkKeyboardColor.SECONDARY)
-        return keyboard
-
+    """Главная клавиатура P2P рынка. Всегда нижняя, не inline."""
+    keyboard = VkKeyboard(one_time=False)
     _add_callback_button(keyboard, "📈 Все лоты", command="market_open", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
@@ -505,6 +398,13 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     """Клавиатура с пагинацией и сортировкой для рынка."""
     keyboard = VkKeyboard(one_time=False, inline=inline)
 
+    if inline:
+        if page > 1:
+            _add_callback_button(keyboard, "◀️ Пред.", command="market_page", page=page - 1, color=VkKeyboardColor.SECONDARY)
+        if page < pages:
+            _add_callback_button(keyboard, "▶️ Вперёд", command="market_page", page=page + 1, color=VkKeyboardColor.SECONDARY)
+        return keyboard
+
     # Ряд навигации (только назад/вперёд, без номеров страниц).
     # Это гарантирует отсутствие ошибки VK 911 по переполнению строки.
     if page > 1:
@@ -514,7 +414,7 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     keyboard.add_line()
 
     # Ряд сортировки
-    sort_labels = [("💰 Дешевле", "cheap"), ("💎 Дороже", "expensive")] if inline else [
+    sort_labels = [
         ("🆕 Новые", "newest"),
         ("📅 Старые", "oldest"),
         ("💰 Дешевле", "cheap"),
@@ -529,8 +429,7 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     keyboard.add_line()
 
     # Ряд действий
-    if not inline:
-        keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
     if category:
         _add_callback_button(keyboard, "✖️ Сбросить фильтр", command="market_clear_filter", color=VkKeyboardColor.NEGATIVE)
     _add_callback_button(keyboard, "🏠 Главная", command="market_home", color=VkKeyboardColor.NEGATIVE)
@@ -546,8 +445,8 @@ def create_market_listing_keyboard(listing_id: int):
 
 
 def create_my_listings_keyboard(page: int, pages: int, *, inline: bool = False):
-    """Клавиатура для управления своими лотами."""
-    keyboard = VkKeyboard(one_time=False, inline=inline)
+    """Клавиатура для управления своими лотами. Всегда нижняя, не inline."""
+    keyboard = VkKeyboard(one_time=False)
 
     if pages > 1:
         if page > 1:
@@ -568,8 +467,8 @@ def create_my_listings_keyboard(page: int, pages: int, *, inline: bool = False):
 
 
 def create_market_search_keyboard(*, inline: bool = False):
-    """Клавиатура для режима поиска."""
-    keyboard = VkKeyboard(one_time=False, inline=inline)
+    """Клавиатура для режима поиска. Всегда нижняя, не inline."""
+    keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("✖️ Отмена", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_button("🏠 Главная", color=VkKeyboardColor.SECONDARY)
     return keyboard

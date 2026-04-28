@@ -3003,8 +3003,6 @@ def create_skills_keyboard(player, user_id: int = None, *, inline: bool = True):
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
     from models.classes import get_class
 
-    keyboard = VkKeyboard(one_time=False, inline=inline)
-
     class_id = player.player_class
     if not class_id:
         return None
@@ -3013,6 +3011,14 @@ def create_skills_keyboard(player, user_id: int = None, *, inline: bool = True):
     if not player_class:
         return None
 
+    # Inline-клавиатуры VK держим компактными. Если в БД классу добавят
+    # много активных навыков, показываем их в нижней клавиатуре.
+    active_skills = player_class.active_skills
+    if inline and len(active_skills) > 4:
+        inline = False
+
+    keyboard = VkKeyboard(one_time=False, inline=inline)
+
     # Получаем кулдауны игрока
     if user_id is None:
         user_id = getattr(player, 'vk_id', None)
@@ -3020,7 +3026,7 @@ def create_skills_keyboard(player, user_id: int = None, *, inline: bool = True):
     active_effects = _active_skill_effects.get(user_id, {})
 
     # Добавляем кнопки активных навыков
-    for skill in player_class.active_skills:
+    for skill in active_skills:
         skill_name = skill["name"]
         skill_cost = skill["energy_cost"]
         cd = cooldowns.get(skill_name, 0)
@@ -3062,12 +3068,13 @@ def create_skills_keyboard(player, user_id: int = None, *, inline: bool = True):
         color=VkKeyboardColor.PRIMARY,
         payload={"command": "combat_action", "action": "inventory"},
     )
-    keyboard.add_line()
-    keyboard.add_callback_button(
-        "Назад",
-        color=VkKeyboardColor.NEGATIVE,
-        payload={"command": "combat_action", "action": "back"},
-    )
+    if not inline:
+        keyboard.add_line()
+        keyboard.add_callback_button(
+            "Назад",
+            color=VkKeyboardColor.NEGATIVE,
+            payload={"command": "combat_action", "action": "back"},
+        )
     return keyboard
 
 

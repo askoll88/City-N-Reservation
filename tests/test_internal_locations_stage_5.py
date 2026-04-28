@@ -80,14 +80,15 @@ class InternalLocationsStage5Tests(unittest.TestCase):
         region_text = format_region_map(DummyPlayer(current_location_id="дорога_военная_часть"), "military")
         self.assertIn("Военная часть", region_text)
 
-    def test_keyboards_offer_internal_step_and_return_step(self):
+    def test_location_keyboards_offer_internal_step_and_map_does_not_duplicate_it(self):
         road_keyboard = create_location_keyboard("дорога_нии").get_keyboard()
         inner_keyboard = create_location_keyboard("главный_корпус_нии").get_keyboard()
         map_keyboard = create_map_region_keyboard("forest", "дорога_зараженный_лес").get_keyboard()
 
         self.assertIn("Главный корпус НИИ", road_keyboard)
         self.assertIn("Дорога на НИИ", inner_keyboard)
-        self.assertIn("Зараженный лес", map_keyboard)
+        self.assertNotIn("Зараженный лес", map_keyboard)
+        self.assertIn("Лес", map_keyboard)
 
     def test_navigation_uses_existing_go_to_location_for_internal_steps(self):
         player = DummyPlayer(current_location_id="дорога_военная_часть")

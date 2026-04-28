@@ -2,7 +2,7 @@
 Player map screen.
 
 The map is a route planner, not a teleport list. It exposes regions first and
-then gives one practical next step through the current route tree.
+then explains the next route step through the current location keyboard.
 """
 from __future__ import annotations
 
@@ -279,7 +279,7 @@ def format_map_overview(player) -> str:
     lines.extend(
         [
             "",
-            "КПП остаётся главным узлом выхода: военный сектор, НИИ и лес начинаются именно там.",
+            "Карта не заменяет навигацию. Для переходов используй нижнюю клавиатуру текущей локации.",
         ]
     )
     return "\n".join(lines)
@@ -303,7 +303,8 @@ def format_region_map(player, region_id: str) -> str:
     ]
     lines.extend(format_location_map_line(player, location_id) for location_id in _region_location_ids(region))
     if next_step:
-        lines.extend(["", f"Ближайшая кнопка маршрута: {next_step}"])
+        lines.extend(["", f"Следующий шаг маршрута: {next_step}"])
+        lines.append("Переход выполняется через нижнюю клавиатуру локации, не через карту.")
     return "\n".join(lines)
 
 

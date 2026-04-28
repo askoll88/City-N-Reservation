@@ -1,7 +1,8 @@
 import json
 import unittest
+from unittest.mock import patch
 
-from handlers.combat import create_anomaly_keyboard, create_combat_keyboard
+from handlers.combat import create_anomaly_keyboard, create_combat_keyboard, create_skills_keyboard
 
 
 class DummyClassPlayer:
@@ -34,6 +35,23 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
 
         self.assertEqual(len(first_row), 1)
         self.assertEqual(json.loads(first_row[0]["action"]["payload"])["action"], "bypass")
+
+    def test_inline_combat_keyboard_has_no_back_button(self):
+        keyboard = json.loads(create_combat_keyboard(DummyClassPlayer(), user_id=1).get_keyboard())
+
+        self.assertNotIn("Назад", json.dumps(keyboard, ensure_ascii=False))
+
+    def test_many_skills_fall_back_to_lower_keyboard(self):
+        class FakeClass:
+            active_skills = [
+                {"name": f"Навык {idx}", "energy_cost": 5, "cooldown": 1, "effect": {}}
+                for idx in range(5)
+            ]
+
+        with patch("models.classes.get_class", return_value=FakeClass()):
+            keyboard = json.loads(create_skills_keyboard(DummyClassPlayer(), user_id=1, inline=True).get_keyboard())
+
+        self.assertFalse(keyboard["inline"])
 
 
 if __name__ == "__main__":

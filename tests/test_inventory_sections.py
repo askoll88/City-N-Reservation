@@ -126,12 +126,11 @@ class InventorySectionsTest(unittest.TestCase):
         self.assertEqual(first_button["action"]["type"], "callback")
         self.assertEqual(payload, {"command": "inventory_section", "section": "weapons"})
 
-    def test_inventory_keyboard_can_be_inline(self):
+    def test_inventory_keyboard_stays_lower_ui_even_if_inline_requested(self):
         keyboard = json.loads(create_inventory_keyboard(inline=True).get_keyboard())
-        button_count = sum(len(row) for row in keyboard["buttons"])
 
-        self.assertTrue(keyboard["inline"])
-        self.assertLessEqual(button_count, 6)
+        self.assertFalse(keyboard["inline"])
+        self.assertIn("Назад", json.dumps(keyboard, ensure_ascii=False))
 
     def test_inventory_back_button_uses_inventory_back_callback(self):
         keyboard = json.loads(create_inventory_keyboard().get_keyboard())
