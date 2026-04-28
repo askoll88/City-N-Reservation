@@ -443,8 +443,8 @@ def create_blackmarket_keyboard():
 def create_heal_confirm_keyboard():
     """Клавиатура подтверждения лечения (показывается только после расчета цены)."""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Подтвердить лечение", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Отмена лечения", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "Подтвердить лечение", command="heal_confirm", action="confirm", color=VkKeyboardColor.POSITIVE)
+    _add_callback_button(keyboard, "Отмена лечения", command="heal_confirm", action="cancel", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -563,8 +563,8 @@ def create_market_search_keyboard():
 def create_purchase_confirm_keyboard():
     """Подтверждение покупки P2P"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("✅ Подтвердить", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("❌ Отмена", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "✅ Подтвердить", command="market_purchase", action="confirm", color=VkKeyboardColor.POSITIVE)
+    _add_callback_button(keyboard, "❌ Отмена", command="market_purchase", action="cancel", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -852,7 +852,7 @@ def create_emission_impact_keyboard(location: str, can_flee: bool = True):
 def create_emission_risk_confirm_keyboard():
     """Подтверждение выхода из safe во время impact."""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("⚠️ Подтвердить риск", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "⚠️ Подтвердить риск", command="emission_risk", action="confirm", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
-    keyboard.add_button("Отмена", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "Отмена", command="emission_risk", action="cancel", color=VkKeyboardColor.SECONDARY)
     return keyboard

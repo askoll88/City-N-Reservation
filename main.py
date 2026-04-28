@@ -997,6 +997,17 @@ def _do_callback_processing(event, vk):
         go_back(player, vk, user_id)
         return
 
+    if payload.get("command") == "market_purchase":
+        if not has_pending_purchase(user_id):
+            _answer_callback(event, vk, "Покупка устарела")
+            return
+        action_text = "подтвердить" if payload.get("action") == "confirm" else "отмена"
+        _answer_callback(event, vk, "Покупка обработана")
+        player = get_player(user_id)
+        from handlers.market import handle_market_confirm_purchase
+        handle_market_confirm_purchase(player, vk, user_id, action_text)
+        return
+
     if str(payload.get("command", "")).startswith("market_"):
         _answer_callback(event, vk, "Рынок обновлен")
         player = get_player(user_id)
@@ -1054,6 +1065,28 @@ def _do_callback_processing(event, vk):
         player = get_player(user_id)
         from handlers.combat import handle_anomaly_action
         handle_anomaly_action(player, vk, user_id, action_text)
+        return
+
+    if payload.get("command") == "heal_confirm":
+        action = payload.get("action")
+        _answer_callback(event, vk, "Лечение обработано")
+        player = get_player(user_id)
+        from handlers.location import handle_cancel_heal, handle_confirm_heal
+        if action == "confirm":
+            handle_confirm_heal(player, vk, user_id)
+        else:
+            handle_cancel_heal(player, vk, user_id)
+        return
+
+    if payload.get("command") == "emission_risk":
+        if not has_pending_emission_risk_exit(user_id):
+            _answer_callback(event, vk, "Риск уже закрыт")
+            return
+        action_text = "подтвердить риск" if payload.get("action") == "confirm" else "отмена"
+        _answer_callback(event, vk, "Риск обработан")
+        player = get_player(user_id)
+        from game.emission import handle_emission_risk_exit_response
+        handle_emission_risk_exit_response(player, vk, user_id, action_text)
         return
 
     if payload.get("command") == "back":
