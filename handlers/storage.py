@@ -22,7 +22,7 @@ def _all_player_items(player) -> list[dict]:
 def _parse_transfer_payload(payload: str) -> tuple[int, str] | tuple[None, str]:
     raw = (payload or "").strip()
     if not raw:
-        return None, "Укажи предмет: например `в шкаф 2 бинт`."
+        return None, "Укажи предмет: например в шкаф 2 бинт."
 
     parts = raw.split(maxsplit=1)
     if parts[0].isdigit():

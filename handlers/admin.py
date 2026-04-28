@@ -59,7 +59,7 @@ def _fmt_ts_msk(ts: int) -> str:
 
 def _show_main_menu(vk, user_id: int):
     _clear_admin_menu(user_id)
-    _send(vk, user_id, "🛠️ **АДМИН-ПАНЕЛЬ**\n\nВыбери категорию:", create_admin_keyboard())
+    _send(vk, user_id, "🛠️ АДМИН-ПАНЕЛЬ\n\nВыбери категорию:", create_admin_keyboard())
 
 
 def _show_category(vk, user_id: int, category: str):
@@ -74,37 +74,37 @@ def _show_category(vk, user_id: int, category: str):
     }
     kb = keyboards.get(category, create_admin_keyboard())
     titles = {
-        "users": "👥 **ПОЛЬЗОВАТЕЛИ**\n\nВыбери действие:",
-        "emission": "☢️ **ВЫБРОС**\n\nУправление глобальным событием:",
-        "give": "📦 **ВЫДАЧА**\n\nВыдача/удаление предметов и статов:",
-        "events": "🎲 **ИВЕНТЫ**\n\nУправление событиями и квестами:",
-        "market": "🏪 **МАРКЕТ**\n\nУправление P2P рынком:",
-        "help": "📖 **СПРАВКА АДМИНА**\n\nВсе команды начинаются с `админ`:\n"
-                "• `админ пользователи [поиск]` — список/поиск\n"
-                "• `админ профиль <vk_id>` — профиль\n"
-                "• `админ права <vk_id> on|off` — права\n"
-                "• `админ выдать <vk_id> <кол-во> <предмет>`\n"
-                "• `админ удалить <vk_id> <предмет> [кол-во]`\n"
-                "• `админ set <vk_id> <поле> <значение>`\n"
-                "• `админ ранги синхронизировать [мягко]`\n"
+        "users": "👥 ПОЛЬЗОВАТЕЛИ\n\nВыбери действие:",
+        "emission": "☢️ ВЫБРОС\n\nУправление глобальным событием:",
+        "give": "📦 ВЫДАЧА\n\nВыдача/удаление предметов и статов:",
+        "events": "🎲 ИВЕНТЫ\n\nУправление событиями и квестами:",
+        "market": "🏪 МАРКЕТ\n\nУправление P2P рынком:",
+        "help": "📖 СПРАВКА АДМИНА\n\nВсе команды начинаются с админ:\n"
+                "• админ пользователи [поиск] — список/поиск\n"
+                "• админ профиль <vk_id> — профиль\n"
+                "• админ права <vk_id> on|off — права\n"
+                "• админ выдать <vk_id> <кол-во> <предмет>\n"
+                "• админ удалить <vk_id> <предмет> [кол-во]\n"
+                "• админ set <vk_id> <поле> <значение>\n"
+                "• админ ранги синхронизировать [мягко]\n"
                 "  поля: money, level, experience, health, energy,\n"
                 "  radiation, strength, stamina, perception, luck,\n"
                 "  shells, artifact_slots, max_weight\n"
-                "• `бан <vk_id> [причина]`\n"
-                "• `разбан <vk_id>`\n"
-                "• `админ маркет on|off`\n"
-                "• `админ лоты [active|sold|cancelled|expired|all]`\n"
-                "• `админ снять лот <id>`\n"
-                "• `админ квесты <vk_id>`\n"
-                "• `админ рандом <vk_id>`\n"
-                "• `админ ивент статус`\n"
-                "• `админ ивент список`\n"
-                "• `админ ивент старт <event_id>`\n"
-                "• `админ ивент стоп`\n"
-                "• `админ кулдаун <vk_id> снять|инфо`\n"
-                "• `админ инвентарь <vk_id>`\n"
-                "• `админ локация <vk_id> <локация>`\n"
-                "• `админ онлайн`\n",
+                "• бан <vk_id> [причина]\n"
+                "• разбан <vk_id>\n"
+                "• админ маркет on|off\n"
+                "• админ лоты [active|sold|cancelled|expired|all]\n"
+                "• админ снять лот <id>\n"
+                "• админ квесты <vk_id>\n"
+                "• админ рандом <vk_id>\n"
+                "• админ ивент статус\n"
+                "• админ ивент список\n"
+                "• админ ивент старт <event_id>\n"
+                "• админ ивент стоп\n"
+                "• админ кулдаун <vk_id> снять|инфо\n"
+                "• админ инвентарь <vk_id>\n"
+                "• админ локация <vk_id> <локация>\n"
+                "• админ онлайн\n",
     }
     _send(vk, user_id, titles.get(category, "Выбери категорию:"), kb)
 
@@ -181,13 +181,13 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         _send(vk, user_id, "\n".join(lines), create_admin_users_keyboard()); return True
 
     if text == "профиль (по vk_id)":
-        _send(vk, user_id, "Введи:\n`админ профиль <vk_id>`", create_admin_users_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин профиль <vk_id>", create_admin_users_keyboard()); return True
     if text == "инвентарь (по vk_id)":
-        _send(vk, user_id, "Введи:\n`админ инвентарь <vk_id>`", create_admin_users_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин инвентарь <vk_id>", create_admin_users_keyboard()); return True
     if text == "права on/off":
-        _send(vk, user_id, "Введи:\n`админ права <vk_id> on` / `off`", create_admin_users_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин права <vk_id> on / off", create_admin_users_keyboard()); return True
     if text == "локация (телепорт)":
-        _send(vk, user_id, "Введи:\n`админ локация <vk_id> <локация>`\n\nгород, кпп, больница, черный рынок, убежище, дорога_военная_часть, дорога_нии, дорога_зараженный_лес", create_admin_users_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин локация <vk_id> <локация>\n\nгород, кпп, больница, черный рынок, убежище, дорога_военная_часть, дорога_нии, дорога_зараженный_лес", create_admin_users_keyboard()); return True
 
     # === Кнопки: Выброс ===
     if text == "☢️ запустить выброс":
@@ -215,21 +215,21 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         stats = database.get_emission_stats()
         if not stats or stats.get("total_emissions", 0) == 0:
             _send(vk, user_id, "📊 Выбросов ещё не было.", create_admin_emission_keyboard()); return True
-        _send(vk, user_id, f"📊 **Выбросы**\n\nВсего: {stats['total_emissions']}\nАктивных: {stats['active_emissions']}\nАдминских: {stats['admin_triggered']}\nПоследний: {stats['last_emission'] or '-'}", create_admin_emission_keyboard()); return True
+        _send(vk, user_id, f"📊 Выбросы\n\nВсего: {stats['total_emissions']}\nАктивных: {stats['active_emissions']}\nАдминских: {stats['admin_triggered']}\nПоследний: {stats['last_emission'] or '-'}", create_admin_emission_keyboard()); return True
 
     # === Кнопки: Выдача ===
     if text == "🎁 выдать предмет":
-        _send(vk, user_id, "Введи:\n`админ выдать <vk_id> <кол-во> <предмет>`\n\nПример: `админ выдать 123456 5 Аптечка`", create_admin_give_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин выдать <vk_id> <кол-во> <предмет>\n\nПример: админ выдать 123456 5 Аптечка", create_admin_give_keyboard()); return True
     if text == "🗑️ удалить предмет":
-        _send(vk, user_id, "Введи:\n`админ удалить <vk_id> <предмет> [кол-во]`\n\nПример: `админ удалить 123456 Мутаген`", create_admin_give_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин удалить <vk_id> <предмет> [кол-во]\n\nПример: админ удалить 123456 Мутаген", create_admin_give_keyboard()); return True
     if text == "📝 set поле (статы)":
-        _send(vk, user_id, "Введи:\n`админ set <vk_id> <поле> <значение>`\n\nПоля: money, level, experience, health, energy, radiation, strength, stamina, perception, luck, shells, artifact_slots, max_weight", create_admin_give_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин set <vk_id> <поле> <значение>\n\nПоля: money, level, experience, health, energy, radiation, strength, stamina, perception, luck, shells, artifact_slots, max_weight", create_admin_give_keyboard()); return True
 
     # === Кнопки: Ивенты ===
     if text == "🎲 рандом ивент игроку":
-        _send(vk, user_id, "Введи:\n`админ рандом <vk_id>`", create_admin_events_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин рандом <vk_id>", create_admin_events_keyboard()); return True
     if text == "📋 квесты игрока":
-        _send(vk, user_id, "Введи:\n`админ квесты <vk_id>`", create_admin_events_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин квесты <vk_id>", create_admin_events_keyboard()); return True
     if text == "🌐 ивент статус":
         from game.limited_events import get_limited_events_admin_status
         st = get_limited_events_admin_status()
@@ -258,7 +258,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     if text == "🚀 старт ивента":
         from game.limited_events import get_limited_events_catalog
         catalog = get_limited_events_catalog()
-        lines = ["Введи:\n`админ ивент старт <event_id>`\n\nДоступные event_id:"]
+        lines = ["Введи:\nадмин ивент старт <event_id>\n\nДоступные event_id:"]
         for row in catalog:
             lines.append(f"• {row['id']} — {row['name']} ({row['duration_minutes']} мин)")
         _send(vk, user_id, "\n".join(lines), create_admin_events_keyboard()); return True
@@ -292,9 +292,9 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             if result.get("success") else "ℹ️ Активного ивента нет."
         ), create_admin_events_keyboard()); return True
     if text == "⏰ кулдаун инфо":
-        _send(vk, user_id, "Введи:\n`админ кулдаун <vk_id> инфо`", create_admin_events_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин кулдаун <vk_id> инфо", create_admin_events_keyboard()); return True
     if text == "⏰ кулдаун снять":
-        _send(vk, user_id, "Введи:\n`админ кулдаун <vk_id> снять`", create_admin_events_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин кулдаун <vk_id> снять", create_admin_events_keyboard()); return True
 
     if text == "👥 онлайн":
         all_players = database.get_all_active_players()
@@ -329,7 +329,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             lines.append(f"#{r['id']} | {r['item_name']} x{r['quantity']} | {r['price_per_item']} руб | seller={r['seller_vk_id']}")
         _send(vk, user_id, "\n".join(lines), create_admin_market_keyboard()); return True
     if text == "🗂️ все лоты":
-        _send(vk, user_id, "Введи:\n`админ лоты [active|sold|cancelled|expired|all]`", create_admin_market_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин лоты [active|sold|cancelled|expired|all]", create_admin_market_keyboard()); return True
     if text == "✅ маркет on":
         database.set_game_setting("p2p_market_enabled", "1")
         _send(vk, user_id, "✅ P2P рынок включён.", create_admin_market_keyboard()); return True
@@ -337,7 +337,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         database.set_game_setting("p2p_market_enabled", "0")
         _send(vk, user_id, "⛔ P2P рынок отключён.", create_admin_market_keyboard()); return True
     if text == "✖️ снять лот":
-        _send(vk, user_id, "Введи:\n`админ снять лот <id>`", create_admin_market_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин снять лот <id>", create_admin_market_keyboard()); return True
 
     # === Текстовые команды (работают из любого состояния) ===
     m = re.match(r"^админ:?\s+маркет\s+(on|off)$", text)
@@ -484,7 +484,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             _send(vk, user_id, "❌ Рандомное событие не сгенерировалось."); return True
         set_pending_event(target, event)
         try:
-            vk.messages.send(user_id=target, message=f"🎲 **АДМИНСКИЙ ИВЕНТ**\n\n{format_event_message(event)}", keyboard=create_random_event_keyboard(event).get_keyboard(), random_id=0)
+            vk.messages.send(user_id=target, message=f"🎲 АДМИНСКИЙ ИВЕНТ\n\n{format_event_message(event)}", keyboard=create_random_event_keyboard(event).get_keyboard(), random_id=0)
             _send(vk, user_id, f"✅ Ивент отправлен vk:{target} | Тип: {event.get('type', '?')}")
         except Exception as e:
             _send(vk, user_id, f"❌ Ошибка: {e}")

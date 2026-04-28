@@ -1059,7 +1059,7 @@ def _handle_show_class(player, vk, user_id: int, npc_id: str):
 
     passive_status = format_passive_status(player.player_class, player.level)
     msg += f"{passive_status}\n"
-    msg += f"<b>Информация о классе:\n{class_info}"
+    msg += f"Информация о классе:\n{class_info}"
 
     vk.messages.send(
         user_id=user_id,

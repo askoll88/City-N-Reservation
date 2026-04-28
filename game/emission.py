@@ -422,7 +422,7 @@ def _send_warning_to_all_players(vk, emission_id: int):
                 location=location,
                 user_id=vk_id,
                 message=(
-                    "⚠️ **ВНИМАНИЕ! ВЫБРОС!**\n\n"
+                    "⚠️ ВНИМАНИЕ! ВЫБРОС!\n\n"
                     "Зона предупреждает: через 15 минут начнётся Выброс!\n"
                     f"Ты в укрытии ({location}) — ты в безопасности.\n\n"
                     "🛡️ Укрытия: Город, Больница, Убежище\n\n"
@@ -441,7 +441,7 @@ def _send_warning_to_all_players(vk, emission_id: int):
                 "phase": "warning",
                 "location": location,
                 "text": (
-                    "⚠️ **ВНИМАНИЕ! ВЫБРОС!**\n\n"
+                    "⚠️ ВНИМАНИЕ! ВЫБРОС!\n\n"
                     "Сталкер, через 15 минут начнётся Выброс!\n"
                     f"Ты сейчас в: {location}\n\n"
                     "🚨 Срочно ищи укрытие!\n"
@@ -847,7 +847,7 @@ def _apply_emission_impact(vk, emission_id: int):
                     location=location,
                     user_id=vk_id,
                     message=(
-                        "☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
+                        "☢️ ВЫБРОС НАЧАЛСЯ!\n\n"
                         f"Ты в укрытии ({location}) — урон не получен.\n"
                         "Оставайся в безопасности до окончания выброса."
                     ),
@@ -902,7 +902,7 @@ def _apply_emission_impact(vk, emission_id: int):
                     location=location,
                     user_id=vk_id,
                     message=(
-                        "☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
+                        "☢️ ВЫБРОС НАЧАЛСЯ!\n\n"
                         "Ты не успел укрыться, а Зона не прощает ошибок.\n"
                         "💀 Смертельная волна выброса накрыла тебя.\n\n"
                         f"🎲 Шанс фатального исхода: {fatal_chance * 100:.1f}% (бросок {fatal_roll * 100:.1f}%)\n"
@@ -961,7 +961,7 @@ def _apply_emission_impact(vk, emission_id: int):
                 "phase": "impact",
                 "location": location,
                 "text": (
-                    f"☢️ **ВЫБРОС НАЧАЛСЯ!**\n\n"
+                    f"☢️ ВЫБРОС НАЧАЛСЯ!\n\n"
                     f"Ты был в: {location}\n"
                     f"💔 Получено урона: -{damage} HP ({current_health} → {new_health})\n"
                     f"☢️ Радиация: +{radiation}\n"
@@ -1078,7 +1078,7 @@ def _apply_impact_radiation_accumulation(vk, emission: dict):
                     location=location,
                     user_id=vk_id,
                     message=(
-                        "☣️ **Критическое облучение**\n\n"
+                        "☣️ Критическое облучение\n\n"
                         f"☢️ Радиация достигла {new_radiation} ед. ({format_radiation_rate(new_radiation)}).\n"
                         "Организм не выдержал продолжающийся выброс.\n\n"
                         f"Штраф: -{death_result['money_lost']} руб, -{death_result['experience_lost']} XP.\n"
@@ -1107,7 +1107,7 @@ def _apply_impact_radiation_accumulation(vk, emission: dict):
                     location=location,
                     user_id=vk_id,
                     message=(
-                        "☣️ **Выброс усиливается**\n\n"
+                        "☣️ Выброс усиливается\n\n"
                         f"☢️ Радиация: +{rad_gain} (итого {new_radiation} ед., {format_radiation_rate(new_radiation)})\n"
                         f"💔 Урон от токсичности: -{overload} HP (осталось {new_health})\n\n"
                         f"Спастись поможет антирад. {escape_hint}"
@@ -1253,21 +1253,21 @@ def _announce_emission_cancelled(vk, emission_id: int):
     """Объявить об отмене выброса — Зона передумала"""
     cancel_messages = [
         (
-            "📻 **ВНИМАНИЕ! Выброс отменён!**\n\n"
+            "📻 ВНИМАНИЕ! Выброс отменён!\n\n"
             "Приборы затихли. Зона... передумала.\n"
             "Аномальная активность пошла на спад.\n\n"
             "Сталкеры, выдыхайте. Но Зона не прощает беспечность — "
             "она может передумать снова."
         ),
         (
-            "📻 **Отбой тревоги! Выброс отменён!**\n\n"
+            "📻 Отбой тревоги! Выброс отменён!\n\n"
             "Детекторы показывают спад. Выброс растворился\n"
             "так же внезапно, как и начался.\n\n"
             "Удача улыбнулась тебе, сталкер.\n"
             "Но в Зоне удаче не доверяют..."
         ),
         (
-            "📻 **Выброс отменён!**\n\n"
+            "📻 Выброс отменён!\n\n"
             "Неизвестные причины. Зона аномально спокойна.\n"
             "Может, кто-то наверху решил за нас?\n\n"
             "Продолжай работу, сталкер.\n"
@@ -1323,7 +1323,7 @@ def _announce_aftermath(vk, emission_id: int):
             vk.messages.send(
                 user_id=vk_id,
                 message=(
-                    "🌅 **Выброс завершился!**\n\n"
+                    "🌅 Выброс завершился!\n\n"
                     "Зона успокоилась. В оставшихся аномалиях\n"
                     "появились редкие артефакты!\n\n"
                     f"🔥 Бонусы ({aftermath_hours} ч):\n"
@@ -1481,7 +1481,7 @@ def prompt_emission_risk_exit_confirmation(player, vk, user_id: int, from_locati
     vk.messages.send(
         user_id=user_id,
         message=(
-            "☢️ **ВЫХОД ИЗ УКРЫТИЯ ВО ВРЕМЯ ИМПАКТА**\n\n"
+            "☢️ ВЫХОД ИЗ УКРЫТИЯ ВО ВРЕМЯ ИМПАКТА\n\n"
             f"Ты собираешься выйти из безопасной зоны: {from_location} → {to_location}.\n"
             "После выхода возврат в safe будет закрыт до конца выброса.\n"
             f"До конца импакта: {mins}:{secs:02d}.\n\n"
@@ -1597,7 +1597,7 @@ def check_emission_during_action(vk, user_id: int, location: str) -> bool:
         vk.messages.send(
             user_id=user_id,
             message=(
-                f"☢️ **ВЫБРОС БУШУЕТ!**\n\n"
+                f"☢️ ВЫБРОС БУШУЕТ!\n\n"
                 f"Ты в Зоне ({effective_location}) и получаешь урон!\n"
                 f"💔 Урон: -{damage} HP\n"
                 f"☣️ Токсичность: -{rad_overload_damage} HP\n"

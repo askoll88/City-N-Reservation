@@ -319,7 +319,7 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
 
         mutation_state = get_zone_mutation_state(location_id)
         if mutation_state.get("active"):
-            parts.append(f"🌀 **МУТАЦИЯ ЗОНЫ!** Находки +{int(mutation_state['bonus_find'] * 100)}%")
+            parts.append(f"🌀 Мутация Зоны: находки +{int(mutation_state['bonus_find'] * 100)}%")
 
         limited = get_active_limited_event()
         if limited:
@@ -336,7 +336,7 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
             )
 
         if parts:
-            location_info = f"\n\n📊 **Активные модификаторы:**\n" + "\n".join(f"• {p}" for p in parts)
+            location_info = f"\n\n📊 Активные модификаторы:\n" + "\n".join(f"• {p}" for p in parts)
 
     _send_location_message(
         vk,

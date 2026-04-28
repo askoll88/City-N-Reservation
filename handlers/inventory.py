@@ -573,30 +573,37 @@ def show_resources_shop(player, vk, user_id: int):
     # Также добавляем мешочки для гильз
     shells_bags = db.get_items_by_category('shells_bag')
 
-    # Формируем сообщение
-    msg = "📦РЕСУРСЫ\n\n"
-    msg += "Гильзы — для добычи артефактов из аномалий.\n\n"
+    msg = f"{ui.title('Ресурсы')}\n\n"
+    msg += "Гильзы нужны для добычи артефактов из аномалий.\n\n"
 
+    msg += f"{ui.section('Гильзы')}\n"
     for idx, item in enumerate(resources, 1):
         price = item.get('price', 0)
         name = item['name']
         desc = item.get('description', '')[:50]
         weight = item.get('weight', 0.1)
-        msg += f"{idx}. {name} — {price} руб.\n   {desc} Вес: {weight}кг\n\n"
+        msg += f"{idx}. {name}\n"
+        msg += f"   Цена: {price} руб. | Вес: {weight}кг\n"
+        if desc:
+            msg += f"   {desc}\n"
+        msg += "\n"
 
     if shells_bags:
-        msg += "🎒Мешочки для гильз:\n\n"
+        msg += f"{ui.section('Мешочки для гильз')}\n"
         start_idx = len(resources) + 1
         for idx, item in enumerate(shells_bags, start_idx):
             price = item.get('price', 0)
             name = item['name']
             capacity = item.get('backpack_bonus', 0)  # Вместимость
             weight = item.get('weight', 0.1)
-            msg += f"{idx}. {name} — {price} руб.\n   Вместимость: {capacity} гильз. Вес: {weight}кг\n\n"
+            msg += f"{idx}. {name}\n"
+            msg += f"   Вместимость: {capacity} гильз | Вес: {weight}кг\n"
+            msg += f"   Цена: {price} руб.\n\n"
 
-    msg += f"Твои деньги: {player.money} руб.\n"
-    msg += f"Гильзы: {db.get_user_shells(user_id)} шт.\n\n"
-    msg += "Напиши 'купить <номер>' или 'купить <название>'"
+    msg += f"{ui.section('Баланс')}\n"
+    msg += f"💰 Деньги: {player.money} руб.\n"
+    msg += f"🎯 Гильзы: {db.get_user_shells(user_id)} шт.\n\n"
+    msg += ui.hint("купи через: купить <номер> или купить <название>")
 
     vk.messages.send(user_id=user_id, message=msg, random_id=0)
 

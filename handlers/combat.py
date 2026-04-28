@@ -994,13 +994,15 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
     vk.messages.send(
         user_id=user_id,
         message=(
-            "═ 🔍 ВЫЛАЗКА НАЧАЛАСЬ ═\n\n"
+            f"{ui.title('Вылазка началась')}\n\n"
+            f"{ui.section('Маршрут')}\n"
             f"📍 Зона: {loc_display_name}\n"
             f"🧭 Режим: {scan_name}\n"
             f"⏱️ Длительность: {time_sec} сек\n"
-            f"⚠️ Риск: {danger_mark}\n"
+            f"⚠️ Риск: {danger_mark}\n\n"
+            f"{ui.section('Ресурсы')}\n"
             f"⚡ Энергия: {energy_before} → {energy_after} (-{energy_cost})\n\n"
-            "Что чувствуется на маршруте:\n"
+            f"{ui.section('Модификаторы')}\n"
             f"{mods_info}\n\n"
             "Ты уходишь с тропы, проверяя укрытия, следы и старые метки.\n"
             "Зона ответит сама, когда ты зайдёшь достаточно глубоко."
@@ -1140,7 +1142,7 @@ def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk
         vk.messages.send(
             user_id=user_id,
             message=(
-                "💀 **ЗАСАДА!**\n\n"
+                "💀 ЗАСАДА!\n\n"
                 "Ты попал в военную засаду! Солдаты заметили тебя...\n"
                 "Будет бой — но награда стоит риска.\n\n"
                 "⚔️ Лут после победы: x2"
@@ -1181,7 +1183,7 @@ def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk
         vk.messages.send(
             user_id=user_id,
             message=(
-                f"🐺 **ОХОТА МУТАНТОВ!**\n\n"
+                f"🐺 ОХОТА МУТАНТОВ!\n\n"
                 "Ты убил мутанта, но его сородичи пришли мстить!\n"
                 f"Стая из {hunt_count} мутантов атакует тебя!\n\n"
                 "Приготовься к бою!"
@@ -1631,9 +1633,10 @@ def _handle_anomaly(player, vk, user_id: int):
 
     # Формируем сообщение
     message = (
-        f"⚠️ АНОМАЛИЯ ОБНАРУЖЕНА! ⚠️\n\n"
+        f"{ui.title('Аномалия обнаружена')}\n\n"
         f"{anomaly_icon} {anomaly_name if has_detector else 'Неопознанная аномалия'}\n"
         f"{anomaly_desc if has_detector else 'Без детектора контур нестабилен, тип трудно определить.'}\n\n"
+        f"{ui.section('Риск')}\n"
         f"Опасность: {anomaly_danger}{' (повышенная без детектора)' if not has_detector else ''}\n"
         f"Детектор: {detector_name}"
         f"{f' (+{detector_bonus}% к шансу)' if has_detector else ' (бонус 0%)'}\n"
@@ -1647,7 +1650,7 @@ def _handle_anomaly(player, vk, user_id: int):
     elif not has_detector:
         message += "Возможные артефакты: неизвестно (нужен детектор).\n"
 
-    message += "\nВыбери действие:"
+    message += f"\n{ui.section('Действие')}\nВыбери действие."
 
     # Клавиатура выбора
     keyboard = VkKeyboard(one_time=False)
@@ -2652,12 +2655,13 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
     )
 
     message = (
-        "⚠️ КОНТАКТ\n\n"
+        f"{ui.title('Контакт')}\n\n"
         f"Шорохи сложились в силуэт: на маршруте появился {scaled_enemy['enemy_name']}.\n\n"
         f"{scaled_enemy['enemy_description']}\n\n"
+        f"{ui.section('Угроза')}\n"
         f"Опасность: L{scaled_enemy['enemy_level']} | Поведение: {scaled_enemy['enemy_role_label']}\n"
         f"HP: {scaled_enemy['enemy_hp']} | Урон: {scaled_enemy['enemy_damage']}\n\n"
-        f"🎲 Инициатива:\n"
+        f"{ui.section('Инициатива')}\n"
         f"Ты: d20({initiative['player_roll']}) → {initiative['player_total']}\n"
         f"Враг: d20({initiative['enemy_roll']}) → {initiative['enemy_total']}\n"
     )
@@ -3053,7 +3057,7 @@ def show_skills_in_combat(player, vk, user_id):
         elif player.energy < skill_cost:
             status = f"❌ Мало энергии"
 
-        msg += f"<b>{skill_name}\n"
+        msg += f"{skill_name}\n"
         msg += f"   {skill_desc}\n"
         msg += f"   Энергия: {skill_cost} | Кулдаун: {skill['cooldown']} ходов\n"
         msg += f"   Статус: {status}\n\n"
@@ -3329,7 +3333,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         message = f"🎯{skill_name}\n\n"
         message += f"Первый выстрел: {first_damage} урона\n"
         message += f"Второй выстрел: {second_damage} урона ({int(second_mult*100)}%)\n"
-        message += f"<b>Всего: {total_damage} урона\n\n"
+        message += f"Всего: {total_damage} урона\n\n"
 
     # === Точный выстрел (damage_boost) ===
     elif "damage_boost" in effect:
@@ -3362,7 +3366,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         message += f"Очередь из {burst_count} выстрелов:\n"
         for i in range(burst_count):
             message += f"  Выстрел {i+1}: {per_shot} урона\n"
-        message += f"<b>Всего: {total_damage} урона\n\n"
+        message += f"Всего: {total_damage} урона\n\n"
 
     # === Подавление ===
     elif "enemy_damage_reduction" in effect:
@@ -3424,7 +3428,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         message += f"Шквал из {burst_count} выстрелов:\n"
         for i in range(burst_count):
             message += f"  Выстрел {i+1}: {per_shot} урона\n"
-        message += f"<b>Всего: {total_damage} урона\n\n"
+        message += f"Всего: {total_damage} урона\n\n"
 
     # === Бронирование ===
     elif "temp_defense" in effect:
@@ -3667,9 +3671,10 @@ def handle_combat_attack(player, vk, user_id: int):
     dodge_chance = player.dodge_chance
     total_defense = player.total_defense
 
-    message = f"⚔️ТЫ АТАКУЕШЬ {combat['enemy_name'].upper()}\n\n"
-    message += f"🎯 Шанс крита: {crit_chance}% | 💨 Уклонение: {dodge_chance}%\n"
-    message += f"🛡️ Твоя защита: {total_defense}\n"
+    message = f"{ui.title('Атака: ' + str(combat['enemy_name']))}\n\n"
+    message += f"{ui.section('Твои параметры')}\n"
+    message += f"🎯 Крит: {crit_chance}% | 💨 Уклонение: {dodge_chance}%\n"
+    message += f"🛡️ Защита: {total_defense}\n"
     if combat.get("enemy_level"):
         message += f"👹 Враг L{combat['enemy_level']} ({combat.get('enemy_role_label', 'Неизвестно')})\n"
 
@@ -3680,6 +3685,7 @@ def handle_combat_attack(player, vk, user_id: int):
         if crit_bonus_pct > 0:
             crit_msg += f" +{crit_bonus_pct}%"
         message += f"\n{crit_msg}\n"
+    message += f"\n{ui.section('Результат')}\n"
     message += f"Нанесён урон: {total_damage}\n"
     message += f"({(' | '.join(damage_details))})\n"
 

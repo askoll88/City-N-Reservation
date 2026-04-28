@@ -775,7 +775,7 @@ def check_zone_mutation(location_id: str, user_id: int | None = None, force: boo
             "bonus_find": bonus_find,
             "bonus_danger": bonus_danger,
             "message": (
-                "🌀 **МУТАЦИЯ ЗОНЫ!**\n\n"
+                "🌀 МУТАЦИЯ ЗОНЫ\n\n"
                 "Аномальная активность усилилась! Зона изменилась...\n"
                 f"+{int(bonus_find * 100)}% к находкам, "
                 f"+{int(bonus_danger * 100)}% к опасности\n\n"

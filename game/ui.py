@@ -1,4 +1,8 @@
-"""UI helper functions for consistent text HUD across the game."""
+"""UI helper functions for consistent plain-text HUD across the game.
+
+VK bot messages do not reliably render Markdown or HTML, so helpers here
+produce readable plain text only.
+"""
 
 from __future__ import annotations
 
@@ -28,8 +32,32 @@ def meter_line(label: str, current: int, max_value: int, width: int = 12) -> str
 
 
 def title(text: str) -> str:
-    return f"== {text.upper()} =="
+    return f"▰ {text.upper()}"
 
 
 def section(text: str) -> str:
-    return f"-- {text.upper()} --"
+    return f"• {text.upper()}"
+
+
+def kv(label: str, value) -> str:
+    return f"{label}: {value}"
+
+
+def hint(text: str) -> str:
+    return f"Подсказка: {text}"
+
+
+def ok(text: str) -> str:
+    return f"✅ {text}"
+
+
+def warn(text: str) -> str:
+    return f"⚠️ {text}"
+
+
+def error(text: str) -> str:
+    return f"❌ {text}"
+
+
+def divider(width: int = 18) -> str:
+    return "─" * max(6, int(width))
