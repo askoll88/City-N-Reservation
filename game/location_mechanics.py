@@ -48,6 +48,35 @@ LOCATION_MODIFIERS = {
         "unique_mechanic": "ambush",
         "ambush_chance": 0.07,         # 7% шанс засады при исследовании
     },
+    "военная_часть": {
+        "name": "Военная часть",
+        "emoji": "🏢",
+        "description": "Внутренний периметр — казармы, склады и закрытые посты",
+        "energy_cost_mult": 1.16,
+        "find_chance_mult": 1.12,
+        "danger_mult": 1.22,
+        "radiation_mult": 1.02,
+        "loot_quality": "military",
+        "anomaly_weights": {
+            "жарка": 18,
+            "электра": 45,
+            "воронка": 10,
+            "туман": 8,
+            "магнит": 48,
+        },
+        "event_weights": {
+            "mutant": 0.75,
+            "bandit": 1.05,
+            "military": 1.65,
+            "artifact": 0.85,
+            "stash": 1.35,
+            "trap": 1.45,
+            "military_cache": 1.85,
+            "field_lab_data": 0.65,
+        },
+        "unique_mechanic": "ambush",
+        "ambush_chance": 0.10,
+    },
 
     "дорога_нии": {
         "name": "НИИ",
@@ -86,6 +115,36 @@ LOCATION_MODIFIERS = {
         # Уникальная механика: Мутация Зоны
         "unique_mechanic": "zone_mutation",
         "zone_mutation_chance": 0.07,  # 7% шанс мутации после посещения
+    },
+    "главный_корпус_нии": {
+        "name": "Главный корпус НИИ",
+        "emoji": "🏛️",
+        "description": "Внутренний научный корпус — данные, реагенты и аномальные карманы",
+        "energy_cost_mult": 1.08,
+        "find_chance_mult": 1.20,
+        "danger_mult": 1.18,
+        "radiation_mult": 1.18,
+        "loot_quality": "scientific",
+        "anomaly_weights": {
+            "жарка": 8,
+            "электра": 24,
+            "воронка": 48,
+            "туман": 45,
+            "магнит": 18,
+        },
+        "event_weights": {
+            "mutant": 1.15,
+            "bandit": 0.55,
+            "military": 0.75,
+            "artifact": 1.3,
+            "anomaly": 1.45,
+            "radiation": 1.4,
+            "field_lab_data": 2.0,
+            "artifact_cluster": 1.45,
+            "psi_echo": 1.35,
+        },
+        "unique_mechanic": "zone_mutation",
+        "zone_mutation_chance": 0.10,
     },
 
     "дорога_зараженный_лес": {
@@ -126,6 +185,36 @@ LOCATION_MODIFIERS = {
         "mutant_hunt_chance": 0.12,    # 12% что придёт стая после убийства
         "mutant_hunt_count": [2, 2],   # фиксированно 2 врага подряд
     },
+    "зараженный_лес": {
+        "name": "Заражённый лес",
+        "emoji": "🌲",
+        "description": "Внутренняя чаща — следы стаи, органика и мутировавшие трофеи",
+        "energy_cost_mult": 1.18,
+        "find_chance_mult": 1.14,
+        "danger_mult": 1.28,
+        "radiation_mult": 1.18,
+        "loot_quality": "organic",
+        "anomaly_weights": {
+            "жарка": 55,
+            "электра": 8,
+            "воронка": 18,
+            "туман": 38,
+            "магнит": 5,
+        },
+        "event_weights": {
+            "mutant": 1.65,
+            "bandit": 0.55,
+            "military": 0.45,
+            "artifact": 1.15,
+            "enemy": 1.25,
+            "anomaly": 1.2,
+            "abandoned_camp": 1.15,
+            "blood_trail": 1.75,
+        },
+        "unique_mechanic": "mutant_hunt",
+        "mutant_hunt_chance": 0.15,
+        "mutant_hunt_count": [2, 3],
+    },
 }
 
 
@@ -142,12 +231,26 @@ LOCATION_LOOT_BIAS = {
         ],
         "bias_weight": 0.30,  # 30% шанс что найденный предмет — из списка
     },
+    "военная_часть": {
+        "bias_items": [
+            "АК-74", "Бронежилет", "Баллистический шлем",
+            "Тактический шлем", "Берцы", "Патрон 5.45", "Аптечка",
+        ],
+        "bias_weight": 0.34,
+    },
     "дорога_нии": {
         "bias_items": [
             "Аптечка", "Антирад", "Детектор аномалий", "Стимулятор",
             "Бинт", "Научная аптечка", "Дозиметр",
         ],
         "bias_weight": 0.30,
+    },
+    "главный_корпус_нии": {
+        "bias_items": [
+            "Аптечка", "Антирад", "Детектор аномалий", "Стимулятор",
+            "Научная аптечка", "Дозиметр", "Капля", "Слизь",
+        ],
+        "bias_weight": 0.34,
     },
     "дорога_зараженный_лес": {
         "bias_items": [
@@ -156,7 +259,327 @@ LOCATION_LOOT_BIAS = {
         ],
         "bias_weight": 0.30,
     },
+    "зараженный_лес": {
+        "bias_items": [
+            "Ломоть мяса", "Капля", "Слизь", "Плёнка",
+            "Антирад", "Вода", "Бинт",
+        ],
+        "bias_weight": 0.34,
+    },
 }
+
+
+# =========================================================================
+# Региональные gameplay loops
+# =========================================================================
+
+REGION_LOOP_FLAG_PREFIX = "region_loop"
+
+REGION_GAMEPLAY_LOOPS = {
+    "дорога_военная_часть": {
+        "name": "Тревога патрулей",
+        "field": "alert",
+        "max": 100,
+        "event_deltas": {
+            "military": 18,
+            "trap": 12,
+            "bandit": 8,
+            "mutant": 5,
+            "military_cache": -16,
+            "stash": -10,
+            "survivor": -6,
+            "nothing": -4,
+        },
+        "pressure_weights": {
+            "military": 0.006,
+            "trap": 0.003,
+            "military_cache": 0.002,
+        },
+        "force_threshold": 85,
+    },
+    "военная_часть": {
+        "name": "Тревога гарнизона",
+        "field": "alert",
+        "max": 100,
+        "event_deltas": {
+            "military": 22,
+            "trap": 14,
+            "bandit": 8,
+            "mutant": 6,
+            "military_cache": -14,
+            "stash": -8,
+            "survivor": -6,
+            "nothing": -3,
+        },
+        "pressure_weights": {
+            "military": 0.007,
+            "trap": 0.004,
+            "military_cache": 0.002,
+        },
+        "force_threshold": 82,
+    },
+    "дорога_нии": {
+        "name": "Нестабильность НИИ",
+        "field": "instability",
+        "secondary_field": "data",
+        "max": 100,
+        "event_deltas": {
+            "anomaly": 18,
+            "radiation": 14,
+            "psi_echo": 16,
+            "artifact_cluster": 12,
+            "artifact": 8,
+            "field_lab_data": -12,
+            "nothing": -3,
+        },
+        "pressure_weights": {
+            "anomaly": 0.005,
+            "radiation": 0.004,
+            "psi_echo": 0.003,
+            "field_lab_data": 0.002,
+        },
+        "force_threshold": 88,
+        "breakthrough_data": 3,
+    },
+    "главный_корпус_нии": {
+        "name": "Нестабильность корпуса",
+        "field": "instability",
+        "secondary_field": "data",
+        "max": 100,
+        "event_deltas": {
+            "anomaly": 22,
+            "radiation": 16,
+            "psi_echo": 18,
+            "artifact_cluster": 14,
+            "artifact": 10,
+            "field_lab_data": -10,
+            "nothing": -2,
+        },
+        "pressure_weights": {
+            "anomaly": 0.006,
+            "radiation": 0.005,
+            "psi_echo": 0.004,
+            "field_lab_data": 0.003,
+        },
+        "force_threshold": 84,
+        "breakthrough_data": 3,
+    },
+    "дорога_зараженный_лес": {
+        "name": "След стаи",
+        "field": "trail",
+        "max": 100,
+        "event_deltas": {
+            "blood_trail": 20,
+            "mutant": 16,
+            "abandoned_camp": -14,
+            "survivor": -8,
+            "nothing": -4,
+            "artifact": 4,
+        },
+        "pressure_weights": {
+            "mutant": 0.006,
+            "blood_trail": 0.005,
+            "abandoned_camp": 0.002,
+        },
+        "force_threshold": 86,
+    },
+    "зараженный_лес": {
+        "name": "Охота стаи",
+        "field": "trail",
+        "max": 100,
+        "event_deltas": {
+            "blood_trail": 24,
+            "mutant": 18,
+            "abandoned_camp": -10,
+            "survivor": -6,
+            "nothing": -3,
+            "artifact": 5,
+        },
+        "pressure_weights": {
+            "mutant": 0.007,
+            "blood_trail": 0.006,
+            "abandoned_camp": 0.002,
+        },
+        "force_threshold": 82,
+    },
+}
+
+
+def _clamp_loop_value(value: int, max_value: int = 100) -> int:
+    return max(0, min(max_value, int(value or 0)))
+
+
+def _loop_flag_name(location_id: str, field: str) -> str:
+    return f"{REGION_LOOP_FLAG_PREFIX}:{location_id}:{field}"
+
+
+def _get_loop_value(user_id: int | None, location_id: str, field: str) -> int:
+    if user_id is None:
+        return 0
+    try:
+        return int(database.get_user_flag(int(user_id), _loop_flag_name(location_id, field), 0) or 0)
+    except Exception:
+        return 0
+
+
+def _set_loop_value(user_id: int | None, location_id: str, field: str, value: int):
+    if user_id is None:
+        return
+    try:
+        database.set_user_flag(int(user_id), _loop_flag_name(location_id, field), int(value))
+    except Exception:
+        return
+
+
+def get_region_loop_config(location_id: str) -> dict | None:
+    """Получить описание gameplay loop для исследовательской ветки."""
+    return REGION_GAMEPLAY_LOOPS.get(location_id)
+
+
+def get_region_loop_state(user_id: int | None, location_id: str) -> dict:
+    """Текущее состояние ветки для игрока."""
+    config = get_region_loop_config(location_id)
+    if not config:
+        return {}
+
+    field = config["field"]
+    max_value = int(config.get("max", 100) or 100)
+    state = {field: _clamp_loop_value(_get_loop_value(user_id, location_id, field), max_value)}
+    secondary = config.get("secondary_field")
+    if secondary:
+        state[secondary] = max(0, int(_get_loop_value(user_id, location_id, secondary) or 0))
+    return state
+
+
+def reset_region_loop_state(user_id: int | None, location_id: str):
+    """Сбросить loop-состояние ветки для игрока."""
+    config = get_region_loop_config(location_id)
+    if not config:
+        return
+    _set_loop_value(user_id, location_id, config["field"], 0)
+    secondary = config.get("secondary_field")
+    if secondary:
+        _set_loop_value(user_id, location_id, secondary, 0)
+
+
+def get_region_loop_event_weights(user_id: int | None, location_id: str) -> dict:
+    """
+    Динамические множители событий от состояния ветки.
+
+    Это делает следующие исследования зависимыми от предыдущих: накопленная
+    тревога чаще приводит к патрулям, нестабильность — к аномалиям, следы — к
+    охоте.
+    """
+    config = get_region_loop_config(location_id)
+    if not config:
+        return {}
+
+    state = get_region_loop_state(user_id, location_id)
+    pressure = state.get(config["field"], 0)
+    if pressure <= 0:
+        return {}
+
+    weights = {}
+    for event_id, per_point in config.get("pressure_weights", {}).items():
+        weights[event_id] = 1.0 + min(0.75, pressure * float(per_point or 0))
+    return weights
+
+
+def apply_region_loop_event(user_id: int | None, location_id: str, event_id: str) -> dict:
+    """
+    Применить событие исследования к loop-состоянию региона.
+
+    Возвращает эффекты для обработчика боя/исследования:
+    - messages: короткие сообщения игроку;
+    - override_event: событие, которое заменяет выбранное, если давление сорвалось;
+    - force_mutation / force_hunt / science_breakthrough / organic_trophy.
+    """
+    config = get_region_loop_config(location_id)
+    if not config:
+        return {"messages": [], "effects": {}, "state": {}}
+
+    field = config["field"]
+    max_value = int(config.get("max", 100) or 100)
+    state = get_region_loop_state(user_id, location_id)
+    before = int(state.get(field, 0) or 0)
+    delta = int(config.get("event_deltas", {}).get(event_id, 2 if event_id != "nothing" else -3) or 0)
+    pressure = _clamp_loop_value(before + delta, max_value)
+    messages: list[str] = []
+    effects: dict = {}
+    override_event = None
+
+    if config.get("field") == "alert":
+        if before < 55 <= pressure:
+            messages.append("📻 Патрули насторожились: в эфире больше коротких военных переговоров.")
+        if pressure >= int(config.get("force_threshold", 85)) and event_id not in {"military"}:
+            override_event = "military"
+            effects["forced_ambush"] = True
+            messages.append("🚨 Тревога сорвалась: патруль перекрывает маршрут, боя не избежать.")
+            pressure = max(35, pressure - 38)
+
+    elif config.get("field") == "instability":
+        data = int(state.get("data", 0) or 0)
+        if event_id == "field_lab_data":
+            data += 1
+            messages.append(f"🧾 Данные НИИ сохранены: {data}/{config.get('breakthrough_data', 3)} пакетов.")
+        if before < 60 <= pressure:
+            messages.append("🌀 НИИ нестабилен: приборы ловят всплески, аномалии становятся ближе.")
+        if pressure >= int(config.get("force_threshold", 88)) and event_id != "anomaly":
+            override_event = "anomaly"
+            effects["force_mutation"] = True
+            messages.append("☢️ Нестабильность достигла пика: маршрут проваливается в аномальный карман.")
+            pressure = max(45, pressure - 34)
+        if data >= int(config.get("breakthrough_data", 3)):
+            data -= int(config.get("breakthrough_data", 3))
+            pressure = max(0, pressure - 24)
+            effects["science_breakthrough"] = True
+            messages.append("🔬 Собран комплект данных: ученые смогут выжать из него практическую пользу.")
+        state["data"] = data
+        _set_loop_value(user_id, location_id, "data", data)
+
+    elif config.get("field") == "trail":
+        if event_id in {"blood_trail", "mutant"}:
+            effects["organic_trophy"] = True
+        if before < 55 <= pressure:
+            messages.append("🐾 Следы сходятся: стая явно ходит рядом с маршрутом.")
+        if pressure >= int(config.get("force_threshold", 86)) and event_id != "mutant":
+            override_event = "mutant"
+            effects["force_hunt"] = True
+            messages.append("🐺 Стая взяла след: тихий поиск превращается в охоту.")
+            pressure = max(38, pressure - 40)
+
+    _set_loop_value(user_id, location_id, field, pressure)
+    state[field] = pressure
+    return {
+        "messages": messages,
+        "effects": effects,
+        "override_event": override_event,
+        "state": state,
+        "delta": delta,
+    }
+
+
+def format_region_loop_status(user_id: int | None, location_id: str) -> str | None:
+    """Короткий статус loop для UI исследования/карты."""
+    config = get_region_loop_config(location_id)
+    if not config:
+        return None
+    state = get_region_loop_state(user_id, location_id)
+
+    if config.get("field") == "alert":
+        value = state.get("alert", 0)
+        label = "тихо" if value < 35 else "настороженно" if value < 70 else "тревога"
+        return f"{config.get('name', 'Тревога')}: {value}/100 ({label})"
+    if config.get("field") == "instability":
+        value = state.get("instability", 0)
+        data = state.get("data", 0)
+        label = "стабильно" if value < 35 else "фонит" if value < 70 else "срыв"
+        return f"{config.get('name', 'Нестабильность')}: {value}/100 ({label}), данные {data}/3"
+    if config.get("field") == "trail":
+        value = state.get("trail", 0)
+        label = "редкие следы" if value < 35 else "стая рядом" if value < 70 else "охота"
+        return f"{config.get('name', 'След стаи')}: {value}/100 ({label})"
+    return None
 
 
 # =========================================================================
@@ -277,29 +700,29 @@ def get_loot_quality(location_id: str) -> str | None:
 # Уникальные механики
 # =========================================================================
 
-def check_ambush(location_id: str) -> bool:
+def check_ambush(location_id: str, user_id: int | None = None) -> bool:
     """Проверить засаду (Военная дорога)"""
-    if location_id != "дорога_военная_часть":
-        return False
     mod = LOCATION_MODIFIERS.get(location_id)
-    if not mod:
+    if not mod or mod.get("unique_mechanic") != "ambush":
         return False
-    return random.random() < mod.get("ambush_chance", 0)
+    alert = get_region_loop_state(user_id, location_id).get("alert", 0) if user_id is not None else 0
+    chance = float(mod.get("ambush_chance", 0) or 0) + min(0.12, alert * 0.0012)
+    return random.random() < chance
 
 
-def check_zone_mutation(location_id: str) -> dict | None:
+def check_zone_mutation(location_id: str, user_id: int | None = None, force: bool = False) -> dict | None:
     """
     Проверить мутацию Зоны (НИИ).
     Возвращает dict с информацией о мутации или None.
     """
-    if location_id != "дорога_нии":
-        return None
-
     mod = LOCATION_MODIFIERS.get(location_id)
-    if not mod:
+    if not mod or mod.get("unique_mechanic") != "zone_mutation":
         return None
 
-    if random.random() < mod.get("zone_mutation_chance", 0):
+    instability = get_region_loop_state(user_id, location_id).get("instability", 0) if user_id is not None else 0
+    mutation_chance = float(mod.get("zone_mutation_chance", 0) or 0) + min(0.15, instability * 0.0015)
+
+    if force or random.random() < mutation_chance:
         # Мутация активна!
         bonus_find = random.uniform(0.1, 0.3)    # +10-30% к находкам
         bonus_danger = random.uniform(0.1, 0.25)  # +10-25% к опасности
@@ -324,17 +747,23 @@ def check_zone_mutation(location_id: str) -> dict | None:
     return None
 
 
-def check_mutant_hunt() -> bool:
+def check_mutant_hunt(user_id: int | None = None, location_id: str = "дорога_зараженный_лес") -> bool:
     """Проверить охоту мутантов (Заражённый лес)"""
-    mod = LOCATION_MODIFIERS.get("дорога_зараженный_лес")
-    if not mod:
+    mod = LOCATION_MODIFIERS.get(location_id)
+    if not mod or mod.get("unique_mechanic") != "mutant_hunt":
         return False
-    return random.random() < mod.get("mutant_hunt_chance", 0)
+    trail = (
+        get_region_loop_state(user_id, location_id).get("trail", 0)
+        if user_id is not None
+        else 0
+    )
+    chance = float(mod.get("mutant_hunt_chance", 0) or 0) + min(0.14, trail * 0.0014)
+    return random.random() < chance
 
 
-def get_mutant_hunt_count() -> int:
+def get_mutant_hunt_count(location_id: str = "дорога_зараженный_лес") -> int:
     """Получить количество врагов в охоте мутантов"""
-    mod = LOCATION_MODIFIERS.get("дорога_зараженный_лес")
+    mod = LOCATION_MODIFIERS.get(location_id)
     if not mod:
         return 2
     count_range = mod.get("mutant_hunt_count", [2, 3])

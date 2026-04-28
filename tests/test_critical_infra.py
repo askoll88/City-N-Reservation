@@ -608,7 +608,8 @@ class TestUniqueMechanics(unittest.TestCase):
     def test_loot_bias_chance(self):
         for loc in LOCATION_LOOT_BIAS:
             chance = get_location_loot_bias_chance(loc)
-            self.assertAlmostEqual(chance, 0.30, places=2)
+            self.assertGreaterEqual(chance, 0.30)
+            self.assertLessEqual(chance, 0.35)
 
 
 # ===========================================================================

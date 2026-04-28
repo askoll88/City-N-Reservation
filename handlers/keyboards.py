@@ -20,6 +20,18 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from game.constants import RESEARCH_LOCATIONS
 from models.npcs import get_npc_by_location, get_npc
 
+ROAD_TO_INNER_LOCATION = {
+    "дорога_военная_часть": ("Военная часть", VkKeyboardColor.PRIMARY),
+    "дорога_нии": ("Главный корпус НИИ", VkKeyboardColor.PRIMARY),
+    "дорога_зараженный_лес": ("Зараженный лес", VkKeyboardColor.NEGATIVE),
+}
+
+INNER_TO_ROAD_LOCATION = {
+    "военная_часть": "Дорога на военную часть",
+    "главный_корпус_нии": "Дорога на НИИ",
+    "зараженный_лес": "Дорога на зараженный лес",
+}
+
 
 # ============================================================
 # Helper — стандартный нижний ряд (всегда одинаковый)
@@ -105,9 +117,15 @@ def create_location_keyboard(location_id: str, player_level: int = None):
     elif location_id in RESEARCH_LOCATIONS:
         # Главное действие — исследование
         keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+        if location_id in ROAD_TO_INNER_LOCATION:
+            label, color = ROAD_TO_INNER_LOCATION[location_id]
+            keyboard.add_button(label, color=color)
         keyboard.add_line()
         # Возврат
-        keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
+        if location_id in INNER_TO_ROAD_LOCATION:
+            keyboard.add_button(INNER_TO_ROAD_LOCATION[location_id], color=VkKeyboardColor.NEGATIVE)
+        else:
+            keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()
         _add_meta_row(keyboard)
 
@@ -182,6 +200,9 @@ def create_map_overview_keyboard(current_location_id: str = None):
     elif current in {"больница", "убежище", "черный рынок"}:
         keyboard.add_button("В город", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
+    elif current in INNER_TO_ROAD_LOCATION:
+        keyboard.add_button(INNER_TO_ROAD_LOCATION[current], color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
     elif current in RESEARCH_LOCATIONS:
         keyboard.add_button("В КПП", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
@@ -211,10 +232,19 @@ def create_map_region_keyboard(region_id: str, current_location_id: str = None):
     elif region_id == "military":
         if current == "дорога_военная_часть":
             keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("Военная часть", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
             keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+        elif current == "военная_часть":
+            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("Дорога на военную часть", color=VkKeyboardColor.NEGATIVE)
             keyboard.add_line()
         elif current == "кпп":
             keyboard.add_button("Дорога на военную часть", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in INNER_TO_ROAD_LOCATION:
+            keyboard.add_button(INNER_TO_ROAD_LOCATION[current], color=VkKeyboardColor.PRIMARY)
             keyboard.add_line()
         elif current in RESEARCH_LOCATIONS:
             keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
@@ -228,10 +258,19 @@ def create_map_region_keyboard(region_id: str, current_location_id: str = None):
     elif region_id == "science":
         if current == "дорога_нии":
             keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("Главный корпус НИИ", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
             keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+        elif current == "главный_корпус_нии":
+            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("Дорога на НИИ", color=VkKeyboardColor.NEGATIVE)
             keyboard.add_line()
         elif current == "кпп":
             keyboard.add_button("Дорога на НИИ", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+        elif current in INNER_TO_ROAD_LOCATION:
+            keyboard.add_button(INNER_TO_ROAD_LOCATION[current], color=VkKeyboardColor.PRIMARY)
             keyboard.add_line()
         elif current in RESEARCH_LOCATIONS:
             keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)
@@ -245,10 +284,19 @@ def create_map_region_keyboard(region_id: str, current_location_id: str = None):
     elif region_id == "forest":
         if current == "дорога_зараженный_лес":
             keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("Зараженный лес", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
             keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+        elif current == "зараженный_лес":
+            keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_button("Дорога на зараженный лес", color=VkKeyboardColor.NEGATIVE)
             keyboard.add_line()
         elif current == "кпп":
             keyboard.add_button("Дорога на зараженный лес", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+        elif current in INNER_TO_ROAD_LOCATION:
+            keyboard.add_button(INNER_TO_ROAD_LOCATION[current], color=VkKeyboardColor.PRIMARY)
             keyboard.add_line()
         elif current in RESEARCH_LOCATIONS:
             keyboard.add_button("В КПП", color=VkKeyboardColor.PRIMARY)

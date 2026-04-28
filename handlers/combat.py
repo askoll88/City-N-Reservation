@@ -364,7 +364,7 @@ def _format_mult_delta(mult: float) -> str:
     return "0%"
 
 
-def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str, str]:
+def _build_research_modifiers_info(location_id: str, time_sec: int, user_id: int | None = None) -> tuple[str, str]:
     """Собрать инфо по модификаторам локации/событий для сообщения старта исследования."""
     from game.location_mechanics import (
         get_location_modifier,
@@ -373,6 +373,7 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
         get_find_chance_mult,
         get_danger_mult,
         get_radiation_mult,
+        format_region_loop_status,
     )
     from game.emission import is_emission_aftermath_active, get_emission_artifact_bonus
     from game.limited_events import get_active_limited_event, get_limited_event_modifiers
@@ -420,6 +421,10 @@ def _build_research_modifiers_info(location_id: str, time_sec: int) -> tuple[str
         lines.append(
             f"• Ивент Зоны: 🐺 шанс охоты мутантов {int(float(mod.get('mutant_hunt_chance', 0)) * 100)}%"
         )
+
+    loop_status = format_region_loop_status(user_id, location_id)
+    if loop_status:
+        lines.append(f"• Состояние ветки: {loop_status}")
 
     if is_emission_aftermath_active():
         artifact_mult = get_emission_artifact_bonus()
@@ -882,7 +887,7 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
     multiplier = RESEARCH_TIME_MULTIPLIERS.get(time_sec, {"name": "Поиск", "chance": 1.0, "danger": 1.0})
     scan_name = multiplier.get("name", "Поиск")
     danger_mark = "низкий" if multiplier.get("danger", 1.0) <= 0.8 else "средний" if multiplier.get("danger", 1.0) <= 1.2 else "высокий"
-    loc_display_name, mods_info = _build_research_modifiers_info(location_id, time_sec)
+    loc_display_name, mods_info = _build_research_modifiers_info(location_id, time_sec, user_id=user_id)
 
     vk.messages.send(
         user_id=user_id,
@@ -936,6 +941,12 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
         location_id,
         user_id=user_id,
     )
+    from game.location_mechanics import apply_region_loop_event
+
+    loop_result = apply_region_loop_event(user_id, location_id, event)
+    override_event = loop_result.get("override_event")
+    if override_event:
+        event = override_event
 
     # Используем полноценного Player, чтобы боевая система получала все атрибуты
     # (total_defense, dodge_chance, max_health, инициатива и т.д.).
@@ -944,14 +955,74 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
     temp_player.current_location_id = location_id
     temp_player.energy = remaining_energy
 
+    _send_region_loop_messages(vk, user_id, loop_result)
+
     # Обрабатываем событие
     _handle_research_event(temp_player, vk, user_id, event, time_sec)
+    _apply_region_loop_rewards(temp_player, vk, user_id, location_id, loop_result)
 
     # === Уникальные механики локаций ===
-    _check_location_unique_mechanics(temp_player, location_id, event, vk, user_id)
+    _check_location_unique_mechanics(temp_player, location_id, event, vk, user_id, loop_result=loop_result)
 
 
-def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk, user_id: int):
+def _send_region_loop_messages(vk, user_id: int, loop_result: dict | None):
+    if not loop_result:
+        return
+    messages = [msg for msg in loop_result.get("messages", []) if msg]
+    if not messages:
+        return
+    vk.messages.send(
+        user_id=user_id,
+        message="СОСТОЯНИЕ РЕГИОНА\n\n" + "\n".join(f"• {msg}" for msg in messages),
+        random_id=0,
+    )
+
+
+def _apply_region_loop_rewards(player, vk, user_id: int, location_id: str, loop_result: dict | None):
+    if not loop_result:
+        return
+    effects = loop_result.get("effects", {}) or {}
+    _, create_location_keyboard, _, _ = _get_main_imports()
+
+    if effects.get("science_breakthrough"):
+        money_gain = random.randint(160, 320)
+        exp_gain = _scale_xp_reward(random.randint(18, 34), player, source="research")
+        player.money = int(getattr(player, "money", 0) or 0) + money_gain
+        gained_xp = int(player.add_experience(exp_gain))
+        database.update_user_stats(user_id, money=player.money)
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🔬 НАУЧНЫЙ ПРОРЫВ\n\n"
+                "Собранные данные НИИ сложились в полезную картину. "
+                "Ученые оплатили пакет и отметили практическую ценность маршрута.\n\n"
+                f"💰 Деньги: +{money_gain} руб.\n"
+                f"📘 Опыт: +{gained_xp}"
+            ),
+            keyboard=create_location_keyboard(location_id).get_keyboard(),
+            random_id=0,
+        )
+
+    if effects.get("organic_trophy") and random.randint(1, 100) <= 35:
+        trophy = random.choice(["Ломоть мяса", "Слизь", "Капля"])
+        database.add_item_to_inventory(user_id, trophy, 1)
+        try:
+            player.inventory.reload()
+        except Exception:
+            pass
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🧬 ОРГАНИЧЕСКИЙ ТРОФЕЙ\n\n"
+                "По следам стаи удалось забрать пригодный образец.\n\n"
+                f"Получено: {trophy} x1"
+            ),
+            keyboard=create_location_keyboard(location_id).get_keyboard(),
+            random_id=0,
+        )
+
+
+def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk, user_id: int, loop_result: dict | None = None):
     """Проверить и применить уникальные механики локаций после исследования"""
     from game.location_mechanics import (
         check_ambush, check_zone_mutation, check_mutant_hunt,
@@ -961,7 +1032,9 @@ def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk
     _combat_state_ref, _, _, _ = _get_main_imports()
 
     # === Военная дорога: ЗАСАДА ===
-    if check_ambush(location_id):
+    effects = (loop_result or {}).get("effects", {}) or {}
+
+    if effects.get("forced_ambush") or check_ambush(location_id, user_id=user_id):
         vk.messages.send(
             user_id=user_id,
             message=(
@@ -985,7 +1058,7 @@ def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk
                 combat_data["ambush"] = True
 
     # === НИИ: МУТАЦИЯ ЗОНЫ ===
-    mutation = check_zone_mutation(location_id)
+    mutation = check_zone_mutation(location_id, user_id=user_id, force=bool(effects.get("force_mutation")))
     if mutation and mutation.get("active"):
         vk.messages.send(
             user_id=user_id,
@@ -994,8 +1067,15 @@ def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk
         )
 
     # === Заражённый лес: ОХОТА МУТАНТОВ ===
-    if check_mutant_hunt() and event_id and "enemy" in str(RESEARCH_EVENTS.get(event_id, {}).get("type", "")):
-        hunt_count = get_mutant_hunt_count()
+    if (
+        effects.get("force_hunt")
+        or (
+            check_mutant_hunt(user_id=user_id, location_id=location_id)
+            and event_id
+            and "enemy" in str(RESEARCH_EVENTS.get(event_id, {}).get("type", ""))
+        )
+    ):
+        hunt_count = get_mutant_hunt_count(location_id)
         vk.messages.send(
             user_id=user_id,
             message=(
@@ -1020,7 +1100,12 @@ def _select_research_event_by_chance(
     user_id: int | None = None,
 ):
     """Выбрать событие исследования на основе шансов и модификаторов локации"""
-    from game.location_mechanics import get_event_weights, get_find_chance_mult, get_danger_mult
+    from game.location_mechanics import (
+        get_event_weights,
+        get_find_chance_mult,
+        get_danger_mult,
+        get_region_loop_event_weights,
+    )
     from game.limited_events import get_limited_event_modifiers
 
     no_anomaly_streak = 0
@@ -1034,6 +1119,7 @@ def _select_research_event_by_chance(
     loc_find_mult = get_find_chance_mult(location_id) if location_id else 1.0
     loc_danger_mult = get_danger_mult(location_id) if location_id else 1.0
     loc_event_weights = get_event_weights(location_id) if location_id else {}
+    loop_event_weights = get_region_loop_event_weights(user_id, location_id) if location_id else {}
     limited_mods = get_limited_event_modifiers()
     limited_find_mult = float(limited_mods.get("research_find_mult", 1.0) or 1.0)
     limited_danger_mult = float(limited_mods.get("research_danger_mult", 1.0) or 1.0)
@@ -1074,6 +1160,14 @@ def _select_research_event_by_chance(
             event_type = event_data.get("type")
             if event_type and event_type in loc_event_weights:
                 weight *= loc_event_weights[event_type]
+
+        if loop_event_weights:
+            loop_weight = loop_event_weights.get(event_id)
+            if loop_weight is not None:
+                weight *= loop_weight
+            event_type = event_data.get("type")
+            if event_type and event_type in loop_event_weights:
+                weight *= loop_event_weights[event_type]
 
         event_type = str(event_data.get("type") or "")
         if event_type in {"enemy"}:
@@ -2758,6 +2852,7 @@ def use_skill(player, vk, user_id: int, skill_name: str):
                 keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
                 random_id=0
             )
+            _maybe_continue_mutant_hunt(player, combat, user_id, vk)
             return
 
         # Обновляем HP в БД
@@ -3221,6 +3316,7 @@ def handle_combat_attack(player, vk, user_id: int):
             keyboard=keyboard.get_keyboard(),
             random_id=0
         )
+        _maybe_continue_mutant_hunt(player, combat, user_id, vk)
         return
     else:
         enemy_damage = combat['enemy_damage']
@@ -3548,3 +3644,30 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
         message += f"\n{level_up}"
     
     return message
+
+
+def _maybe_continue_mutant_hunt(player, combat: dict, user_id: int, vk):
+    """Продолжить лесную охоту после победы, если стая ещё не рассеялась."""
+    try:
+        remaining = int(combat.get("mutant_hunt", 0) or 0)
+    except (TypeError, ValueError):
+        remaining = 0
+    if remaining <= 0:
+        return
+    if combat.get("location_id") not in {"дорога_зараженный_лес", "зараженный_лес"}:
+        return
+
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🐺 ОХОТА ПРОДОЛЖАЕТСЯ\n\n"
+            "Шум боя подтянул следующего хищника. "
+            f"Осталось волн стаи: {remaining}."
+        ),
+        random_id=0,
+    )
+    _spawn_enemy(player, vk, user_id, enemy_type="mutant", allow_elite=False)
+    _combat_state_ref, _, _, _ = _get_main_imports()
+    next_combat = _combat_state_ref.get(user_id)
+    if next_combat:
+        next_combat["mutant_hunt"] = remaining - 1

@@ -58,10 +58,10 @@ class MapSchemaTests(unittest.TestCase):
         self.assertEqual(validate_map_schema(), [])
         assert_valid_map_schema()
 
-    def test_research_locations_are_typed_as_routes_with_research_activity(self):
+    def test_research_locations_have_research_activity(self):
         for location_id in RESEARCH_LOCATIONS:
             record = get_map_location(location_id)
-            self.assertEqual(record["type"], "route")
+            self.assertIn(record["type"], {"route", "field", "dungeon"})
             self.assertIn("research", record["activities"])
             self.assertIn("research", record["tags"])
             self.assertIsNotNone(record["loot_profile"])
@@ -83,7 +83,17 @@ class MapSchemaTests(unittest.TestCase):
         self.assertIn("убежище", city_locations)
 
         route_locations = {record["id"] for record in get_locations_by_type("route")}
-        self.assertEqual(route_locations, set(RESEARCH_LOCATIONS))
+        self.assertEqual(
+            route_locations,
+            {"дорога_военная_часть", "дорога_нии", "дорога_зараженный_лес"},
+        )
+
+        dungeon_locations = {record["id"] for record in get_locations_by_type("dungeon")}
+        self.assertIn("военная_часть", dungeon_locations)
+        self.assertIn("главный_корпус_нии", dungeon_locations)
+
+        field_locations = {record["id"] for record in get_locations_by_type("field")}
+        self.assertIn("зараженный_лес", field_locations)
 
     def test_requirement_validator_accepts_future_access_shapes(self):
         errors = validate_location_requires(

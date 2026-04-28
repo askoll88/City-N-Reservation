@@ -36,23 +36,23 @@ MAP_REGIONS: dict[str, MapRegion] = {
     "military": MapRegion(
         id="military",
         label="Военный сектор",
-        location_ids=("дорога_военная_часть",),
+        location_ids=("дорога_военная_часть", "военная_часть"),
         route_target="дорога_военная_часть",
-        description="Первый боевой сектор через КПП. Оружие, броня, армейские схроны.",
+        description="Боевой сектор через КПП. Дорога ведет к внутреннему периметру военной части.",
     ),
     "science": MapRegion(
         id="science",
         label="НИИ",
-        location_ids=("дорога_нии",),
+        location_ids=("дорога_нии", "главный_корпус_нии"),
         route_target="дорога_нии",
-        description="Научная ветка через КПП. Аномалии, медикаменты, артефакты.",
+        description="Научная ветка через КПП. Дорога ведет к главному корпусу НИИ.",
     ),
     "forest": MapRegion(
         id="forest",
         label="Лес",
-        location_ids=("дорога_зараженный_лес",),
+        location_ids=("дорога_зараженный_лес", "зараженный_лес"),
         route_target="дорога_зараженный_лес",
-        description="Дикая ветка через КПП. Мутанты, органика, высокий риск.",
+        description="Дикая ветка через КПП. Тропа ведет в зараженную чащу.",
     ),
 }
 
@@ -75,6 +75,11 @@ REGION_ALIASES = {
 
 REGION_ORDER = ("city", "military", "science", "forest")
 CITY_SERVICE_LOCATIONS = {"больница", "убежище", "черный рынок"}
+INNER_TO_ROAD_LOCATION = {
+    "военная_часть": "Дорога на военную часть",
+    "главный_корпус_нии": "Дорога на НИИ",
+    "зараженный_лес": "Дорога на зараженный лес",
+}
 
 DANGER_LABELS = {
     "safe": "безопасно",
@@ -98,8 +103,11 @@ LOCATION_COMMAND_LABELS = {
     "убежище": "Убежище",
     "черный рынок": "Черный рынок",
     "дорога_военная_часть": "Дорога на военную часть",
+    "военная_часть": "Военная часть",
     "дорога_нии": "Дорога на НИИ",
+    "главный_корпус_нии": "Главный корпус НИИ",
     "дорога_зараженный_лес": "Дорога на зараженный лес",
+    "зараженный_лес": "Зараженный лес",
 }
 
 
@@ -173,11 +181,19 @@ def format_location_map_line(player, location_id: str) -> str:
     access = can_enter_location(player, location_id)
     danger = DANGER_LABELS.get(record.get("danger"), str(record.get("danger") or "неизвестно"))
     loot = LOOT_PROFILE_LABELS.get(record.get("loot_profile"), str(record.get("loot_profile") or "смешанный лут"))
+    try:
+        from game.location_mechanics import format_region_loop_status
+
+        loop_status = format_region_loop_status(getattr(player, "user_id", None), location_id)
+    except Exception:
+        loop_status = None
+    loop_line = f"\n  Ветка: {loop_status}" if loop_status else ""
     return (
         f"• {_location_name(location_id)}: опасность {danger}, ур. {_level_text(record)}, "
         f"{_access_label(access)}\n"
         f"  События: {_format_active_events(location_id)}\n"
         f"  Лут: {loot}"
+        f"{loop_line}"
     )
 
 
@@ -210,6 +226,8 @@ def get_next_map_step(region_id: str, current_location_id: str) -> tuple[str | N
         return None, "Неизвестный регион."
 
     target = region.route_target
+    location_ids = _region_location_ids(region)
+    inner_target = location_ids[1] if len(location_ids) > 1 else None
     current = str(current_location_id or "")
 
     if region_id == "city":
@@ -219,14 +237,24 @@ def get_next_map_step(region_id: str, current_location_id: str) -> tuple[str | N
             return "В город", "Следующий шаг: вернуться в город."
         if current == "кпп":
             return "В город", "Следующий шаг: пройти с КПП в город."
+        if current in INNER_TO_ROAD_LOCATION:
+            return INNER_TO_ROAD_LOCATION[current], "Сначала вернись на предыдущую дорогу, затем на КПП и в город."
         if current in RESEARCH_LOCATIONS:
             return "В КПП", "Сначала вернись на КПП, затем иди в город."
         return "Город", "Следующий шаг: город."
 
+    if inner_target and current == target:
+        return LOCATION_COMMAND_LABELS[inner_target], (
+            f"Ты у входа в ветку. Можно исследовать дорогу или идти глубже: {LOCATION_COMMAND_LABELS[inner_target]}."
+        )
+    if inner_target and current == inner_target:
+        return None, "Ты во внутренней точке региона. Можно исследовать или вернуться на предыдущую дорогу."
     if current == target:
         return None, "Ты уже у входа в эту ветку. Можно исследовать или вернуться на КПП."
     if current == "кпп":
         return LOCATION_COMMAND_LABELS[target], f"Следующий шаг: {LOCATION_COMMAND_LABELS[target]}."
+    if current in INNER_TO_ROAD_LOCATION:
+        return INNER_TO_ROAD_LOCATION[current], "Сначала вернись на предыдущую дорогу. Другие ветки открываются через КПП."
     if current in RESEARCH_LOCATIONS:
         return "В КПП", "Сначала вернись на КПП. Другие ветки открываются через КПП."
     if current in CITY_SERVICE_LOCATIONS:

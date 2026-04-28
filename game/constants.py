@@ -15,6 +15,9 @@ class LocationType(Enum):
     MILITARY_ROAD = "дорога_военная_часть"
     NII_ROAD = "дорога_нии"
     INFECTED_FOREST = "дорога_зараженный_лес"
+    MILITARY_BASE = "военная_часть"
+    NII_MAIN_BUILDING = "главный_корпус_нии"
+    INFECTED_FOREST_DEEP = "зараженный_лес"
 
 
 # === Разделы инвентаря ===
@@ -59,6 +62,9 @@ COMMANDS = {
     'дорога на военную часть': 'location:дорога_военная_часть',
     'дорога на нии': 'location:дорога_нии',
     'дорога на зараженный лес': 'location:дорога_зараженный_лес',
+    'военная часть': 'location:военная_часть',
+    'главный корпус нии': 'location:главный_корпус_нии',
+    'зараженный лес': 'location:зараженный_лес',
     
     # Статус
     'статус': 'status',
@@ -134,8 +140,11 @@ COMMANDS = {
 # === Исследовательские локации ===
 RESEARCH_LOCATIONS = [
     LocationType.MILITARY_ROAD.value,
+    LocationType.MILITARY_BASE.value,
     LocationType.NII_ROAD.value,
+    LocationType.NII_MAIN_BUILDING.value,
     LocationType.INFECTED_FOREST.value,
+    LocationType.INFECTED_FOREST_DEEP.value,
 ]
 
 # === Дроп предметов по локациям ===
@@ -181,6 +190,45 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "rare_armor": 2,
         "resources": 6,
     },
+    LocationType.MILITARY_BASE.value: {
+        "weapons": 20,
+        "armor": 18,
+        "meds": 7,
+        "food": 5,
+        "consumables": 10,
+        "other": 8,
+        "trash": 24,
+        "artifacts": 4,
+        "rare_weapons": 6,
+        "rare_armor": 5,
+        "resources": 6,
+    },
+    LocationType.NII_MAIN_BUILDING.value: {
+        "weapons": 8,
+        "armor": 10,
+        "meds": 16,
+        "food": 6,
+        "consumables": 12,
+        "other": 14,
+        "trash": 24,
+        "artifacts": 16,
+        "rare_weapons": 2,
+        "rare_armor": 2,
+        "resources": 6,
+    },
+    LocationType.INFECTED_FOREST_DEEP.value: {
+        "weapons": 8,
+        "armor": 8,
+        "meds": 7,
+        "food": 7,
+        "consumables": 12,
+        "other": 8,
+        "trash": 28,
+        "artifacts": 16,
+        "rare_weapons": 3,
+        "rare_armor": 2,
+        "resources": 10,
+    },
 }
 
 # === Порог уровней по локациям (для дропа/скейла) ===
@@ -189,6 +237,9 @@ LOCATION_LEVEL_THRESHOLDS = {
     LocationType.MILITARY_ROAD.value: {"min": 1, "max": 5},
     LocationType.NII_ROAD.value: {"min": 1, "max": 5},
     LocationType.INFECTED_FOREST.value: {"min": 3, "max": 7},
+    LocationType.MILITARY_BASE.value: {"min": 5, "max": 10},
+    LocationType.NII_MAIN_BUILDING.value: {"min": 5, "max": 10},
+    LocationType.INFECTED_FOREST_DEEP.value: {"min": 5, "max": 10},
 }
 
 # === Баланс дропа по фарм-локациям ===
@@ -207,6 +258,18 @@ LOCATION_DROP_BALANCE_RULES = {
         "max_price": 5_000,
         "max_rarity": "rare",
     },
+    LocationType.MILITARY_BASE.value: {
+        "max_price": 8_000,
+        "max_rarity": "rare",
+    },
+    LocationType.NII_MAIN_BUILDING.value: {
+        "max_price": 7_000,
+        "max_rarity": "rare",
+    },
+    LocationType.INFECTED_FOREST_DEEP.value: {
+        "max_price": 7_500,
+        "max_rarity": "rare",
+    },
 }
 
 
@@ -222,8 +285,11 @@ SAFE_LOCATIONS = [
 # === Опасные локации (Зона — урон от Выброса) ===
 DANGEROUS_LOCATIONS = [
     LocationType.MILITARY_ROAD.value,
+    LocationType.MILITARY_BASE.value,
     LocationType.NII_ROAD.value,
+    LocationType.NII_MAIN_BUILDING.value,
     LocationType.INFECTED_FOREST.value,
+    LocationType.INFECTED_FOREST_DEEP.value,
 ]
 
 
