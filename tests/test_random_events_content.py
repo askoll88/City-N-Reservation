@@ -78,12 +78,19 @@ class RandomEventsContentTests(unittest.TestCase):
     def test_random_event_selection_respects_corridor_filter(self):
         seen = set()
         for _ in range(3000):
-            event = get_random_event(corridor_id="военная_часть")
+            event = get_random_event(corridor_id="военная_часть", guaranteed=True)
             if event:
                 seen.add(event["id"])
 
         self.assertIn("military_patrol", seen)
         self.assertNotIn("rain_archive_reading_room", seen)
+
+    def test_guaranteed_random_event_returns_corridor_event(self):
+        for corridor_id in RESEARCH_LOCATIONS:
+            event = get_random_event(corridor_id=corridor_id, guaranteed=True)
+
+            self.assertIsNotNone(event, corridor_id)
+            self.assertIn(corridor_id, get_event_corridors(event["id"]))
 
 
 if __name__ == "__main__":

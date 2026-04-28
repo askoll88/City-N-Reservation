@@ -15,9 +15,10 @@ from game.constants import RESEARCH_LOCATIONS, NPC_LOCATIONS, SAFE_LOCATIONS
 logger = logging.getLogger(__name__)
 
 # Кулдаун рандомных событий
-EVENT_COOLDOWN_SECONDS = 30 * 60        # 30 минут — базовый кулдаун
+EVENT_COOLDOWN_SECONDS = 40 * 60        # 40 минут — защита от спама после события
 EVENT_CHANCE_RAMP_UP = 10 * 60          # каждые 10 минут после кулдауна
-EVENT_CHANCE_INCREMENT = 1.5            # +1.5% шанс за каждый интервал
+EVENT_BASE_CHANCE_AFTER_COOLDOWN = 45.0 # базовый шанс после кулдауна
+EVENT_CHANCE_INCREMENT = 8.0            # +8% шанс за каждый интервал
 EVENT_MAX_CHANCE = 100                  # макс шанс
 
 # Коридор перемещения
@@ -27,8 +28,8 @@ TRAVEL_ACCELERATION_SECONDS = 15
 TRAVEL_ACCELERATION_ENERGY = 8
 TRAVEL_SCOUT_COOLDOWN = 15
 TRAVEL_MAX_COMBAT_ENCOUNTERS = 1
-TRAVEL_EVENT_CHANCE = 18
-TRAVEL_EVENT_CHANCE_FORCED = 28
+TRAVEL_EVENT_CHANCE = 28
+TRAVEL_EVENT_CHANCE_FORCED = 42
 TRAVEL_ENEMY_CHANCE = 30
 TRAVEL_ENEMY_CHANCE_FORCED = 42
 TRAVEL_POST_EMISSION_ELITE_CHANCE = 0.12
@@ -175,7 +176,10 @@ def get_event_spawn_state(last_event_time_raw, now: Optional[int] = None) -> dic
 
     time_after_cooldown = elapsed - EVENT_COOLDOWN_SECONDS
     intervals_passed = int(time_after_cooldown / EVENT_CHANCE_RAMP_UP)
-    chance = min(EVENT_MAX_CHANCE, intervals_passed * EVENT_CHANCE_INCREMENT)
+    chance = min(
+        EVENT_MAX_CHANCE,
+        EVENT_BASE_CHANCE_AFTER_COOLDOWN + intervals_passed * EVENT_CHANCE_INCREMENT,
+    )
 
     return {
         "last_event_time": last_event_time,
@@ -192,8 +196,8 @@ def _check_event_cooldown(user_id: int) -> bool:
     Возвращает True если можно выдавать событие, False если на кулдауне.
 
     Механика:
-    - После получения события — кулдаун 30 минут
-    - После кулдауна — шанс растёт на 1.5% каждые 10 минут
+    - После получения события — кулдаун 40 минут
+    - После кулдауна — шанс стартует с 45% и растёт на 8% каждые 10 минут
     - Максимум 100%
     """
     state = get_event_spawn_state(database.get_user_flag(user_id, "last_random_event_time", 0))
@@ -372,7 +376,7 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
         event_corridor = travel.get("to_location")
         if event_corridor not in RESEARCH_LOCATIONS:
             event_corridor = travel.get("from_location")
-        event = get_random_event(user_id=user_id, corridor_id=event_corridor)
+        event = get_random_event(user_id=user_id, corridor_id=event_corridor, guaranteed=True)
         if event:
             set_pending_event(user_id, event)
             database.set_user_flag(user_id, "last_random_event_time", int(time.time()))

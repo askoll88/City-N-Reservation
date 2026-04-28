@@ -2450,7 +2450,7 @@ def _is_rare_wow_event(event_id: str) -> bool:
     return event_id in RARE_WOW_EVENTS
 
 
-def get_random_event(user_id: int = None, corridor_id: str | None = None) -> dict | None:
+def get_random_event(user_id: int = None, corridor_id: str | None = None, *, guaranteed: bool = False) -> dict | None:
     """
     Получить случайное событие.
     Если передан user_id — учитываются квестовые цепочки.
@@ -2465,8 +2465,10 @@ def get_random_event(user_id: int = None, corridor_id: str | None = None) -> dic
         if quest_event:
             return copy.deepcopy(quest_event)
 
-    # Редкий «вау» — отдельный ролл 5%
-    if random.randint(1, 100) <= 5:
+    # Редкий «вау» — отдельный ролл 5%. В guaranteed-режиме это не
+    # дополнительный шанс пустого результата, а редкая подмена обычного ивента.
+    wow_roll = random.randint(1, 100) <= 5
+    if wow_roll:
         wow_events = [
             e for e in RANDOM_EVENTS
             if _is_rare_wow_event(e["id"]) and _event_weight_for_corridor(e, corridor_id) > 0
@@ -2478,8 +2480,9 @@ def get_random_event(user_id: int = None, corridor_id: str | None = None) -> dic
             ]
             return copy.deepcopy(random.choices(wow_events, weights=weights, k=1)[0])
 
-    # Обычные события — 18% шанс
-    if random.randint(1, 100) > 18:
+    # Обычные события — 18% шанс. Коридорный travel уже сделал внешний ролл,
+    # поэтому guaranteed=True сразу выбирает событие из подходящего пула.
+    if not guaranteed and random.randint(1, 100) > 18:
         return None
 
     # Взвешенный выбор из обычных событий (исключая квестовые и вау)
