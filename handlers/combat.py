@@ -24,9 +24,11 @@ from infra.state_manager import (
     set_combat_state,
     is_in_combat,
     get_combat_data,
+    set_research_state,
     clear_research_state,
     try_edit_or_send_ui,
 )
+from handlers.keyboards import create_research_active_keyboard
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
 _active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
@@ -1032,6 +1034,14 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
         "remaining_energy": current_energy,
         "player_id": user_id
     }
+    set_research_state(
+        user_id,
+        {
+            "duration": time_sec,
+            "location_id": location_id,
+            "remaining_energy": current_energy,
+        },
+    )
 
     # Запускаем фоновый таймер
     timer = threading.Timer(time_sec, _complete_research, args=(user_id, vk, start_time))
@@ -1060,6 +1070,7 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
             "Ты уходишь с тропы, проверяя укрытия, следы и старые метки.\n"
             "Зона ответит сама, когда ты зайдёшь достаточно глубоко."
         ),
+        keyboard=create_research_active_keyboard().get_keyboard(),
         random_id=0
     )
 
@@ -1084,6 +1095,7 @@ def _complete_research(user_id: int, vk, expected_start_time: float):
 
     # Удаляем из активных исследований
     del _research_timers[user_id]
+    clear_research_state(user_id)
 
     # Получаем множители
     multiplier = RESEARCH_TIME_MULTIPLIERS[time_sec]

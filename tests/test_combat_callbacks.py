@@ -8,13 +8,22 @@ from handlers.combat import (
     _select_research_event_by_chance,
     _spawn_item,
     _will_continue_mutant_hunt,
+    cancel_research,
     create_anomaly_keyboard,
     create_combat_keyboard,
     create_combat_inventory_keyboard,
     create_skills_keyboard,
+    handle_explore_time,
     RESEARCH_EVENTS,
 )
-from infra.state_manager import clear_combat_state, invalidate_edit_targets, set_combat_state, set_ui_message
+from infra.state_manager import (
+    clear_combat_state,
+    clear_research_state,
+    invalidate_edit_targets,
+    is_researching,
+    set_combat_state,
+    set_ui_message,
+)
 
 
 class DummyClassPlayer:
@@ -29,6 +38,8 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
     def tearDown(self):
         clear_combat_state(1)
         clear_combat_state(77)
+        cancel_research(88)
+        clear_research_state(88)
         invalidate_edit_targets(77)
 
     def test_combat_attack_button_is_callback(self):
@@ -211,6 +222,55 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         self.assertIn("Бинт x2", edited["message"])
         self.assertNotIn("Атаковать", edited["keyboard"])
         self.assertIn("Назад к бою", edited["keyboard"])
+
+    def test_research_start_replaces_lower_keyboard_with_research_controls(self):
+        class Inventory:
+            total_weight = 0
+
+        class Player:
+            current_location_id = "дорога_военная_часть"
+            energy = 100
+            find_chance = 40
+            rare_find_chance = 5
+            inventory = Inventory()
+
+            def _get_passive_bonuses(self):
+                return {}
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 101
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        class FakeTimer:
+            daemon = False
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                pass
+
+        vk = Vk()
+
+        with patch("handlers.combat.threading.Timer", FakeTimer), \
+                patch("handlers.combat.database.update_user_stats", return_value=True):
+            handle_explore_time(Player(), vk, 88, time_sec=5)
+
+        self.assertTrue(is_researching(88))
+        keyboard = vk.messages.sent[-1]["keyboard"]
+        self.assertIn("Статус исследования", keyboard)
+        self.assertIn("Отмена", keyboard)
+        self.assertNotIn("Исследовать", keyboard)
+        self.assertNotIn("Карта", keyboard)
+        self.assertNotIn("Персонаж", keyboard)
 
     def test_many_skills_fall_back_to_lower_keyboard(self):
         class FakeClass:

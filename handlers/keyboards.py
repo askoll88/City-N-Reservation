@@ -61,6 +61,15 @@ def create_character_keyboard():
     return keyboard
 
 
+def create_research_active_keyboard():
+    """Минимальная клавиатура на время активного исследования."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Статус исследования", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Отмена", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
 # ============================================================
 # Главное меню (/start)
 # ============================================================

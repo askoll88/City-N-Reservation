@@ -961,6 +961,19 @@ def _do_callback_processing(event, vk):
     """Основная логика обработки callback-события."""
     payload = event.obj.payload or {}
     user_id = getattr(event.obj, "user_id", 0)
+    command = str(payload.get("command") or "")
+
+    if user_id and is_researching(user_id):
+        blocked_research_callbacks = {
+            "map",
+            "inventory_section",
+            "inventory_back",
+            "market_purchase",
+            "random_event",
+        }
+        if command in blocked_research_callbacks or command.startswith("market_"):
+            _answer_callback(event, vk, "Идёт исследование")
+            return
 
     if payload.get("command") == "map":
         region = payload.get("region")

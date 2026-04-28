@@ -14,6 +14,8 @@ from handlers.location import (
 )
 from handlers.combat import (
     handle_explore, handle_combat_attack, handle_combat_flee,
+    cancel_research as cancel_active_research,
+    get_research_status as get_active_research_status,
     show_skills_in_combat, use_skill,
     create_combat_inventory_keyboard,
     create_combat_keyboard as create_dynamic_combat_keyboard,
@@ -21,7 +23,8 @@ from handlers.combat import (
 )
 from handlers.keyboards import (
     create_location_keyboard,
-    create_npc_select_keyboard
+    create_npc_select_keyboard,
+    create_research_active_keyboard,
 )
 from handlers.npc import (
     show_npc_dialog, handle_npc_choice, handle_npc_back
@@ -42,8 +45,6 @@ from infra.state_manager import (
     is_in_combat,
     is_in_dialog, get_dialog_info, clear_dialog_state,
     is_researching as is_in_research,
-    get_research_data, clear_research_state,
-    cancel_research as cancel_research_state,
     is_in_anomaly, get_anomaly_data
 )
 
@@ -421,7 +422,7 @@ def handle_research_commands(player, vk, user_id: int, text: str):
     
     # Отмена исследования
     if text in ['отмена', 'отменить', 'стоп', 'прекратить']:
-        if cancel_research_state(user_id):
+        if cancel_active_research(user_id):
             vk.messages.send(
                 user_id=user_id,
                 message="❌ Исследование отменено.",
@@ -431,7 +432,7 @@ def handle_research_commands(player, vk, user_id: int, text: str):
         return True
     
     # Показать статус исследования
-    status = get_research_data(user_id)
+    status = get_active_research_status(user_id)
     if status:
         vk.messages.send(
             user_id=user_id,
@@ -441,6 +442,7 @@ def handle_research_commands(player, vk, user_id: int, text: str):
                 f"📍 Локация: {status.get('location_id', 'unknown')}\n\n"
                 f"Жди результата или напиши 'отмена' для отмены."
             ),
+            keyboard=create_research_active_keyboard().get_keyboard(),
             random_id=0
         )
         return True
