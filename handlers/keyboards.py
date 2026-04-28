@@ -345,11 +345,11 @@ def create_inventory_keyboard():
 def create_combat_keyboard():
     """Клавиатура боя — минимализм в стрессе"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "Атаковать", command="combat_action", action="attack", color=VkKeyboardColor.POSITIVE)
+    _add_callback_button(keyboard, "Навыки", command="combat_action", action="skills", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "Инвентарь", command="combat_action", action="inventory", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Убежать", command="combat_action", action="flee", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -468,20 +468,20 @@ def create_artifact_shop_keyboard():
 def create_player_market_keyboard():
     """Главная клавиатура P2P рынка"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("📈 Все лоты", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "📈 Все лоты", command="market_open", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("➕ Выставить лот", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("🧾 Мои лоты", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "🧾 Мои лоты", command="market_my_listings", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("🔫 Оружие", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("🛡️ Броня", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "🔫 Оружие", command="market_category", category="weapons", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "🛡️ Броня", command="market_category", category="armor", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
-    keyboard.add_button("💎 Артефакты", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("💊 Медицина", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "💎 Артефакты", command="market_category", category="artifacts", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "💊 Медицина", command="market_category", category="meds", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("🍖 Еда", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("📒 Мои сделки", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "🍖 Еда", command="market_category", category="food", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "📒 Мои сделки", command="market_transactions", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 

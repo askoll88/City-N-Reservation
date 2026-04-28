@@ -3,7 +3,7 @@ import json
 from unittest.mock import Mock, patch
 
 from handlers import market
-from handlers.keyboards import create_market_pagination_keyboard
+from handlers.keyboards import create_market_pagination_keyboard, create_player_market_keyboard
 
 
 class DummyKeyboard:
@@ -125,6 +125,18 @@ class MarketHandlersTest(unittest.TestCase):
         self.assertEqual(sort_button["action"]["type"], "callback")
         self.assertEqual(payload, {"command": "market_sort", "sort": "newest"})
 
+    def test_market_menu_category_buttons_are_callbacks(self):
+        keyboard = json.loads(create_player_market_keyboard().get_keyboard())
+        all_lots = keyboard["buttons"][0][0]
+        weapon_button = keyboard["buttons"][2][0]
+        all_payload = json.loads(all_lots["action"]["payload"])
+        weapon_payload = json.loads(weapon_button["action"]["payload"])
+
+        self.assertEqual(all_lots["action"]["type"], "callback")
+        self.assertEqual(all_payload, {"command": "market_open"})
+        self.assertEqual(weapon_button["action"]["type"], "callback")
+        self.assertEqual(weapon_payload, {"command": "market_category", "category": "weapons"})
+
     @patch("handlers.market.show_market_menu")
     def test_handle_market_callback_home_clears_state(self, show_menu_mock):
         market.set_market_browse_state(1, category="weapons", page=2, sort="cheap")
@@ -134,6 +146,21 @@ class MarketHandlersTest(unittest.TestCase):
         self.assertTrue(handled)
         self.assertIsNone(market.get_market_browse_state(1))
         show_menu_mock.assert_called_once()
+
+    @patch("handlers.market._show_market_listings_page")
+    def test_handle_market_callback_category_opens_category(self, show_page_mock):
+        market.set_market_browse_state(1, category=None, page=1, sort="cheap")
+        player = DummyPlayer()
+
+        handled = market.handle_market_callback(
+            player,
+            self.vk,
+            1,
+            {"command": "market_category", "category": "armor"},
+        )
+
+        self.assertTrue(handled)
+        show_page_mock.assert_called_once_with(player, self.vk, 1, 1, "armor", "cheap", None)
 
 
 if __name__ == "__main__":

@@ -680,8 +680,7 @@ def _restore_interrupted_context(player, vk, user_id: int, header: str = ""):
     Приоритет: бой -> аномалия -> квест/рандом-ивент -> диалог -> исследование -> путь.
     """
     from game.random_events import format_event_message
-    from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-    from handlers.combat import create_combat_keyboard
+    from handlers.combat import create_anomaly_keyboard, create_combat_keyboard
 
     if is_in_combat(user_id):
         msg = "⚔️ Бой продолжается."
@@ -699,12 +698,7 @@ def _restore_interrupted_context(player, vk, user_id: int, header: str = ""):
         anomaly = get_anomaly_data(user_id) or {}
         anomaly_name = anomaly.get("anomaly_name", "аномалия")
         shells = database.get_user_shells(user_id)
-        keyboard = VkKeyboard(one_time=False)
-        keyboard.add_button("Обойти", color=VkKeyboardColor.POSITIVE)
-        if shells > 0:
-            keyboard.add_button("Бросить гильзу", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_line()
-        keyboard.add_button("Отступить", color=VkKeyboardColor.NEGATIVE)
+        keyboard = create_anomaly_keyboard(shells)
         msg = f"⚠️ Ты всё ещё в аномалии: {anomaly_name}.\nВыбери действие."
         if header:
             msg = f"{header}\n\n{msg}"

@@ -1004,6 +1004,58 @@ def _do_callback_processing(event, vk):
         handle_market_callback(player, vk, user_id, payload)
         return
 
+    if payload.get("command") == "combat_action":
+        action = payload.get("action")
+        if not is_in_combat(user_id):
+            _answer_callback(event, vk, "Бой уже завершен")
+            return
+        action_text = {
+            "attack": "атаковать",
+            "flee": "убежать",
+            "skills": "навыки",
+            "inventory": "инвентарь",
+            "back": "назад",
+        }.get(action)
+        if not action_text:
+            _answer_callback(event, vk, "Действие устарело")
+            return
+        _answer_callback(event, vk, "Бой обновлен")
+        player = get_player(user_id)
+        handle_combat_commands(player, vk, user_id, action_text, action_text)
+        return
+
+    if payload.get("command") == "combat_skill":
+        if not is_in_combat(user_id):
+            _answer_callback(event, vk, "Бой уже завершен")
+            return
+        skill_name = str(payload.get("skill") or "").strip()
+        if not skill_name:
+            _answer_callback(event, vk, "Навык устарел")
+            return
+        _answer_callback(event, vk, "Навык применен")
+        player = get_player(user_id)
+        from handlers.combat import use_skill
+        use_skill(player, vk, user_id, skill_name)
+        return
+
+    if payload.get("command") == "anomaly_action":
+        if not is_in_anomaly(user_id):
+            _answer_callback(event, vk, "Аномалия уже закрыта")
+            return
+        action_text = {
+            "bypass": "обойти",
+            "extract": "бросить гильзу",
+            "retreat": "отступить",
+        }.get(payload.get("action"))
+        if not action_text:
+            _answer_callback(event, vk, "Действие устарело")
+            return
+        _answer_callback(event, vk, "Аномалия обновлена")
+        player = get_player(user_id)
+        from handlers.combat import handle_anomaly_action
+        handle_anomaly_action(player, vk, user_id, action_text)
+        return
+
     if payload.get("command") == "back":
         _answer_callback(event, vk, "Возврат")
         player = get_player(user_id)

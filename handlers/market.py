@@ -438,6 +438,27 @@ def handle_market_callback(player, vk, user_id: int, payload: dict) -> bool:
     search = state.get("search")
     pages = max(1, int(state.get("pages", 1) or 1))
 
+    if command == "market_open":
+        clear_market_browse_state(user_id)
+        _show_market_listings_page(player, vk, user_id, 1, None, "newest", None)
+        return True
+
+    if command == "market_category":
+        target_category = payload.get("category")
+        if target_category not in {"weapons", "armor", "artifacts", "meds", "food"}:
+            target_category = None
+        _show_market_listings_page(player, vk, user_id, 1, target_category, sort, None)
+        return True
+
+    if command == "market_my_listings":
+        my_page, my_status = get_market_my_listings_page(user_id)
+        show_my_market_listings(player, vk, user_id, page=my_page, status=my_status)
+        return True
+
+    if command == "market_transactions":
+        show_my_market_transactions(player, vk, user_id)
+        return True
+
     if command == "market_page":
         target_page = int(payload.get("page", page) or page)
         target_page = max(1, min(pages, target_page))

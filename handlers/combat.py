@@ -1653,12 +1653,7 @@ def _handle_anomaly(player, vk, user_id: int):
     message += f"\n{ui.section('Действие')}\nВыбери действие."
 
     # Клавиатура выбора
-    keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Обойти", color=VkKeyboardColor.POSITIVE)
-    if shells > 0:
-        keyboard.add_button("Бросить гильзу", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_line()
-    keyboard.add_button("Отступить", color=VkKeyboardColor.NEGATIVE)
+    keyboard = create_anomaly_keyboard(shells)
 
     if shells == 0:
         message += "\n\n⚠️ У тебя нет гильз! Сначала найди гильзы."
@@ -2718,12 +2713,7 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
 
     message += "\nТвой ход."
 
-    keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_line()
-    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
+    keyboard = create_combat_keyboard(player, user_id)
 
     vk.messages.send(user_id=user_id, message=message, keyboard=keyboard.get_keyboard(), random_id=0)
 
@@ -2940,15 +2930,59 @@ def create_combat_keyboard(player=None, user_id=None):
     """Клавиатура боя"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Атаковать", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_callback_button(
+        "Атаковать",
+        color=VkKeyboardColor.POSITIVE,
+        payload={"command": "combat_action", "action": "attack"},
+    )
+    keyboard.add_callback_button(
+        "Инвентарь",
+        color=VkKeyboardColor.PRIMARY,
+        payload={"command": "combat_action", "action": "inventory"},
+    )
     keyboard.add_line()
     # Кнопка навыков - показываем только если есть выбранная специализация.
     if player and player.player_class:
-        keyboard.add_button("Навыки", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_callback_button(
+            "Навыки",
+            color=VkKeyboardColor.SECONDARY,
+            payload={"command": "combat_action", "action": "skills"},
+        )
+        keyboard.add_callback_button(
+            "Убежать",
+            color=VkKeyboardColor.NEGATIVE,
+            payload={"command": "combat_action", "action": "flee"},
+        )
     else:
-        keyboard.add_button("Убежать", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_callback_button(
+            "Убежать",
+            color=VkKeyboardColor.NEGATIVE,
+            payload={"command": "combat_action", "action": "flee"},
+        )
+    return keyboard
+
+
+def create_anomaly_keyboard(shells: int = 0):
+    """Клавиатура действий в аномалии."""
+    from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_callback_button(
+        "Обойти",
+        color=VkKeyboardColor.POSITIVE,
+        payload={"command": "anomaly_action", "action": "bypass"},
+    )
+    if int(shells or 0) > 0:
+        keyboard.add_callback_button(
+            "Бросить гильзу",
+            color=VkKeyboardColor.PRIMARY,
+            payload={"command": "anomaly_action", "action": "extract"},
+        )
+    keyboard.add_line()
+    keyboard.add_callback_button(
+        "Отступить",
+        color=VkKeyboardColor.NEGATIVE,
+        payload={"command": "anomaly_action", "action": "retreat"},
+    )
     return keyboard
 
 
@@ -3004,12 +3038,24 @@ def create_skills_keyboard(player, user_id: int = None):
             btn_text = f"{skill_name}{status}"
 
         color = VkKeyboardColor.POSITIVE if can_use else VkKeyboardColor.SECONDARY
-        keyboard.add_button(btn_text, color=color)
+        keyboard.add_callback_button(
+            btn_text,
+            color=color,
+            payload={"command": "combat_skill", "skill": skill_name},
+        )
         keyboard.add_line()
 
-    keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_callback_button(
+        "Инвентарь",
+        color=VkKeyboardColor.PRIMARY,
+        payload={"command": "combat_action", "action": "inventory"},
+    )
     keyboard.add_line()
-    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_callback_button(
+        "Назад",
+        color=VkKeyboardColor.NEGATIVE,
+        payload={"command": "combat_action", "action": "back"},
+    )
     return keyboard
 
 
