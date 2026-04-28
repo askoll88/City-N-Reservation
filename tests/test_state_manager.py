@@ -76,6 +76,17 @@ class StateManagerTest(unittest.TestCase):
         self.assertEqual(vk.messages.edited[0]["message_id"], 1)
         self.assertEqual(vk.messages.edited[0]["message"], "map-2")
 
+    def test_invalidate_edit_targets_forces_fresh_ui_message(self):
+        vk = DummyVK()
+
+        state_manager.try_edit_or_send_ui(vk, 11, "map", "map-1")
+        state_manager.invalidate_edit_targets(11)
+        state_manager.try_edit_or_send_ui(vk, 11, "map", "map-2")
+
+        self.assertEqual(len(vk.messages.sent), 2)
+        self.assertEqual(len(vk.messages.edited), 0)
+        self.assertEqual(vk.messages.sent[1]["message"], "map-2")
+
 
 if __name__ == "__main__":
     unittest.main()

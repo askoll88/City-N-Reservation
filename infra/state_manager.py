@@ -702,6 +702,18 @@ def set_ui_message(user_id: int, screen_key: str, msg_id: int, peer_id: int = No
     _ui_message_state.update(user_id, updater)
 
 
+def invalidate_edit_targets(user_id: int):
+    """
+    Сбросить сохранённые сообщения для редактирования.
+
+    Обычное текстовое сообщение пользователя начинает новую ветку истории чата.
+    После него нельзя редактировать старый UI-экран выше по диалогу — следующий
+    экран должен отправиться новым сообщением и стать свежей точкой редактирования.
+    """
+    _last_message_state.pop(user_id, None)
+    _ui_message_state.pop(user_id, None)
+
+
 def try_edit_or_send_ui(vk, user_id: int, screen_key: str, message: str, keyboard=None):
     """
     Попытаться редактировать активное сообщение конкретного UI-экрана.

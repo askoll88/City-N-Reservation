@@ -75,6 +75,7 @@ from infra.state_manager import (
     get_ui_current_screen, set_ui_screen,
     ensure_runtime_state_loaded, hydrate_travel_states_from_runtime,
     cleanup_inactive_states,
+    invalidate_edit_targets,
 )
 from handlers.keyboards import (
     create_main_keyboard,
@@ -901,6 +902,7 @@ def _process_message_event(event, vk):
     lock = _get_user_lock(user_id)
     with lock:
         try:
+            invalidate_edit_targets(user_id)
             handle_message(event, vk)
         except Exception as e:
             _handle_message_error(event, vk, e)
