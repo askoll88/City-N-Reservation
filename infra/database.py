@@ -3408,11 +3408,11 @@ def give_newbie_kit(vk_id: int) -> dict:
         """, (user_id,))
 
     # Донастройка после выдачи:
-    # 1) надеваем стартовый мешочек и добавляем 25 гильз;
+    # 1) надеваем стартовый мешочек и добавляем стартовый запас гильз;
     # 2) аккуратно автоэкипируем стартовый сет только в пустые слоты.
     equip_shells_bag(vk_id, "Маленький мешочек")
     shells_before = get_user_shells(vk_id)
-    add_shells(vk_id, 25)
+    add_shells(vk_id, 10)
     shells_after = get_user_shells(vk_id)
     shells_added = max(0, int(shells_after) - int(shells_before))
 

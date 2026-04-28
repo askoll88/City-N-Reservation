@@ -95,12 +95,12 @@ MIN_LEVEL_FOR_ARTIFACT_SLOT = min(v["level"] for v in ARTIFACT_SLOT_REQUIREMENTS
 ARTIFACT_SLOT_COSTS = {slot: int(req["cost"]) for slot, req in ARTIFACT_SLOT_REQUIREMENTS.items()}
 
 # === Мешочки для гильз ===
-# Линейная прогрессия у Военного на КПП: от стартового до эндгейм-варианта к 120 уровню.
+# Линейная прогрессия у Военного на КПП: стартовый мешочек выдается новичку,
+# Военный продает только апгрейды выше базового.
 SHELLS_BAG_REQUIREMENTS = {
-    "Маленький мешочек": {"level": 8, "cost": 6000},
-    "Средний мешочек": {"level": 24, "cost": 18000},
-    "Большой мешочек": {"level": 50, "cost": 42000},
-    "Профессиональный мешочек": {"level": 85, "cost": 90000},
+    "Средний мешочек": {"level": 8, "cost": 6000},
+    "Большой мешочек": {"level": 24, "cost": 18000},
+    "Профессиональный мешочек": {"level": 60, "cost": 65000},
     "Легендарный мешочек": {"level": 120, "cost": 180000},
 }
 SHELLS_BAG_ORDER = tuple(SHELLS_BAG_REQUIREMENTS.keys())
