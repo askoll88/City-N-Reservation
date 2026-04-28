@@ -359,16 +359,19 @@ def _show_combat_inventory(player, vk, user_id: int):
 
 def _use_combat_item_by_index(player, vk, user_id: int, idx: int) -> bool:
     """Использовать расходник по номеру во время боя."""
+    from infra.state_manager import try_edit_or_send_ui
+
     if idx <= 0:
         return False
     player.inventory.reload()
     items = player.inventory.other
     if idx > len(items):
-        vk.messages.send(
-            user_id=user_id,
-            message="Нет предмета с таким номером в боевом инвентаре.",
-            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-            random_id=0
+        try_edit_or_send_ui(
+            vk,
+            user_id,
+            "combat",
+            "Нет предмета с таким номером в боевом инвентаре.",
+            keyboard=create_combat_inventory_keyboard(user_id).get_keyboard(),
         )
         return True
     return _use_combat_item(player, vk, user_id, items[idx - 1]["name"])
@@ -376,6 +379,8 @@ def _use_combat_item_by_index(player, vk, user_id: int, idx: int) -> bool:
 
 def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
     """Использовать предмет в бою только из секции other."""
+    from infra.state_manager import try_edit_or_send_ui
+
     if not target:
         return False
 
@@ -385,11 +390,12 @@ def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
     if target.isdigit():
         idx = int(target)
         if idx <= 0 or idx > len(player.inventory.other):
-            vk.messages.send(
-                user_id=user_id,
-                message="Нет предмета с таким номером в боевом инвентаре.",
-                keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-                random_id=0
+            try_edit_or_send_ui(
+                vk,
+                user_id,
+                "combat",
+                "Нет предмета с таким номером в боевом инвентаре.",
+                keyboard=create_combat_inventory_keyboard(user_id).get_keyboard(),
             )
             return True
         item = player.inventory.other[idx - 1]
@@ -397,21 +403,24 @@ def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
         item = next((it for it in player.inventory.other if it["name"].lower() == target.lower()), None)
 
     if not item:
-        vk.messages.send(
-            user_id=user_id,
-            message="В бою можно использовать только расходники из раздела 'Другое'.",
-            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-            random_id=0
+        try_edit_or_send_ui(
+            vk,
+            user_id,
+            "combat",
+            "В бою можно использовать только расходники из раздела 'Другое'.",
+            keyboard=create_combat_inventory_keyboard(user_id).get_keyboard(),
         )
         return True
 
     success, msg = player.use_item(item["name"])
-    vk.messages.send(
-        user_id=user_id,
-        message=msg,
-        keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-        random_id=0
-    )
+    if not show_current_combat_screen(player, vk, user_id, prefix=msg):
+        try_edit_or_send_ui(
+            vk,
+            user_id,
+            "combat",
+            msg,
+            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
+        )
     return True
 
 

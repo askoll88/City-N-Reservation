@@ -223,6 +223,68 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         self.assertNotIn("Атаковать", edited["keyboard"])
         self.assertIn("Назад к бою", edited["keyboard"])
 
+    def test_combat_item_use_edits_back_to_combat_hud(self):
+        from handlers.commands import handle_combat_commands
+
+        class Inventory:
+            other = [{"name": "Бинт", "quantity": 1}]
+
+            def reload(self):
+                pass
+
+        class Player:
+            inventory = Inventory()
+            player_class = None
+            health = 50
+            max_health = 100
+            energy = 80
+            total_defense = 5
+
+            def use_item(self, item_name):
+                self.health = 70
+                return True, f"Использован {item_name}."
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+                self.edited = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 101
+
+            def edit(self, **kwargs):
+                self.edited.append(kwargs)
+                return 1
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        vk = Vk()
+        set_combat_state(
+            77,
+            {
+                "combat_id": "fight-77",
+                "enemy_name": "Слепой пёс",
+                "enemy_hp": 12,
+                "enemy_max_hp": 20,
+            },
+        )
+        set_ui_message(77, "combat", 55, peer_id=77)
+
+        handled = handle_combat_commands(Player(), vk, 77, "использовать 1", "использовать 1")
+
+        self.assertTrue(handled)
+        self.assertEqual(vk.messages.sent, [])
+        self.assertEqual(len(vk.messages.edited), 1)
+        edited = vk.messages.edited[0]
+        self.assertEqual(edited["message_id"], 55)
+        self.assertIn("Использован Бинт.", edited["message"])
+        self.assertIn("Слепой пёс", edited["message"])
+        self.assertIn("Атаковать", edited["keyboard"])
+        self.assertIn("Инвентарь", edited["keyboard"])
+
     def test_research_start_replaces_lower_keyboard_with_research_controls(self):
         class Inventory:
             total_weight = 0
