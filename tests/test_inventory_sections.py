@@ -128,8 +128,10 @@ class InventorySectionsTest(unittest.TestCase):
 
     def test_inventory_keyboard_can_be_inline(self):
         keyboard = json.loads(create_inventory_keyboard(inline=True).get_keyboard())
+        button_count = sum(len(row) for row in keyboard["buttons"])
 
         self.assertTrue(keyboard["inline"])
+        self.assertLessEqual(button_count, 6)
 
     def test_inventory_back_button_uses_inventory_back_callback(self):
         keyboard = json.loads(create_inventory_keyboard().get_keyboard())

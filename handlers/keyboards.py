@@ -333,8 +333,9 @@ def create_inventory_keyboard(*, inline: bool = False):
     keyboard.add_line()
     _add_callback_button(keyboard, "Рюкзаки", command="inventory_section", section="backpacks", color=VkKeyboardColor.PRIMARY)
     _add_callback_button(keyboard, "Все", command="inventory_section", section="all", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_line()
-    _add_callback_button(keyboard, "Назад", command="inventory_back", color=VkKeyboardColor.NEGATIVE)
+    if not inline:
+        keyboard.add_line()
+        _add_callback_button(keyboard, "Назад", command="inventory_back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -468,6 +469,18 @@ def create_artifact_shop_keyboard():
 def create_player_market_keyboard(*, inline: bool = False):
     """Главная клавиатура P2P рынка"""
     keyboard = VkKeyboard(one_time=False, inline=inline)
+
+    if inline:
+        _add_callback_button(keyboard, "📈 Все лоты", command="market_open", color=VkKeyboardColor.PRIMARY)
+        _add_callback_button(keyboard, "🧾 Мои лоты", command="market_my_listings", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+        _add_callback_button(keyboard, "🔫 Оружие", command="market_category", category="weapons", color=VkKeyboardColor.PRIMARY)
+        _add_callback_button(keyboard, "🛡️ Броня", command="market_category", category="armor", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+        _add_callback_button(keyboard, "💎 Артефакты", command="market_category", category="artifacts", color=VkKeyboardColor.PRIMARY)
+        _add_callback_button(keyboard, "📒 Сделки", command="market_transactions", color=VkKeyboardColor.SECONDARY)
+        return keyboard
+
     _add_callback_button(keyboard, "📈 Все лоты", command="market_open", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
@@ -501,7 +514,7 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     keyboard.add_line()
 
     # Ряд сортировки
-    sort_labels = [
+    sort_labels = [("💰 Дешевле", "cheap"), ("💎 Дороже", "expensive")] if inline else [
         ("🆕 Новые", "newest"),
         ("📅 Старые", "oldest"),
         ("💰 Дешевле", "cheap"),
@@ -516,7 +529,8 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     keyboard.add_line()
 
     # Ряд действий
-    keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
+    if not inline:
+        keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
     if category:
         _add_callback_button(keyboard, "✖️ Сбросить фильтр", command="market_clear_filter", color=VkKeyboardColor.NEGATIVE)
     _add_callback_button(keyboard, "🏠 Главная", command="market_home", color=VkKeyboardColor.NEGATIVE)

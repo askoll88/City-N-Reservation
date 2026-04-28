@@ -150,8 +150,19 @@ class MarketHandlersTest(unittest.TestCase):
 
     def test_market_keyboard_can_be_inline(self):
         keyboard = json.loads(create_player_market_keyboard(inline=True).get_keyboard())
+        button_count = sum(len(row) for row in keyboard["buttons"])
 
         self.assertTrue(keyboard["inline"])
+        self.assertLessEqual(button_count, 6)
+        self.assertTrue(all(button["action"]["type"] == "callback" for row in keyboard["buttons"] for button in row))
+
+    def test_market_pagination_inline_is_compact(self):
+        keyboard = json.loads(create_market_pagination_keyboard(2, 3, category="weapons", inline=True).get_keyboard())
+        button_count = sum(len(row) for row in keyboard["buttons"])
+
+        self.assertTrue(keyboard["inline"])
+        self.assertLessEqual(button_count, 6)
+        self.assertTrue(all(button["action"]["type"] == "callback" for row in keyboard["buttons"] for button in row))
 
     @patch("handlers.market.create_player_market_keyboard", return_value=DummyKeyboard())
     @patch("handlers.market.database.get_market_user_transactions", return_value=[])
