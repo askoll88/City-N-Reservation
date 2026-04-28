@@ -997,6 +997,13 @@ def _do_callback_processing(event, vk):
         go_back(player, vk, user_id)
         return
 
+    if str(payload.get("command", "")).startswith("market_"):
+        _answer_callback(event, vk, "Рынок обновлен")
+        player = get_player(user_id)
+        from handlers.market import handle_market_callback
+        handle_market_callback(player, vk, user_id, payload)
+        return
+
     if payload.get("command") == "back":
         _answer_callback(event, vk, "Возврат")
         player = get_player(user_id)

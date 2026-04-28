@@ -494,9 +494,9 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     # Ряд навигации (только назад/вперёд, без номеров страниц).
     # Это гарантирует отсутствие ошибки VK 911 по переполнению строки.
     if page > 1:
-        keyboard.add_button("◀️ Назад", color=VkKeyboardColor.SECONDARY)
+        _add_callback_button(keyboard, "◀️ Назад", command="market_page", page=page - 1, color=VkKeyboardColor.SECONDARY)
     if page < pages:
-        keyboard.add_button("▶️ Вперёд", color=VkKeyboardColor.SECONDARY)
+        _add_callback_button(keyboard, "▶️ Вперёд", command="market_page", page=page + 1, color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
 
     # Ряд сортировки
@@ -508,7 +508,7 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     ]
     for idx, (label, sort_key) in enumerate(sort_labels, 1):
         color = VkKeyboardColor.POSITIVE if sort == sort_key else VkKeyboardColor.SECONDARY
-        keyboard.add_button(label, color=color)
+        _add_callback_button(keyboard, label, command="market_sort", sort=sort_key, color=color)
         # Держим сортировку в 2 кнопки на ряд, чтобы не ловить лимиты VK.
         if idx % 2 == 0 and idx < len(sort_labels):
             keyboard.add_line()
@@ -517,8 +517,8 @@ def create_market_pagination_keyboard(page: int, pages: int, category: str | Non
     # Ряд действий
     keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
     if category:
-        keyboard.add_button("✖️ Сбросить фильтр", color=VkKeyboardColor.NEGATIVE)
-    keyboard.add_button("🏠 Главная", color=VkKeyboardColor.NEGATIVE)
+        _add_callback_button(keyboard, "✖️ Сбросить фильтр", command="market_clear_filter", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "🏠 Главная", command="market_home", color=VkKeyboardColor.NEGATIVE)
 
     return keyboard
 

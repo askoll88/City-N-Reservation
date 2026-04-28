@@ -428,6 +428,41 @@ def show_market_listings(player, vk, user_id, category=None, page=1, sort="newes
     _show_market_listings_page(player, vk, user_id, page, category, sort, search)
 
 
+def handle_market_callback(player, vk, user_id: int, payload: dict) -> bool:
+    """Обработать callback-кнопки просмотра рынка."""
+    command = payload.get("command")
+    state = get_market_browse_state(user_id) or {}
+    category = state.get("category")
+    page = int(state.get("page", 1) or 1)
+    sort = state.get("sort", "newest")
+    search = state.get("search")
+    pages = max(1, int(state.get("pages", 1) or 1))
+
+    if command == "market_page":
+        target_page = int(payload.get("page", page) or page)
+        target_page = max(1, min(pages, target_page))
+        _show_market_listings_page(player, vk, user_id, target_page, category, sort, search)
+        return True
+
+    if command == "market_sort":
+        target_sort = payload.get("sort") or "newest"
+        if target_sort not in {"newest", "oldest", "cheap", "expensive"}:
+            target_sort = "newest"
+        _show_market_listings_page(player, vk, user_id, 1, category, target_sort, search)
+        return True
+
+    if command == "market_clear_filter":
+        _show_market_listings_page(player, vk, user_id, 1, None, sort, None)
+        return True
+
+    if command == "market_home":
+        clear_market_browse_state(user_id)
+        show_market_menu(player, vk, user_id)
+        return True
+
+    return False
+
+
 def show_my_market_listings(player, vk, user_id, page=1, status="active"):
     """Показать свои лоты с пагинацией."""
     data = database.get_market_user_listings(user_id, status=status, page=page, per_page=PER_PAGE)

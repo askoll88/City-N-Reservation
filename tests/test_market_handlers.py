@@ -1,7 +1,9 @@
 import unittest
+import json
 from unittest.mock import Mock, patch
 
 from handlers import market
+from handlers.keyboards import create_market_pagination_keyboard
 
 
 class DummyKeyboard:
@@ -106,6 +108,32 @@ class MarketHandlersTest(unittest.TestCase):
 
         self.assertTrue(handled)
         cancel_listing_mock.assert_called_once_with(1, 9)
+
+    def test_market_pagination_buttons_are_callbacks(self):
+        keyboard = json.loads(create_market_pagination_keyboard(1, 2).get_keyboard())
+        next_button = keyboard["buttons"][0][0]
+        payload = json.loads(next_button["action"]["payload"])
+
+        self.assertEqual(next_button["action"]["type"], "callback")
+        self.assertEqual(payload, {"command": "market_page", "page": 2})
+
+    def test_market_sort_buttons_are_callbacks(self):
+        keyboard = json.loads(create_market_pagination_keyboard(1, 1).get_keyboard())
+        sort_button = keyboard["buttons"][1][0]
+        payload = json.loads(sort_button["action"]["payload"])
+
+        self.assertEqual(sort_button["action"]["type"], "callback")
+        self.assertEqual(payload, {"command": "market_sort", "sort": "newest"})
+
+    @patch("handlers.market.show_market_menu")
+    def test_handle_market_callback_home_clears_state(self, show_menu_mock):
+        market.set_market_browse_state(1, category="weapons", page=2, sort="cheap")
+
+        handled = market.handle_market_callback(DummyPlayer(), self.vk, 1, {"command": "market_home"})
+
+        self.assertTrue(handled)
+        self.assertIsNone(market.get_market_browse_state(1))
+        show_menu_mock.assert_called_once()
 
 
 if __name__ == "__main__":
