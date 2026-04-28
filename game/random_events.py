@@ -2766,7 +2766,7 @@ def _apply_random_loot(player):
     player_id = _resolve_player_id(player)
     money_reward = random.randint(50, 300)
     player.money += money_reward
-    item_text = "ничего"
+    item_text = ""
     if random.randint(1, 100) <= 40:
         common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
         item_name, qty = random.choice(common_items)
@@ -2845,10 +2845,14 @@ def _render_event_message(template: str, ctx: dict) -> str:
     """Безопасно подставить плейсхолдеры в тексте ивента."""
     if not template:
         return ""
+    item_text = str(ctx.get("item", ctx.get("item_text", "")) or "").strip()
+    if not item_text or item_text.lower() == "ничего":
+        template = template.replace(", +{item}", "").replace(" +{item}", "")
+        item_text = ""
     try:
         return template.format(
             money=ctx.get("money", ctx.get("money_reward", 0)),
-            item=ctx.get("item", ctx.get("item_text", "ничего")),
+            item=item_text,
             artifact=ctx.get("artifact", "артефакт"),
             xp=ctx.get("xp", 0),
         )

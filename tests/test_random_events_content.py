@@ -1,7 +1,13 @@
 import unittest
 
 from game.constants import RESEARCH_LOCATIONS
-from game.random_events import QUEST_CHAINS, RANDOM_EVENTS, get_event_corridors, get_random_event
+from game.random_events import (
+    QUEST_CHAINS,
+    RANDOM_EVENTS,
+    _render_event_message,
+    get_event_corridors,
+    get_random_event,
+)
 
 
 NEW_RANDOM_EVENT_IDS = {
@@ -91,6 +97,15 @@ class RandomEventsContentTests(unittest.TestCase):
 
             self.assertIsNotNone(event, corridor_id)
             self.assertIn(corridor_id, get_event_corridors(event["id"]))
+
+    def test_random_loot_message_omits_empty_item_reward(self):
+        message = _render_event_message(
+            "Нить вывела к чужой закладке. +{money} руб., +{item}",
+            {"money": 149, "item": ""},
+        )
+
+        self.assertEqual(message, "Нить вывела к чужой закладке. +149 руб.")
+        self.assertNotIn("+ничего", message)
 
 
 if __name__ == "__main__":
