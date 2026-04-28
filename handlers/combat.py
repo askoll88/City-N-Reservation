@@ -43,6 +43,22 @@ def _send_anomaly_screen(vk, user_id: int, message: str, keyboard=None):
     try_edit_or_send_ui(vk, user_id, "anomaly", message, keyboard=keyboard)
 
 
+def _hide_lower_keyboard_for_combat(vk, user_id: int):
+    """Убрать нижнюю VK-клавиатуру, чтобы в бою остались только inline-действия."""
+    from infra import vk_messages
+    from vk_api.keyboard import VkKeyboard
+
+    try:
+        vk_messages.send(
+            vk,
+            user_id=user_id,
+            message="⚔️ Боевой режим.",
+            keyboard=VkKeyboard.get_empty_keyboard(),
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Не удалось скрыть нижнюю клавиатуру боя: user_id=%s", user_id)
+
+
 def _get_combat_logger() -> logging.Logger:
     logger = logging.getLogger("city_n.combat")
     if any(getattr(handler, "_city_n_combat_file", False) for handler in logger.handlers):
@@ -2632,6 +2648,7 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
         scaled_enemy["enemy_damage"] = max(1, int(scaled_enemy["enemy_damage"] * enemy_stat_mult))
 
     initiative = _roll_initiative(player, scaled_enemy["enemy_speed"])
+    _hide_lower_keyboard_for_combat(vk, user_id)
 
     # Сохраняем состояние боя
     _combat_state[user_id] = {
@@ -3355,10 +3372,13 @@ def use_skill(player, vk, user_id: int, skill_name: str):
             )
             victory_message = _handle_victory(player, combat, user_id, vk=vk)
             from handlers.keyboards import create_resume_keyboard
+            victory_keyboard = None
+            if not _will_continue_mutant_hunt(combat):
+                victory_keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard()
             vk.messages.send(
                 user_id=user_id,
                 message=victory_message,
-                keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
+                keyboard=victory_keyboard,
                 random_id=0
             )
             _maybe_continue_mutant_hunt(player, combat, user_id, vk)
@@ -3815,11 +3835,13 @@ def handle_combat_attack(player, vk, user_id: int):
         )
         victory_message = _handle_victory(player, combat, user_id, vk=vk)
         from handlers.keyboards import create_resume_keyboard
-        keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id)
+        keyboard = None
+        if not _will_continue_mutant_hunt(combat):
+            keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard()
         vk.messages.send(
             user_id=user_id,
             message=victory_message,
-            keyboard=keyboard.get_keyboard(),
+            keyboard=keyboard,
             random_id=0
         )
         _maybe_continue_mutant_hunt(player, combat, user_id, vk)
@@ -4149,14 +4171,9 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
 
 def _maybe_continue_mutant_hunt(player, combat: dict, user_id: int, vk):
     """Продолжить лесную охоту после победы, если стая ещё не рассеялась."""
-    try:
-        remaining = int(combat.get("mutant_hunt", 0) or 0)
-    except (TypeError, ValueError):
-        remaining = 0
-    if remaining <= 0:
+    if not _will_continue_mutant_hunt(combat):
         return
-    if combat.get("location_id") not in {"дорога_зараженный_лес", "зараженный_лес"}:
-        return
+    remaining = int(combat.get("mutant_hunt", 0) or 0)
 
     vk.messages.send(
         user_id=user_id,
@@ -4172,3 +4189,14 @@ def _maybe_continue_mutant_hunt(player, combat: dict, user_id: int, vk):
     next_combat = _combat_state_ref.get(user_id)
     if next_combat:
         next_combat["mutant_hunt"] = remaining - 1
+
+
+def _will_continue_mutant_hunt(combat: dict) -> bool:
+    """Есть ли следующая волна стаи после текущей победы."""
+    try:
+        remaining = int(combat.get("mutant_hunt", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if remaining <= 0:
+        return False
+    return combat.get("location_id") in {"дорога_зараженный_лес", "зараженный_лес"}
