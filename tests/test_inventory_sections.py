@@ -73,7 +73,7 @@ class InventorySectionsTest(unittest.TestCase):
         sys.modules["database"] = cls.fake_db
 
         fake_main = types.ModuleType("main")
-        fake_main.create_inventory_keyboard = lambda: DummyKeyboard()
+        fake_main.create_inventory_keyboard = lambda *args, **kwargs: DummyKeyboard()
         sys.modules["main"] = fake_main
 
         cls.inventory_module = importlib.import_module("handlers.inventory")
@@ -125,6 +125,11 @@ class InventorySectionsTest(unittest.TestCase):
 
         self.assertEqual(first_button["action"]["type"], "callback")
         self.assertEqual(payload, {"command": "inventory_section", "section": "weapons"})
+
+    def test_inventory_keyboard_can_be_inline(self):
+        keyboard = json.loads(create_inventory_keyboard(inline=True).get_keyboard())
+
+        self.assertTrue(keyboard["inline"])
 
     def test_inventory_back_button_uses_inventory_back_callback(self):
         keyboard = json.loads(create_inventory_keyboard().get_keyboard())

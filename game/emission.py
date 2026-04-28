@@ -1481,7 +1481,7 @@ def prompt_emission_risk_exit_confirmation(player, vk, user_id: int, from_locati
             f"До конца импакта: {mins}:{secs:02d}.\n\n"
             "Подтверждаешь риск?"
         ),
-        keyboard=create_emission_risk_confirm_keyboard().get_keyboard(),
+        keyboard=create_emission_risk_confirm_keyboard(inline=True).get_keyboard(),
         random_id=0,
     )
     return True
@@ -1528,7 +1528,7 @@ def handle_emission_risk_exit_response(player, vk, user_id: int, text: str) -> b
     vk.messages.send(
         user_id=user_id,
         message="Выбери: '⚠️ Подтвердить риск' или 'Отмена'.",
-        keyboard=create_emission_risk_confirm_keyboard().get_keyboard(),
+        keyboard=create_emission_risk_confirm_keyboard(inline=True).get_keyboard(),
         random_id=0,
     )
     return True

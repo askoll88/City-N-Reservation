@@ -148,6 +148,11 @@ class MarketHandlersTest(unittest.TestCase):
         self.assertEqual(weapon_button["action"]["type"], "callback")
         self.assertEqual(weapon_payload, {"command": "market_category", "category": "weapons"})
 
+    def test_market_keyboard_can_be_inline(self):
+        keyboard = json.loads(create_player_market_keyboard(inline=True).get_keyboard())
+
+        self.assertTrue(keyboard["inline"])
+
     @patch("handlers.market.create_player_market_keyboard", return_value=DummyKeyboard())
     @patch("handlers.market.database.get_market_user_transactions", return_value=[])
     @patch("handlers.market.database.is_market_enabled", return_value=True)

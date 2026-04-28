@@ -333,10 +333,10 @@ def show_map(player, vk, user_id: int, region_id: str | None = None):
     current_location = _current_location_id(player)
     if region_id and region_id in MAP_REGIONS:
         message = format_region_map(player, region_id)
-        keyboard = create_map_region_keyboard(region_id, current_location).get_keyboard()
+        keyboard = create_map_region_keyboard(region_id, current_location, inline=True).get_keyboard()
     else:
         message = format_map_overview(player)
-        keyboard = create_map_overview_keyboard(current_location).get_keyboard()
+        keyboard = create_map_overview_keyboard(current_location, inline=True).get_keyboard()
 
     try_edit_or_send_ui(vk, user_id, "map", message, keyboard=keyboard)
 

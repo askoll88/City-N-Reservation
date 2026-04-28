@@ -189,9 +189,9 @@ def create_location_keyboard(location_id: str, player_level: int = None):
 # Карта
 # ============================================================
 
-def create_map_overview_keyboard(current_location_id: str = None):
+def create_map_overview_keyboard(current_location_id: str = None, *, inline: bool = False):
     """Карта: выбор региона без списка всех локаций."""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     current = current_location_id or "город"
     _add_callback_button(keyboard, "Карта: Город", command="map", region="city", color=VkKeyboardColor.PRIMARY)
     _add_callback_button(keyboard, "Карта: Военный сектор", command="map", region="military", color=VkKeyboardColor.PRIMARY)
@@ -215,9 +215,9 @@ def create_map_overview_keyboard(current_location_id: str = None):
     return keyboard
 
 
-def create_map_region_keyboard(region_id: str, current_location_id: str = None):
+def create_map_region_keyboard(region_id: str, current_location_id: str = None, *, inline: bool = False):
     """Карта выбранного региона: кнопки ведут только к ближайшему шагу маршрута."""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     current = current_location_id or "город"
 
     if region_id == "city":
@@ -322,9 +322,9 @@ def create_map_region_keyboard(region_id: str, current_location_id: str = None):
 # Инвентарь (отдельная клавиатура)
 # ============================================================
 
-def create_inventory_keyboard():
+def create_inventory_keyboard(*, inline: bool = False):
     """Клавиатура инвентаря (дублирующая)"""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     _add_callback_button(keyboard, "Оружие", command="inventory_section", section="weapons", color=VkKeyboardColor.PRIMARY)
     _add_callback_button(keyboard, "Броня", command="inventory_section", section="armor", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
@@ -440,9 +440,9 @@ def create_blackmarket_keyboard():
     return keyboard
 
 
-def create_heal_confirm_keyboard():
+def create_heal_confirm_keyboard(*, inline: bool = False):
     """Клавиатура подтверждения лечения (показывается только после расчета цены)."""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     _add_callback_button(keyboard, "Подтвердить лечение", command="heal_confirm", action="confirm", color=VkKeyboardColor.POSITIVE)
     _add_callback_button(keyboard, "Отмена лечения", command="heal_confirm", action="cancel", color=VkKeyboardColor.NEGATIVE)
     return keyboard
@@ -465,9 +465,9 @@ def create_artifact_shop_keyboard():
 # P2P Рынок игроков
 # ============================================================
 
-def create_player_market_keyboard():
+def create_player_market_keyboard(*, inline: bool = False):
     """Главная клавиатура P2P рынка"""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     _add_callback_button(keyboard, "📈 Все лоты", command="market_open", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("🔍 Поиск", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
@@ -487,9 +487,10 @@ def create_player_market_keyboard():
 
 
 def create_market_pagination_keyboard(page: int, pages: int, category: str | None = None,
-                                       sort: str = "newest", search: str | None = None):
+                                       sort: str = "newest", search: str | None = None,
+                                       *, inline: bool = False):
     """Клавиатура с пагинацией и сортировкой для рынка."""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
 
     # Ряд навигации (только назад/вперёд, без номеров страниц).
     # Это гарантирует отсутствие ошибки VK 911 по переполнению строки.
@@ -530,9 +531,9 @@ def create_market_listing_keyboard(listing_id: int):
     return keyboard
 
 
-def create_my_listings_keyboard(page: int, pages: int):
+def create_my_listings_keyboard(page: int, pages: int, *, inline: bool = False):
     """Клавиатура для управления своими лотами."""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
 
     if pages > 1:
         if page > 1:
@@ -552,17 +553,17 @@ def create_my_listings_keyboard(page: int, pages: int):
     return keyboard
 
 
-def create_market_search_keyboard():
+def create_market_search_keyboard(*, inline: bool = False):
     """Клавиатура для режима поиска."""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     keyboard.add_button("✖️ Отмена", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_button("🏠 Главная", color=VkKeyboardColor.SECONDARY)
     return keyboard
 
 
-def create_purchase_confirm_keyboard():
+def create_purchase_confirm_keyboard(*, inline: bool = False):
     """Подтверждение покупки P2P"""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     _add_callback_button(keyboard, "✅ Подтвердить", command="market_purchase", action="confirm", color=VkKeyboardColor.POSITIVE)
     _add_callback_button(keyboard, "❌ Отмена", command="market_purchase", action="cancel", color=VkKeyboardColor.NEGATIVE)
     return keyboard
@@ -849,9 +850,9 @@ def create_emission_impact_keyboard(location: str, can_flee: bool = True):
     return keyboard
 
 
-def create_emission_risk_confirm_keyboard():
+def create_emission_risk_confirm_keyboard(*, inline: bool = False):
     """Подтверждение выхода из safe во время impact."""
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     _add_callback_button(keyboard, "⚠️ Подтвердить риск", command="emission_risk", action="confirm", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
     _add_callback_button(keyboard, "Отмена", command="emission_risk", action="cancel", color=VkKeyboardColor.SECONDARY)

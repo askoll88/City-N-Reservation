@@ -93,6 +93,11 @@ class MapScreenTests(unittest.TestCase):
         self.assertEqual(first_button["action"]["type"], "callback")
         self.assertEqual(payload, {"command": "map", "region": "city"})
 
+    def test_map_keyboard_can_be_inline(self):
+        keyboard = json.loads(create_map_overview_keyboard("город", inline=True).get_keyboard())
+
+        self.assertTrue(keyboard["inline"])
+
     def test_map_back_button_is_callback(self):
         keyboard = json.loads(create_map_region_keyboard("science", "кпп").get_keyboard())
         back_button = keyboard["buttons"][-1][-1]

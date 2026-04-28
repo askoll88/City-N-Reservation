@@ -10,10 +10,11 @@ from handlers.keyboards import (
 
 class ConfirmCallbackKeyboardTests(unittest.TestCase):
     def test_purchase_confirm_buttons_are_callbacks(self):
-        keyboard = json.loads(create_purchase_confirm_keyboard().get_keyboard())
+        keyboard = json.loads(create_purchase_confirm_keyboard(inline=True).get_keyboard())
         confirm = keyboard["buttons"][0][0]
         cancel = keyboard["buttons"][0][1]
 
+        self.assertTrue(keyboard["inline"])
         self.assertEqual(json.loads(confirm["action"]["payload"]), {"command": "market_purchase", "action": "confirm"})
         self.assertEqual(json.loads(cancel["action"]["payload"]), {"command": "market_purchase", "action": "cancel"})
 

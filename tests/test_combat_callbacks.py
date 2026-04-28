@@ -15,6 +15,7 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         button = keyboard["buttons"][0][0]
         payload = json.loads(button["action"]["payload"])
 
+        self.assertTrue(keyboard["inline"])
         self.assertEqual(button["action"]["type"], "callback")
         self.assertEqual(payload, {"command": "combat_action", "action": "attack"})
 
@@ -23,6 +24,7 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         bypass = keyboard["buttons"][0][0]
         extract = keyboard["buttons"][0][1]
 
+        self.assertTrue(keyboard["inline"])
         self.assertEqual(json.loads(bypass["action"]["payload"]), {"command": "anomaly_action", "action": "bypass"})
         self.assertEqual(json.loads(extract["action"]["payload"]), {"command": "anomaly_action", "action": "extract"})
 

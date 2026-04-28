@@ -2938,10 +2938,10 @@ def _spawn_item(player, vk, user_id: int):
     )
 
 
-def create_combat_keyboard(player=None, user_id=None):
+def create_combat_keyboard(player=None, user_id=None, *, inline: bool = True):
     """Клавиатура боя"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     keyboard.add_callback_button(
         "Атаковать",
         color=VkKeyboardColor.POSITIVE,
@@ -2974,10 +2974,10 @@ def create_combat_keyboard(player=None, user_id=None):
     return keyboard
 
 
-def create_anomaly_keyboard(shells: int = 0):
+def create_anomaly_keyboard(shells: int = 0, *, inline: bool = True):
     """Клавиатура действий в аномалии."""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
     keyboard.add_callback_button(
         "Обойти",
         color=VkKeyboardColor.POSITIVE,
@@ -2998,12 +2998,12 @@ def create_anomaly_keyboard(shells: int = 0):
     return keyboard
 
 
-def create_skills_keyboard(player, user_id: int = None):
+def create_skills_keyboard(player, user_id: int = None, *, inline: bool = True):
     """Клавиатура навыков в бою"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
     from models.classes import get_class
 
-    keyboard = VkKeyboard(one_time=False)
+    keyboard = VkKeyboard(one_time=False, inline=inline)
 
     class_id = player.player_class
     if not class_id:

@@ -1176,7 +1176,7 @@ def handle_heal(player, vk, user_id: int):
                     "Нажми кнопку 'Подтвердить лечение' в течение 2 минут.\n"
                     "Если передумал, нажми 'Отмена лечения'."
                 ),
-                keyboard=create_heal_confirm_keyboard().get_keyboard(),
+                keyboard=create_heal_confirm_keyboard(inline=True).get_keyboard(),
                 random_id=0
             )
             return
