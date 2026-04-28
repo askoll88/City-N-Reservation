@@ -60,6 +60,11 @@ def _notify_user(vk, user_id: int, message: str):
         pass
 
 
+def _send_market_screen(vk, user_id: int, message: str, keyboard=None):
+    """Обновить активный экран рынка без лишних сообщений в чате."""
+    try_edit_or_send_ui(vk, user_id, "market", message, keyboard=keyboard)
+
+
 def _resolve_player_item_name(player, item_input: str) -> tuple[str, dict | None]:
     """Найти каноничное имя предмета из инвентаря игрока."""
     name_raw = (item_input or "").strip()
@@ -385,23 +390,24 @@ def _show_market_listings_page(player, vk, user_id, page,
                                                    sort=sort, search=search)
     keyboard_payload = _sanitize_keyboard_payload(keyboard.get_keyboard(), max_cols=2)
 
-    try_edit_or_send_ui(vk, user_id, "market", "\n".join(lines), keyboard=keyboard_payload)
+    _send_market_screen(vk, user_id, "\n".join(lines), keyboard=keyboard_payload)
 
 
 def show_market_menu(player, vk, user_id):
     """Главное меню рынка."""
     if not database.is_market_enabled():
-        vk.messages.send(
-            user_id=user_id,
-            message="⛔ P2P рынок временно находится на техническом обслуживании.",
+        _send_market_screen(
+            vk,
+            user_id,
+            "⛔ P2P рынок временно находится на техническом обслуживании.",
             keyboard=create_player_market_keyboard().get_keyboard(),
-            random_id=0,
         )
         return
 
-    vk.messages.send(
-        user_id=user_id,
-        message=(
+    _send_market_screen(
+        vk,
+        user_id,
+        (
             "📈 РЫНОК СТАЛКЕРОВ\n\n"
             "Здесь сталкеры торгуют между собой через эскроу.\n"
             "Рынок берет комиссию за безопасность сделки.\n\n"
@@ -416,7 +422,6 @@ def show_market_menu(player, vk, user_id):
             "• Купить: купить лот <id>"
         ),
         keyboard=create_player_market_keyboard().get_keyboard(),
-        random_id=0,
     )
 
 
@@ -493,11 +498,11 @@ def show_my_market_listings(player, vk, user_id, page=1, status="active"):
 
     if not listings:
         status_name = {"active": "активных", "sold": "проданных", "all": ""}.get(status, "")
-        vk.messages.send(
-            user_id=user_id,
-            message=f"📭 У тебя нет {status_name} лотов." if status_name else "📭 У тебя нет лотов.",
+        _send_market_screen(
+            vk,
+            user_id,
+            f"📭 У тебя нет {status_name} лотов." if status_name else "📭 У тебя нет лотов.",
             keyboard=create_my_listings_keyboard(cur_page, pages).get_keyboard(),
-            random_id=0,
         )
         return
 
@@ -519,11 +524,11 @@ def show_my_market_listings(player, vk, user_id, page=1, status="active"):
         lines.append(f"\n💡 Снять лот: снять лот <id>")
 
     keyboard = create_my_listings_keyboard(cur_page, pages)
-    vk.messages.send(
-        user_id=user_id,
-        message="\n".join(lines),
+    _send_market_screen(
+        vk,
+        user_id,
+        "\n".join(lines),
         keyboard=keyboard.get_keyboard(),
-        random_id=0,
     )
 
 
@@ -531,11 +536,11 @@ def show_my_market_transactions(player, vk, user_id):
     """Показать историю сделок."""
     rows = database.get_market_user_transactions(user_id, limit=30)
     if not rows:
-        vk.messages.send(
-            user_id=user_id,
-            message="📭 Сделок пока нет.",
+        _send_market_screen(
+            vk,
+            user_id,
+            "📭 Сделок пока нет.",
             keyboard=create_player_market_keyboard().get_keyboard(),
-            random_id=0,
         )
         return
 
@@ -547,11 +552,11 @@ def show_my_market_transactions(player, vk, user_id):
             f"{row['total_price']:,} руб. | {row['created_at']:%d.%m.%Y %H:%M}"
         )
 
-    vk.messages.send(
-        user_id=user_id,
-        message="\n".join(lines),
+    _send_market_screen(
+        vk,
+        user_id,
+        "\n".join(lines),
         keyboard=create_player_market_keyboard().get_keyboard(),
-        random_id=0,
     )
 
 

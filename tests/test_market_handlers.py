@@ -13,7 +13,18 @@ class DummyKeyboard:
 
 class DummyVKMessages:
     def __init__(self):
-        self.send = Mock()
+        self.sent = []
+        self.edited = []
+        self.send = Mock(side_effect=self._send)
+        self.edit = Mock(side_effect=self._edit)
+
+    def _send(self, **kwargs):
+        self.sent.append(kwargs)
+        return len(self.sent)
+
+    def _edit(self, **kwargs):
+        self.edited.append(kwargs)
+        return 1
 
 
 class DummyVK:
@@ -136,6 +147,19 @@ class MarketHandlersTest(unittest.TestCase):
         self.assertEqual(all_payload, {"command": "market_open"})
         self.assertEqual(weapon_button["action"]["type"], "callback")
         self.assertEqual(weapon_payload, {"command": "market_category", "category": "weapons"})
+
+    @patch("handlers.market.create_player_market_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.market.database.get_market_user_transactions", return_value=[])
+    @patch("handlers.market.database.is_market_enabled", return_value=True)
+    def test_market_aux_screens_edit_existing_market_screen(self, _enabled_mock, _tx_mock, _kbd_mock):
+        market.show_market_menu(DummyPlayer(), self.vk, 9902)
+        market.show_my_market_transactions(DummyPlayer(), self.vk, 9902)
+
+        self.assertEqual(len(self.vk.messages.sent), 1)
+        self.assertEqual(len(self.vk.messages.edited), 1)
+        self.assertEqual(self.vk.messages.edited[0]["peer_id"], 9902)
+        self.assertEqual(self.vk.messages.edited[0]["message_id"], 1)
+        self.assertIn("Сделок пока нет", self.vk.messages.edited[0]["message"])
 
     @patch("handlers.market.show_market_menu")
     def test_handle_market_callback_home_clears_state(self, show_menu_mock):

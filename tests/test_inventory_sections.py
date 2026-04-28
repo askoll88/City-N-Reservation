@@ -15,8 +15,16 @@ class DummyKeyboard:
 
 class DummyVKMessages:
     def __init__(self):
-        self.send = Mock()
+        self.sent = []
+        self.edited = []
 
+    def send(self, **kwargs):
+        self.sent.append(kwargs)
+        return len(self.sent)
+
+    def edit(self, **kwargs):
+        self.edited.append(kwargs)
+        return 1
 
 class DummyVK:
     def __init__(self):
@@ -31,6 +39,10 @@ class DummyInventory:
         self.artifacts = [{"name": "Медуза", "quantity": 1, "weight": 0.5}]
         self.shells_bags = []
         self.other = [{"name": "Бинт", "quantity": 2, "weight": 0.1}]
+        self.total_weight = 4.6
+
+    def reload(self):
+        pass
 
 
 class DummyPlayer:
@@ -46,6 +58,9 @@ class DummyPlayer:
         self.equipped_backpack = "Рюкзак"
         self.equipped_device = None
         self.equipped_artifacts = []
+        self.artifact_slots = 3
+        self.max_weight = 30
+        self.money = 100
 
 
 class InventorySectionsTest(unittest.TestCase):
@@ -92,6 +107,16 @@ class InventorySectionsTest(unittest.TestCase):
         self.inventory_module.show_other(self.player, self.vk, user_id=1)
         self.assertEqual(self.player.inventory_section, "other")
         self.fake_db.update_user_stats.assert_not_called()
+
+    def test_inventory_sections_edit_existing_inventory_screen(self):
+        self.inventory_module.show_all(self.player, self.vk, user_id=9901)
+        self.inventory_module.show_weapons(self.player, self.vk, user_id=9901)
+
+        self.assertEqual(len(self.vk.messages.sent), 1)
+        self.assertEqual(len(self.vk.messages.edited), 1)
+        self.assertEqual(self.vk.messages.edited[0]["peer_id"], 9901)
+        self.assertEqual(self.vk.messages.edited[0]["message_id"], 1)
+        self.assertIn("ИНВЕНТАРЬ: ОРУЖИЕ", self.vk.messages.edited[0]["message"])
 
     def test_inventory_section_buttons_are_callbacks(self):
         keyboard = json.loads(create_inventory_keyboard().get_keyboard())

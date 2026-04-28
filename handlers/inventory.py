@@ -110,6 +110,13 @@ def _screen_footer(action_hint: str) -> str:
     )
 
 
+def _send_inventory_screen(vk, user_id: int, message: str, keyboard=None):
+    """Обновить активный экран инвентаря без засорения чата."""
+    from infra.state_manager import try_edit_or_send_ui
+
+    try_edit_or_send_ui(vk, user_id, "inventory", message, keyboard=keyboard)
+
+
 def _iter_all_inventory_items(player) -> list[dict]:
     return (
         player.inventory.weapons +
@@ -484,7 +491,7 @@ def show_weapons(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: оружие", player) + "\nПусто."
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_armor(player, vk, user_id: int):
@@ -514,7 +521,7 @@ def show_armor(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: броня", player) + "\nПусто."
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_backpacks(player, vk, user_id: int):
@@ -540,7 +547,7 @@ def show_backpacks(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: рюкзаки", player) + "\nПусто."
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_artifacts(player, vk, user_id: int):
@@ -578,7 +585,7 @@ def show_artifacts(player, vk, user_id: int):
     elif not equipped:
         msg = _screen_header("Инвентарь: артефакты", player) + "\nПусто."
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_other(player, vk, user_id: int):
@@ -598,7 +605,7 @@ def show_other(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: другое", player) + "\nПусто."
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_resources_shop(player, vk, user_id: int):
@@ -674,7 +681,7 @@ def show_all(player, vk, user_id: int):
         + "\nОткрой нужную категорию кнопками ниже — так читать проще."
     )
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_equipped_artifacts(player, vk, user_id: int):
@@ -688,7 +695,7 @@ def show_equipped_artifacts(player, vk, user_id: int):
             "У тебя нет надетых артефактов...\n\n"
             "Зайди в раздел 'Артефакты' чтобы надеть артефакты из инвентаря."
         )
-        vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+        _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
         return
 
     msg = "Надетые артефакты:\n\n"
@@ -715,7 +722,7 @@ def show_equipped_artifacts(player, vk, user_id: int):
 
     msg += "\nНажми цифру чтобы снять артефакт"
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_artifact_slots(player, vk, user_id: int):
@@ -752,7 +759,7 @@ def show_artifact_slots(player, vk, user_id: int):
         else:
             msg += "✅ Условия выполнены. Можно покупать."
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def show_artifact_help(player, vk, user_id: int):
@@ -780,7 +787,7 @@ def show_artifact_help(player, vk, user_id: int):
         "Базово 3 слота. Дополнительные слоты покупаются у Барыги на Черном рынке."
     )
 
-    vk.messages.send(user_id=user_id, message=msg, keyboard=create_inventory_keyboard().get_keyboard(), random_id=0)
+    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
 
 
 def handle_unequip_backpack(player, vk, user_id: int):

@@ -19,11 +19,28 @@ from game.constants import (
     LOCATION_LEVEL_THRESHOLDS,
     LOCATION_DROP_BALANCE_RULES,
 )
-from infra.state_manager import _combat_state, set_combat_state, is_in_combat, get_combat_data, clear_research_state
+from infra.state_manager import (
+    _combat_state,
+    set_combat_state,
+    is_in_combat,
+    get_combat_data,
+    clear_research_state,
+    try_edit_or_send_ui,
+)
 _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "player_data": {...}}}
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
 _active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
 COMBAT_LOG_PATH = Path(__file__).resolve().parent.parent / "logs" / "combat.log"
+
+
+def _send_combat_screen(vk, user_id: int, message: str, keyboard=None):
+    """Обновить активный HUD боя без лишних сообщений в чате."""
+    try_edit_or_send_ui(vk, user_id, "combat", message, keyboard=keyboard)
+
+
+def _send_anomaly_screen(vk, user_id: int, message: str, keyboard=None):
+    """Обновить активный экран аномалии."""
+    try_edit_or_send_ui(vk, user_id, "anomaly", message, keyboard=keyboard)
 
 
 def _get_combat_logger() -> logging.Logger:
@@ -1660,12 +1677,7 @@ def _handle_anomaly(player, vk, user_id: int):
     if not has_detector:
         message += "\n⚠️ Без детектора шанс добычи ниже, а урон при ошибке выше."
 
-    vk.messages.send(
-        user_id=user_id,
-        message=message,
-        keyboard=keyboard.get_keyboard(),
-        random_id=0
-    )
+    _send_anomaly_screen(vk, user_id, message, keyboard=keyboard.get_keyboard())
 
 
 def handle_anomaly_action(player, vk, user_id: int, action: str):
@@ -2715,7 +2727,7 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
 
     keyboard = create_combat_keyboard(player, user_id)
 
-    vk.messages.send(user_id=user_id, message=message, keyboard=keyboard.get_keyboard(), random_id=0)
+    _send_combat_screen(vk, user_id, message, keyboard=keyboard.get_keyboard())
 
 
 def _spawn_item(player, vk, user_id: int):
@@ -3118,12 +3130,7 @@ def show_skills_in_combat(player, vk, user_id):
     if not keyboard:
         return
 
-    vk.messages.send(
-        user_id=user_id,
-        message=msg,
-        keyboard=keyboard.get_keyboard(),
-        random_id=0
-    )
+    _send_combat_screen(vk, user_id, msg, keyboard=keyboard.get_keyboard())
 
 
 def use_skill(player, vk, user_id: int, skill_name: str):
@@ -3348,12 +3355,7 @@ def use_skill(player, vk, user_id: int, skill_name: str):
     _combat_state[user_id] = combat
 
     # Показываем результат и клавиатуру боя
-    vk.messages.send(
-        user_id=user_id,
-        message=result_msg,
-        keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
-        random_id=0
-    )
+    _send_combat_screen(vk, user_id, result_msg, keyboard=create_combat_keyboard(player, user_id).get_keyboard())
 
 
 def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, effect: dict):
@@ -3922,12 +3924,7 @@ def handle_combat_attack(player, vk, user_id: int):
         _combat_state[user_id] = combat
         keyboard = create_combat_keyboard(player, user_id)
 
-    vk.messages.send(
-        user_id=user_id,
-        message=message,
-        keyboard=keyboard.get_keyboard(),
-        random_id=0
-    )
+    _send_combat_screen(vk, user_id, message, keyboard=keyboard.get_keyboard())
 
 
 def handle_combat_flee(player, vk, user_id: int):
@@ -3999,9 +3996,10 @@ def handle_combat_flee(player, vk, user_id: int):
         
         player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
 
-        vk.messages.send(
-            user_id=user_id,
-            message=(
+        _send_combat_screen(
+            vk,
+            user_id,
+            (
                 "Сбежать не получилось.\n\n"
                 f"{combat['enemy_name']} атакует!\n"
                 f"Урон: {final_damage} (защита: {total_defense})\n\n"
@@ -4009,7 +4007,6 @@ def handle_combat_flee(player, vk, user_id: int):
                 f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)"
             ),
             keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
-            random_id=0
         )
 
 def _handle_victory(player, combat, user_id: int, vk=None) -> str:
