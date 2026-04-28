@@ -714,19 +714,20 @@ def try_edit_or_send_ui(vk, user_id: int, screen_key: str, message: str, keyboar
         try:
             vk_messages.edit(
                 vk,
-                conversation_message_id=last_msg["msg_id"],
+                peer_id=last_msg.get("peer_id") or user_id,
+                message_id=last_msg["msg_id"],
                 message=message,
                 keyboard=keyboard,
             )
             return
         except Exception:
-            pass
+            logger.exception("Не удалось отредактировать UI-сообщение: user_id=%s screen=%s", user_id, screen_key)
 
     try:
         msg_id = vk_messages.send(vk, user_id=user_id, message=message, keyboard=keyboard)
-        set_ui_message(user_id, screen_key, msg_id)
+        set_ui_message(user_id, screen_key, msg_id, peer_id=user_id)
     except Exception:
-        pass
+        logger.exception("Не удалось отправить UI-сообщение: user_id=%s screen=%s", user_id, screen_key)
 
 
 def try_edit_or_send(vk, user_id: int, message: str, keyboard=None):
@@ -742,17 +743,18 @@ def try_edit_or_send(vk, user_id: int, message: str, keyboard=None):
         try:
             vk_messages.edit(
                 vk,
-                conversation_message_id=last_msg["msg_id"],
+                peer_id=last_msg.get("peer_id") or user_id,
+                message_id=last_msg["msg_id"],
                 message=message,
                 keyboard=keyboard,
             )
             return  # Успешно отредактировано
         except Exception:
-            pass
+            logger.exception("Не удалось отредактировать последнее сообщение: user_id=%s", user_id)
 
     # Fallback: отправить новое
     try:
         msg_id = vk_messages.send(vk, user_id=user_id, message=message, keyboard=keyboard)
-        set_last_message(user_id, msg_id)
+        set_last_message(user_id, msg_id, peer_id=user_id)
     except Exception:
-        pass
+        logger.exception("Не удалось отправить fallback-сообщение: user_id=%s", user_id)

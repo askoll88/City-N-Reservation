@@ -75,7 +75,8 @@ class VkMessagesTests(unittest.TestCase):
 
         self.assertEqual(len(vk.messages.edited), 1)
         edited = vk.messages.edited[0]
-        self.assertEqual(edited["conversation_message_id"], 5)
+        self.assertEqual(edited["peer_id"], 42)
+        self.assertEqual(edited["message_id"], 5)
         self.assertEqual(edited["message"], "screen")
         self.assertEqual(edited["disable_mentions"], 1)
         self.assertEqual(edited["dont_parse_links"], 1)

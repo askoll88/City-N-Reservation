@@ -72,7 +72,8 @@ class StateManagerTest(unittest.TestCase):
 
         self.assertEqual(len(vk.messages.sent), 2)
         self.assertEqual(len(vk.messages.edited), 1)
-        self.assertEqual(vk.messages.edited[0]["conversation_message_id"], 1)
+        self.assertEqual(vk.messages.edited[0]["peer_id"], 10)
+        self.assertEqual(vk.messages.edited[0]["message_id"], 1)
         self.assertEqual(vk.messages.edited[0]["message"], "map-2")
 
 
