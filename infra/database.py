@@ -3081,6 +3081,46 @@ def get_user_shells(vk_id: int) -> int:
     return info['current']
 
 
+def ensure_starter_shells_bag(vk_id: int) -> bool:
+    """Выдать и надеть стартовый мешочек, если у игрока нет мешочка для гильз."""
+    user_data = get_user_by_vk(vk_id)
+    if not user_data or user_data.get("equipped_shells_bag"):
+        return False
+
+    starter_bag = get_item_by_name("Маленький мешочек")
+    if not starter_bag:
+        return False
+
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return False
+
+        cursor.execute(
+            """
+            SELECT ui.quantity
+            FROM user_inventory ui
+            WHERE ui.user_id = %s AND ui.item_id = %s
+            """,
+            (user["id"], starter_bag["id"]),
+        )
+        owned = cursor.fetchone()
+        if not owned:
+            cursor.execute(
+                """
+                INSERT INTO user_inventory (user_id, item_id, quantity)
+                VALUES (%s, %s, 1)
+                ON CONFLICT (user_id, item_id) DO UPDATE
+                SET quantity = GREATEST(user_inventory.quantity, 1)
+                """,
+                (user["id"], starter_bag["id"]),
+            )
+
+    result = equip_shells_bag(vk_id, "Маленький мешочек")
+    return bool(result.get("success"))
+
+
 def remove_shells(vk_id: int, quantity: int) -> bool:
     """Удалить гильзы у игрока"""
     with db_cursor() as (cursor, _):
@@ -3101,6 +3141,10 @@ def add_shells(vk_id: int, quantity: int) -> tuple[bool, str]:
     """Добавить гильзы игроку с учётом вместимости мешочка.
     Возвращает (успех, сообщение)."""
     shells_info = get_shells_info(vk_id)
+    if shells_info["capacity"] <= 0 and not shells_info.get("equipped_bag"):
+        ensure_starter_shells_bag(vk_id)
+        shells_info = get_shells_info(vk_id)
+
     current = shells_info['current']
     capacity = shells_info['capacity']
 

@@ -14,7 +14,8 @@ from game.location_mechanics import (
     reset_region_loop_state,
 )
 from game.constants import RESEARCH_LOCATIONS
-from handlers.combat import _build_research_modifiers_info
+from handlers.combat import _apply_region_loop_rewards, _build_research_modifiers_info
+from infra.state_manager import clear_combat_state, set_combat_state
 
 
 class LoopStorage:
@@ -39,6 +40,7 @@ class RegionGameplayLoopTests(unittest.TestCase):
     def tearDown(self):
         self.set_patch.stop()
         self.get_patch.stop()
+        clear_combat_state(99)
 
     def test_each_current_research_branch_has_gameplay_loop(self):
         self.assertEqual(set(REGION_GAMEPLAY_LOOPS.keys()), set(RESEARCH_LOCATIONS))
@@ -116,6 +118,26 @@ class RegionGameplayLoopTests(unittest.TestCase):
 
         self.assertIn("Состояние ветки", text)
         self.assertIn("Тревога патрулей", text)
+
+    def test_region_loop_rewards_do_not_interrupt_active_combat(self):
+        class DummyMessages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+
+        class DummyVk:
+            def __init__(self):
+                self.messages = DummyMessages()
+
+        set_combat_state(99, {"combat_id": "active"})
+        vk = DummyVk()
+        loop_result = {"effects": {"organic_trophy": True, "science_breakthrough": True}}
+
+        _apply_region_loop_rewards(object(), vk, 99, "дорога_зараженный_лес", loop_result)
+
+        self.assertEqual(vk.messages.sent, [])
 
 
 if __name__ == "__main__":

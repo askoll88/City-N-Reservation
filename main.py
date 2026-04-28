@@ -946,6 +946,17 @@ def _answer_callback(event, vk, text: str):
     )
 
 
+def _is_stale_combat_callback(user_id: int, payload: dict) -> bool:
+    """Проверить, относится ли callback к уже сменившемуся бою."""
+    payload_combat_id = payload.get("combat_id")
+    if not payload_combat_id:
+        return False
+    combat = get_combat_data(user_id)
+    if not combat:
+        return True
+    return str(combat.get("combat_id") or "") != str(payload_combat_id)
+
+
 def _do_callback_processing(event, vk):
     """Основная логика обработки callback-события."""
     payload = event.obj.payload or {}
@@ -1022,6 +1033,9 @@ def _do_callback_processing(event, vk):
         if not is_in_combat(user_id):
             _answer_callback(event, vk, "Бой уже завершен")
             return
+        if _is_stale_combat_callback(user_id, payload):
+            _answer_callback(event, vk, "Действие устарело")
+            return
         action_text = {
             "attack": "атаковать",
             "flee": "убежать",
@@ -1040,6 +1054,9 @@ def _do_callback_processing(event, vk):
     if payload.get("command") == "combat_skill":
         if not is_in_combat(user_id):
             _answer_callback(event, vk, "Бой уже завершен")
+            return
+        if _is_stale_combat_callback(user_id, payload):
+            _answer_callback(event, vk, "Действие устарело")
             return
         skill_name = str(payload.get("skill") or "").strip()
         if not skill_name:

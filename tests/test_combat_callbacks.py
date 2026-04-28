@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from handlers.combat import create_anomaly_keyboard, create_combat_keyboard, create_skills_keyboard
+from infra.state_manager import clear_combat_state, set_combat_state
 
 
 class DummyClassPlayer:
@@ -11,6 +12,12 @@ class DummyClassPlayer:
 
 
 class CombatCallbackKeyboardTests(unittest.TestCase):
+    def setUp(self):
+        clear_combat_state(1)
+
+    def tearDown(self):
+        clear_combat_state(1)
+
     def test_combat_attack_button_is_callback(self):
         keyboard = json.loads(create_combat_keyboard(DummyClassPlayer(), user_id=1).get_keyboard())
         button = keyboard["buttons"][0][0]
@@ -19,6 +26,14 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         self.assertTrue(keyboard["inline"])
         self.assertEqual(button["action"]["type"], "callback")
         self.assertEqual(payload, {"command": "combat_action", "action": "attack"})
+
+    def test_combat_buttons_include_current_combat_id_when_available(self):
+        set_combat_state(1, {"combat_id": "fight-1"})
+
+        keyboard = json.loads(create_combat_keyboard(DummyClassPlayer(), user_id=1).get_keyboard())
+        payload = json.loads(keyboard["buttons"][0][0]["action"]["payload"])
+
+        self.assertEqual(payload["combat_id"], "fight-1")
 
     def test_anomaly_buttons_are_callbacks(self):
         keyboard = json.loads(create_anomaly_keyboard(shells=1).get_keyboard())

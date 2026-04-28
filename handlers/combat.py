@@ -1102,6 +1102,8 @@ def _send_region_loop_messages(vk, user_id: int, loop_result: dict | None):
 def _apply_region_loop_rewards(player, vk, user_id: int, location_id: str, loop_result: dict | None):
     if not loop_result:
         return
+    if is_in_combat(user_id):
+        return
     effects = loop_result.get("effects", {}) or {}
     _, create_location_keyboard, _, _ = _get_main_imports()
 
@@ -1145,6 +1147,8 @@ def _apply_region_loop_rewards(player, vk, user_id: int, location_id: str, loop_
 
 def _check_location_unique_mechanics(player, location_id: str, event_id: str, vk, user_id: int, loop_result: dict | None = None):
     """Проверить и применить уникальные механики локаций после исследования"""
+    if is_in_combat(user_id):
+        return
     from game.location_mechanics import (
         check_ambush, check_zone_mutation, check_mutant_hunt,
         get_mutant_hunt_count,
@@ -2631,6 +2635,7 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
 
     # Сохраняем состояние боя
     _combat_state[user_id] = {
+        'combat_id': f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}",
         'enemy_name': scaled_enemy['enemy_name'],
         'enemy_hp': scaled_enemy['enemy_hp'],
         'enemy_max_hp': scaled_enemy['enemy_max_hp'],
@@ -2941,16 +2946,25 @@ def _spawn_item(player, vk, user_id: int):
 def create_combat_keyboard(player=None, user_id=None, *, inline: bool = True):
     """Клавиатура боя"""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+    combat_id = None
+    if user_id is not None:
+        combat = _combat_state.get(user_id)
+        if combat:
+            combat_id = combat.get("combat_id")
+    base_payload = {"command": "combat_action"}
+    if combat_id:
+        base_payload["combat_id"] = combat_id
+
     keyboard = VkKeyboard(one_time=False, inline=inline)
     keyboard.add_callback_button(
         "Атаковать",
         color=VkKeyboardColor.POSITIVE,
-        payload={"command": "combat_action", "action": "attack"},
+        payload={**base_payload, "action": "attack"},
     )
     keyboard.add_callback_button(
         "Инвентарь",
         color=VkKeyboardColor.PRIMARY,
-        payload={"command": "combat_action", "action": "inventory"},
+        payload={**base_payload, "action": "inventory"},
     )
     keyboard.add_line()
     # Кнопка навыков - показываем только если есть выбранная специализация.
@@ -2958,18 +2972,18 @@ def create_combat_keyboard(player=None, user_id=None, *, inline: bool = True):
         keyboard.add_callback_button(
             "Навыки",
             color=VkKeyboardColor.SECONDARY,
-            payload={"command": "combat_action", "action": "skills"},
+            payload={**base_payload, "action": "skills"},
         )
         keyboard.add_callback_button(
             "Убежать",
             color=VkKeyboardColor.NEGATIVE,
-            payload={"command": "combat_action", "action": "flee"},
+            payload={**base_payload, "action": "flee"},
         )
     else:
         keyboard.add_callback_button(
             "Убежать",
             color=VkKeyboardColor.NEGATIVE,
-            payload={"command": "combat_action", "action": "flee"},
+            payload={**base_payload, "action": "flee"},
         )
     return keyboard
 
@@ -3024,6 +3038,11 @@ def create_skills_keyboard(player, user_id: int = None, *, inline: bool = True):
         user_id = getattr(player, 'vk_id', None)
     cooldowns = _skill_cooldowns.get(user_id, {})
     active_effects = _active_skill_effects.get(user_id, {})
+    combat_id = None
+    if user_id is not None:
+        combat = _combat_state.get(user_id)
+        if combat:
+            combat_id = combat.get("combat_id")
 
     # Добавляем кнопки активных навыков
     for skill in active_skills:
@@ -3059,21 +3078,31 @@ def create_skills_keyboard(player, user_id: int = None, *, inline: bool = True):
         keyboard.add_callback_button(
             btn_text,
             color=color,
-            payload={"command": "combat_skill", "skill": skill_name},
+            payload={
+                "command": "combat_skill",
+                "skill": skill_name,
+                **({"combat_id": combat_id} if combat_id else {}),
+            },
         )
         keyboard.add_line()
 
+    combat_payload = {"command": "combat_action", "action": "inventory"}
+    if combat_id:
+        combat_payload["combat_id"] = combat_id
     keyboard.add_callback_button(
         "Инвентарь",
         color=VkKeyboardColor.PRIMARY,
-        payload={"command": "combat_action", "action": "inventory"},
+        payload=combat_payload,
     )
     if not inline:
         keyboard.add_line()
+        back_payload = {"command": "combat_action", "action": "back"}
+        if combat_id:
+            back_payload["combat_id"] = combat_id
         keyboard.add_callback_button(
             "Назад",
             color=VkKeyboardColor.NEGATIVE,
-            payload={"command": "combat_action", "action": "back"},
+            payload=back_payload,
         )
     return keyboard
 
