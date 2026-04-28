@@ -325,16 +325,16 @@ def create_map_region_keyboard(region_id: str, current_location_id: str = None):
 def create_inventory_keyboard():
     """Клавиатура инвентаря (дублирующая)"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Оружие", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Броня", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Оружие", command="inventory_section", section="weapons", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Броня", command="inventory_section", section="armor", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
-    keyboard.add_button("Артефакты", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Другое", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "Артефакты", command="inventory_section", section="artifacts", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Другое", command="inventory_section", section="other", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("Рюкзаки", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Все", color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "Рюкзаки", command="inventory_section", section="backpacks", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Все", command="inventory_section", section="all", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "Назад", command="inventory_back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 

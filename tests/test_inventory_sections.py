@@ -1,8 +1,11 @@
 import importlib
+import json
 import sys
 import types
 import unittest
 from unittest.mock import Mock
+
+from handlers.keyboards import create_inventory_keyboard
 
 
 class DummyKeyboard:
@@ -89,6 +92,22 @@ class InventorySectionsTest(unittest.TestCase):
         self.inventory_module.show_other(self.player, self.vk, user_id=1)
         self.assertEqual(self.player.inventory_section, "other")
         self.fake_db.update_user_stats.assert_not_called()
+
+    def test_inventory_section_buttons_are_callbacks(self):
+        keyboard = json.loads(create_inventory_keyboard().get_keyboard())
+        first_button = keyboard["buttons"][0][0]
+        payload = json.loads(first_button["action"]["payload"])
+
+        self.assertEqual(first_button["action"]["type"], "callback")
+        self.assertEqual(payload, {"command": "inventory_section", "section": "weapons"})
+
+    def test_inventory_back_button_uses_inventory_back_callback(self):
+        keyboard = json.loads(create_inventory_keyboard().get_keyboard())
+        back_button = keyboard["buttons"][-1][0]
+        payload = json.loads(back_button["action"]["payload"])
+
+        self.assertEqual(back_button["action"]["type"], "callback")
+        self.assertEqual(payload, {"command": "inventory_back"})
 
 
 if __name__ == "__main__":

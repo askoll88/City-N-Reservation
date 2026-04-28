@@ -911,11 +911,37 @@ def _process_callback_event(event, vk):
     user_id = getattr(event.obj, "user_id", 0)
     lock = _get_user_lock(user_id) if user_id else None
 
-    if lock:
-        with lock:
+    try:
+        if lock:
+            with lock:
+                _do_callback_processing(event, vk)
+        else:
             _do_callback_processing(event, vk)
-    else:
-        _do_callback_processing(event, vk)
+    except Exception:
+        logger.exception("Ошибка обработки callback-события")
+        try:
+            vk_messages.answer_event(
+                vk,
+                event_id=event.obj.event_id,
+                user_id=event.obj.user_id,
+                peer_id=event.obj.peer_id,
+                text="Ошибка действия",
+                show_snackbar=True,
+            )
+        except Exception:
+            logger.exception("Не удалось ответить на callback после ошибки")
+
+
+def _answer_callback(event, vk, text: str):
+    """Быстро закрыть loading-состояние callback-кнопки."""
+    return vk_messages.answer_event(
+        vk,
+        event_id=event.obj.event_id,
+        user_id=event.obj.user_id,
+        peer_id=event.obj.peer_id,
+        text=text,
+        show_snackbar=True,
+    )
 
 
 def _do_callback_processing(event, vk):
@@ -927,19 +953,52 @@ def _do_callback_processing(event, vk):
         region = payload.get("region")
         if region == "overview":
             region = None
+        _answer_callback(event, vk, "Карта обновлена")
         player = get_player(user_id)
         show_map(player, vk, user_id, region)
-        vk_messages.answer_event(
-            vk,
-            event_id=event.obj.event_id,
-            user_id=event.obj.user_id,
-            peer_id=event.obj.peer_id,
-            text="Карта обновлена",
-            show_snackbar=True,
+        return
+
+    if payload.get("command") == "inventory_section":
+        section = payload.get("section")
+        player = get_player(user_id)
+        if player.current_location_id != "инвентарь":
+            _answer_callback(event, vk, "Сначала открой инвентарь")
+            return
+
+        from handlers.inventory import (
+            show_all,
+            show_armor,
+            show_artifacts,
+            show_backpacks,
+            show_other,
+            show_weapons,
         )
+
+        section_handlers = {
+            "weapons": show_weapons,
+            "armor": show_armor,
+            "backpacks": show_backpacks,
+            "artifacts": show_artifacts,
+            "other": show_other,
+            "all": show_all,
+        }
+        handler = section_handlers.get(section)
+        if not handler:
+            _answer_callback(event, vk, "Раздел устарел")
+            return
+
+        _answer_callback(event, vk, "Инвентарь обновлен")
+        handler(player, vk, user_id)
+        return
+
+    if payload.get("command") == "inventory_back":
+        _answer_callback(event, vk, "Возврат")
+        player = get_player(user_id)
+        go_back(player, vk, user_id)
         return
 
     if payload.get("command") == "back":
+        _answer_callback(event, vk, "Возврат")
         player = get_player(user_id)
         try:
             _apply_shelter_passive_energy_regen(player, user_id)
@@ -957,24 +1016,9 @@ def _do_callback_processing(event, vk):
         player.current_location_id = return_location
         database.update_user_location(user_id, return_location)
         _set_shelter_regen_anchor(user_id, in_shelter=(return_location == "убежище"))
-        vk_messages.answer_event(
-            vk,
-            event_id=event.obj.event_id,
-            user_id=event.obj.user_id,
-            peer_id=event.obj.peer_id,
-            text="Возврат",
-            show_snackbar=True,
-        )
         return
 
-    vk_messages.answer_event(
-        vk,
-        event_id=event.obj.event_id,
-        user_id=event.obj.user_id,
-        peer_id=event.obj.peer_id,
-        text="Действие устарело",
-        show_snackbar=True,
-    )
+    _answer_callback(event, vk, "Действие устарело")
 
 
 def _event_worker(task_queue: "queue.Queue[tuple[str, object]]", vk):
