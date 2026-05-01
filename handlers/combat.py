@@ -19,6 +19,13 @@ from game.constants import (
     LOCATION_LEVEL_THRESHOLDS,
     LOCATION_DROP_BALANCE_RULES,
 )
+from game.stat_balance import (
+    luck_bleed_chance_bonus,
+    luck_bleed_damage_bonus,
+    luck_initiative_bonus,
+    stamina_energy_regen,
+    stamina_research_energy_discount,
+)
 from infra.state_manager import (
     _combat_state,
     set_combat_state,
@@ -443,7 +450,10 @@ def _get_main_imports():
     """Ленивый импорт для избежания циклической зависимости"""
     import main
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-    return _combat_state, main.create_location_keyboard, VkKeyboard, VkKeyboardColor
+    create_location_keyboard = getattr(main, "create_location_keyboard", None)
+    if create_location_keyboard is None:
+        from handlers.keyboards import create_location_keyboard
+    return _combat_state, create_location_keyboard, VkKeyboard, VkKeyboardColor
 
 
 def _clamp(value: int, min_val: int, max_val: int) -> int:
@@ -466,6 +476,9 @@ def _apply_early_weapon_mastery_cap(player, damage: int, weapon_is_knife: bool =
 def _calculate_incoming_damage(player, enemy_damage: int, total_defense: int) -> tuple[int, int]:
     """Посчитать входящий урон с мягкой защитой от резких просадок в ранней игре."""
     final_damage = max(1, int(enemy_damage) - int(total_defense))
+    damage_resist = max(0, min(70, int(getattr(player, "damage_resist", 0) or 0)))
+    if damage_resist > 0:
+        final_damage = max(1, int(final_damage * (100 - damage_resist) / 100))
     lvl = max(1, int(getattr(player, "level", 1) or 1))
     if lvl <= 10:
         max_health = max(1, int(getattr(player, "max_health", 100) or 100))
@@ -768,7 +781,7 @@ def _roll_initiative(player, enemy_speed: int) -> dict:
     player_roll = random.randint(1, 20)
     enemy_roll = random.randint(1, 20)
 
-    player_total = player_roll + player_perception // 2 + player_luck // 3
+    player_total = player_roll + player_perception // 2 + luck_initiative_bonus(player_luck)
     enemy_total = enemy_roll + enemy_speed
 
     player_first = player_total >= enemy_total
@@ -787,9 +800,14 @@ def _create_hp_bar(current: int, max_val: int, bar_length: int = 10) -> str:
     return ui.bar(current, max_val, width=bar_length, fill="#", empty="-")
 
 
+def _max_energy(player) -> int:
+    return int(getattr(player, "max_energy", 100) or 100)
+
+
 def _format_combat_hud(combat: dict, player) -> str:
     enemy_bar = _create_hp_bar(combat['enemy_hp'], combat['enemy_max_hp'], bar_length=14)
     player_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
+    max_energy = _max_energy(player)
     enemy_pct = ui.pct(combat['enemy_hp'], combat['enemy_max_hp'])
     player_pct = ui.pct(player.health, player.max_health)
 
@@ -799,7 +817,7 @@ def _format_combat_hud(combat: dict, player) -> str:
         f"   HP      {enemy_bar} {combat['enemy_hp']}/{combat['enemy_max_hp']} ({enemy_pct}%)",
         f"🧍 Ты",
         f"   HP      {player_bar} {player.health}/{player.max_health} ({player_pct}%)",
-        f"   Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100",
+        f"   Энергия {ui.bar(player.energy, max_energy, width=14)} {player.energy}/{max_energy}",
         f"   Защита  {player.total_defense}",
     ]
     return "\n".join(lines)
@@ -875,7 +893,7 @@ def _handle_death(player, vk, user_id: int, cause: str = None, killer_name: str 
         f"• Опыт: -{lost_exp}\n\n"
         f"{ui.section('Текущее состояние')}\n"
         f"HP      {ui.bar(player.health, player.max_health, width=14)} {player.health}/{player.max_health}\n"
-        f"Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100\n"
+        f"Энергия {ui.bar(player.energy, _max_energy(player), width=14)} {player.energy}/{_max_energy(player)}\n"
         f"Радиация 0"
     )
 
@@ -934,7 +952,7 @@ def show_explore_menu(player, vk, user_id: int):
         f"10 сек — обычный поиск (2 энергии)\n"
         f"15 сек — тщательный поиск (3 энергии)\n\n"
         f"Чем дольше время — тем больше находок, но выше риск.\n\n"
-        f"Твоя энергия: {player.energy}/100"
+        f"Твоя энергия: {player.energy}/{_max_energy(player)}"
     )
 
     vk.messages.send(
@@ -994,6 +1012,8 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
     energy_cost = max(1, int(energy_cost_base * get_energy_cost_mult(player.current_location_id)))
     passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
     research_discount_pct = max(0, min(80, int(passive.get("research_energy_discount_pct", 0) or 0)))
+    stamina_discount_pct = stamina_research_energy_discount(getattr(player, "effective_stamina", getattr(player, "stamina", 1)))
+    research_discount_pct = min(80, research_discount_pct + stamina_discount_pct)
     if research_discount_pct > 0:
         energy_cost = max(1, int(energy_cost * (100 - research_discount_pct) / 100))
 
@@ -1003,7 +1023,7 @@ def handle_explore_time(player, vk, user_id: int, time_sec: int = None):
             message=(
                 "Тело отказывается идти дальше.\n\n"
                 f"Для этой вылазки нужно энергии: {energy_cost}\n"
-                f"Сейчас у тебя: {player.energy}/100\n\n"
+                f"Сейчас у тебя: {player.energy}/{_max_energy(player)}\n\n"
                 "Переведи дух в безопасном месте или возьми что-нибудь из припасов: еду, кофе, энергетик."
             ),
             keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
@@ -2248,7 +2268,8 @@ def _handle_abandoned_camp(player, vk, user_id: int):
 
     old_energy = int(user.get("energy", 0))
     energy_gain = random.randint(6, 14)
-    new_energy = min(100, old_energy + energy_gain)
+    max_energy = _max_energy(player)
+    new_energy = min(max_energy, old_energy + energy_gain)
     database.update_user_stats(user_id, energy=new_energy)
     player.energy = new_energy
 
@@ -3199,7 +3220,7 @@ def show_skills_in_combat(player, vk, user_id):
 
     # Формируем сообщение
     msg = f"⚡НАВЫКИ КЛАССА {class_id.upper()}\n\n"
-    msg += f"Твоя энергия: {player.energy}/100\n\n"
+    msg += f"Твоя энергия: {player.energy}/{_max_energy(player)}\n\n"
 
     cooldowns = _skill_cooldowns.get(user_id, {})
     active_effects = _active_skill_effects.get(user_id, {})
@@ -3741,11 +3762,11 @@ def _restore_energy_from_stamina(player) -> int:
     Формула мягкая: без заметного бафа на низких уровнях, но полезна в мид/лейт-гейме.
     """
     effective_stamina = int(getattr(player, "effective_stamina", getattr(player, "stamina", 1)) or 1)
-    regen = max(0, (effective_stamina - 4) // 4)  # 4->0, 8->1, 12->2, 16->3, 20->4
+    regen = stamina_energy_regen(effective_stamina)
     if regen <= 0:
         return 0
     old_energy = int(getattr(player, "energy", 0) or 0)
-    player.energy = min(100, old_energy + regen)
+    player.energy = min(_max_energy(player), old_energy + regen)
     return max(0, player.energy - old_energy)
 
 
@@ -3798,7 +3819,7 @@ def handle_combat_attack(player, vk, user_id: int):
     bleed_applied = False
     if weapon_is_knife:
         effective_luck = int(getattr(player, "effective_luck", player.luck) or player.luck)
-        bleed_chance = 30 + effective_luck * 2  # 30-50% + удача
+        bleed_chance = 30 + luck_bleed_chance_bonus(effective_luck)
         if random.randint(1, 100) <= bleed_chance:
             combat['bleed_turns'] = combat.get('bleed_turns', 0) + 3  # 3 хода кровотечения
             bleed_applied = True
@@ -3807,7 +3828,7 @@ def handle_combat_attack(player, vk, user_id: int):
     bleed_damage = 0
     if combat.get('bleed_turns', 0) > 0:
         effective_luck = int(getattr(player, "effective_luck", player.luck) or player.luck)
-        bleed_damage = 5 + effective_luck  # 5-10 урона от кровотечения
+        bleed_damage = 5 + luck_bleed_damage_bonus(effective_luck)
         combat['enemy_hp'] -= bleed_damage
         combat['bleed_turns'] -= 1
 
@@ -4069,7 +4090,7 @@ def handle_combat_flee(player, vk, user_id: int):
                 "Удалось оторваться от противника.\n\n"
                 f"{ui.section('Состояние')}\n"
                 f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)\n"
-                f"Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100"
+                f"Энергия {ui.bar(player.energy, _max_energy(player), width=14)} {player.energy}/{_max_energy(player)}"
             ),
             keyboard=create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard(),
             random_id=0
@@ -4216,7 +4237,7 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     message += (
         f"\n{ui.section('Состояние')}\n"
         f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)\n"
-        f"Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100\n"
+        f"Энергия {ui.bar(player.energy, _max_energy(player), width=14)} {player.energy}/{_max_energy(player)}\n"
     )
 
     return message

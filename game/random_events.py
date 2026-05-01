@@ -7,6 +7,7 @@
 from __future__ import annotations
 import copy
 import random
+from game.stat_balance import clamp, luck_artifact_bonus, luck_outcome_bonus
 
 from game.constants import RESEARCH_LOCATIONS
 
@@ -2611,7 +2612,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
             if "money" in eff:
                 player.money += eff.get("money", 0)
             if "energy" in eff:
-                player.energy = max(0, player.energy + eff["energy"])
+                _apply_energy_delta(player, eff["energy"])
             if "hp" in eff:
                 _apply_hp_delta(player, int(eff["hp"]))
             if eff.get("random_loot"):
@@ -2634,7 +2635,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
             if "money" in final_effect:
                 player.money += final_effect.get("money", 0)
             if "energy" in final_effect:
-                player.energy = max(0, player.energy + final_effect["energy"])
+                _apply_energy_delta(player, final_effect["energy"])
             if "hp" in final_effect:
                 _apply_hp_delta(player, int(final_effect["hp"]))
 
@@ -2664,7 +2665,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         if "money" in effect:
             player.money += effect["money"]
         if "energy" in effect:
-            player.energy = max(0, player.energy + effect["energy"])
+            _apply_energy_delta(player, effect["energy"])
         if "shells" in effect:
             shell_gain = int(effect["shells"] or 0)
             if shell_gain > 0 and player_id is not None:
@@ -2744,7 +2745,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     if "money" in effect:
         player.money += effect["money"]
     if "energy" in effect:
-        player.energy = max(0, player.energy + effect["energy"])
+        _apply_energy_delta(player, effect["energy"])
 
     return {"message": effect.get("message", "Дорога проглотила событие без следа. Ты идёшь дальше."), "next_stage": None, "is_final": True}
 
@@ -2761,13 +2762,28 @@ def _resolve_player_id(player) -> int | None:
     except (TypeError, ValueError):
         return None
 
+
+def _effective_luck(player) -> int:
+    return int(getattr(player, "effective_luck", getattr(player, "luck", 1)) or 1)
+
+
+def _luck_outcome_chance(player, base_chance: int, *, cap: int = 78) -> int:
+    return int(clamp(base_chance + luck_outcome_bonus(_effective_luck(player)), 0, cap))
+
+
+def _apply_energy_delta(player, delta: int):
+    max_energy = int(getattr(player, "max_energy", 100) or 100)
+    player.energy = max(0, min(max_energy, int(getattr(player, "energy", 0) or 0) + int(delta or 0)))
+
+
 def _apply_random_loot(player):
     from infra import database
     player_id = _resolve_player_id(player)
-    money_reward = random.randint(50, 300)
+    luck_bonus = luck_outcome_bonus(_effective_luck(player))
+    money_reward = random.randint(50 + luck_bonus * 2, 300 + luck_bonus * 4)
     player.money += money_reward
     item_text = ""
-    if random.randint(1, 100) <= 40:
+    if random.randint(1, 100) <= _luck_outcome_chance(player, 40, cap=62):
         common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
         item_name, qty = random.choice(common_items)
         if player_id is not None:
@@ -2802,7 +2818,7 @@ def _apply_artifact_chance(player, effect=None):
     player_id = _resolve_player_id(player)
     anomaly = get_random_anomaly()
     artifact = get_artifact_from_anomaly(anomaly["type"])
-    success_chance = min(95, int(30 * get_emission_artifact_bonus()))
+    success_chance = int(clamp(30 * get_emission_artifact_bonus() + luck_artifact_bonus(_effective_luck(player)), 0, 82))
     if random.randint(1, 100) <= success_chance:
         if artifact and player_id is not None:
             database.add_item_to_inventory(player_id, artifact, 1)
@@ -2817,7 +2833,7 @@ def _apply_artifact_chance(player, effect=None):
 
 
 def _apply_risk_combat(player, effect=None):
-    if random.randint(1, 100) <= 60:
+    if random.randint(1, 100) <= _luck_outcome_chance(player, 60, cap=78):
         money_gain = 0
         if effect and "money" in effect:
             money_gain = int(effect.get("money", 0))
@@ -2831,7 +2847,8 @@ def _apply_risk_combat(player, effect=None):
 
 
 def _apply_risk_damage(player, effect=None):
-    if random.randint(1, 100) <= 40:
+    avoid_chance = _luck_outcome_chance(player, 60, cap=78)
+    if random.randint(1, 100) > avoid_chance:
         _apply_hp_delta(player, -20)
         player.energy = max(0, player.energy - 15)
         msg_tpl = effect.get("message_fail", "Зона забрала плату за лишний риск.") if effect else "Зона забрала плату за лишний риск."

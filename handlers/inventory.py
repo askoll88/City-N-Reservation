@@ -139,11 +139,15 @@ def _artifact_effect_lines(item_name: str) -> list[str]:
         "defense": "🛡️ Защита",
         "defense_fire": "🔥 Защита от огня",
         "energy": "⚡ Энергия",
+        "max_energy": "⚡ Макс. энергия",
         "radiation": "☢️ Радиация",
         "crit": "🎯 Крит. шанс",
         "find_chance": "🔍 Шанс находок",
         "dodge": "🌀 Уклонение",
         "rare_find_chance": "💎 Редкая находка",
+        "damage_resist": "🧬 Сопротивление урону",
+        "strength": "⚔️ Сила",
+        "stamina": "🏃 Выносливость",
         "luck": "🍀 Удача",
         "perception": "👁️ Восприятие",
         "max_weight": "🎒 Переносимый вес",
@@ -407,8 +411,7 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
         result = database.unequip_artifact(user_id, artifact_name)
         
         if result['success']:
-            player._artifact_bonuses = player._get_artifact_bonuses()
-            player.max_health_bonus = player._artifact_bonuses.get('max_health_bonus', 0)
+            player.reload()
             player._recalculate_max_weight()
             if player.health > player.max_health:
                 player.health = player.max_health
@@ -428,8 +431,7 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
         result = database.equip_artifact(user_id, artifact_name)
         
         if result['success']:
-            player._artifact_bonuses = player._get_artifact_bonuses()
-            player.max_health_bonus = player._artifact_bonuses.get('max_health_bonus', 0)
+            player.reload()
             player._recalculate_max_weight()
             if player.health > player.max_health:
                 player.health = player.max_health
@@ -448,12 +450,16 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
                 msg += f"Радиация: {bonuses['radiation']}\n"
             if bonuses.get('energy'):
                 msg += f"Энергия: +{bonuses['energy']}\n"
+            if bonuses.get('max_energy'):
+                msg += f"Макс. энергия: +{bonuses['max_energy']}\n"
             if bonuses.get('defense'):
                 msg += f"Защита: +{bonuses['defense']}%\n"
             if bonuses.get('dodge'):
                 msg += f"Уклонение: +{bonuses['dodge']}%"
             if bonuses.get('max_health_bonus'):
                 msg += f"\nЗдоровье: +{bonuses['max_health_bonus']} HP"
+            if bonuses.get('damage_resist'):
+                msg += f"\nСопротивление урону: +{bonuses['damage_resist']}%"
         else:
             msg = f"{result['message']}"
 
@@ -701,24 +707,12 @@ def show_equipped_artifacts(player, vk, user_id: int):
     msg = "Надетые артефакты:\n\n"
 
     for idx, art_name in enumerate(equipped, 1):
-        art_info = database.get_item_by_name(art_name)
-        if art_info:
-            bonuses = []
-            if art_info.get('crit_bonus'):
-                bonuses.append(f"крит:+{art_info['crit_bonus']}%")
-            if art_info.get('find_bonus'):
-                bonuses.append(f"находка:+{art_info['find_bonus']}%")
-            if art_info.get('radiation'):
-                bonuses.append(f"рад:{art_info['radiation']}")
-            if art_info.get('energy_bonus'):
-                bonuses.append(f"энергия:+{art_info['energy_bonus']}")
-            if art_info.get('defense_bonus'):
-                bonuses.append(f"защита:+{art_info['defense_bonus']}%")
-            if art_info.get('dodge_bonus'):
-                bonuses.append(f"уклон:+{art_info['dodge_bonus']}%")
-
-            bonus_str = " ".join(bonuses) if bonuses else ""
-            msg += f"{idx}. {art_name} {bonus_str}\n"
+        bonus_lines = _artifact_effect_lines(art_name)
+        bonus_str = "; ".join(line.replace("• ", "") for line in bonus_lines)
+        msg += f"{idx}. {art_name}"
+        if bonus_str:
+            msg += f" ({bonus_str})"
+        msg += "\n"
 
     msg += "\nНажми цифру чтобы снять артефакт"
 

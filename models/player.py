@@ -8,6 +8,7 @@ from infra import database
 import logging
 from models.locations import get_location, Location
 from game import ui
+from game.stat_balance import clamp, luck_crit_bonus, luck_rare_find_bonus, stamina_hp_bonus
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ def calculate_player_max_health(
     base = max(1, int(getattr(game_config, "PLAYER_HP_BASE", 56) or 56))
     per_level = max(0, int(getattr(game_config, "PLAYER_HP_PER_LEVEL", 4) or 4))
     per_stamina = max(1, int(getattr(game_config, "PLAYER_HP_PER_STAMINA", 10) or 10))
-    return max(1, base + lvl * per_level + sta * per_stamina + bonus)
+    return max(1, base + lvl * per_level + stamina_hp_bonus(sta, per_point=per_stamina) + bonus)
 
 
 def get_level_xp_required(level: int, levels: dict[int, int] | None = None, max_level: int | None = None) -> int:
@@ -354,6 +355,9 @@ class Player:
         # Загружаем бонусы от артефактов
         self._artifact_bonuses = self._get_artifact_bonuses()
         self.max_health_bonus = self._artifact_bonuses.get('max_health_bonus', 0)
+        if self.energy > self.max_energy:
+            self.energy = self.max_energy
+            database.update_user_stats(self.user_id, energy=self.energy)
 
         # Инициализируем инвентарь
         self.inventory = Inventory(user_id)
@@ -409,6 +413,7 @@ class Player:
             self.equipped_armor = self._data.get('equipped_armor')
             self.equipped_device = self._data.get('equipped_device')
             self.newbie_kit_received = self._data.get('newbie_kit_received', 0)
+            self.artifact_slots = self._data.get('artifact_slots', 3)
             self.inventory_section = self._data.get('inventory_section')
             self.previous_location = self._data.get('previous_location')
             self.is_admin = self._data.get('is_admin', 0)
@@ -420,11 +425,16 @@ class Player:
             self.equipped_armor_legs = self._data.get('equipped_armor_legs')
             self.equipped_armor_hands = self._data.get('equipped_armor_hands')
             self.equipped_armor_feet = self._data.get('equipped_armor_feet')
+            for idx in range(1, game_config.MAX_ARTIFACT_SLOTS + 1):
+                setattr(self, f"equipped_artifact_{idx}", self._data.get(f"equipped_artifact_{idx}"))
 
             self.inventory.reload()
             # Обновляем бонусы от артефактов, HP и переносимый вес
             self._artifact_bonuses = self._get_artifact_bonuses()
             self.max_health_bonus = self._artifact_bonuses.get('max_health_bonus', 0)
+            if self.energy > self.max_energy:
+                self.energy = self.max_energy
+                database.update_user_stats(self.user_id, energy=self.energy)
             self._recalculate_max_weight()
 
     @property
@@ -457,7 +467,20 @@ class Player:
         base = 10  # Базовый шанс уклонения
         passive = self._get_passive_bonuses()
         artifact = self._artifact_bonuses.get('dodge', 0)
-        return max(0, min(100, base + passive.get('dodge', 0) + artifact))
+        return max(0, min(70, base + passive.get('dodge', 0) + artifact))
+
+    @property
+    def damage_resist(self) -> int:
+        """Процентное снижение входящего урона от артефактов и пассивок."""
+        passive = self._get_passive_bonuses()
+        value = int(self._artifact_bonuses.get('damage_resist', 0) or 0) + int(passive.get('damage_resist', 0) or 0)
+        return max(0, min(70, value))
+
+    @property
+    def max_energy(self) -> int:
+        """Максимальная энергия с учетом энергетических артефактов."""
+        bonus = int(self._artifact_bonuses.get('energy', 0) or 0) + int(self._artifact_bonuses.get('max_energy', 0) or 0)
+        return max(1, min(160, 100 + bonus))
 
     @property
     def artifact_radiation(self) -> int:
@@ -484,10 +507,10 @@ class Player:
     @property
     def crit_chance(self) -> int:
         """Шанс критического удара (%)"""
-        base = 5 + (self.effective_luck - 1) * 2  # Базовый 5% + 2% за каждый пункт удачи свыше 1
+        base = 5 + luck_crit_bonus(self.effective_luck)
         artifact_bonus = self._artifact_bonuses.get('crit', 0)
         passive_bonus = self._get_passive_bonuses().get('crit_chance', 0)
-        return max(0, min(100, base + artifact_bonus + passive_bonus))
+        return int(clamp(base + artifact_bonus + passive_bonus, 0, 55))
 
     @property
     def crit_damage(self) -> int:
@@ -498,10 +521,10 @@ class Player:
     @property
     def rare_find_chance(self) -> int:
         """Шанс редкой находки (%)"""
-        base = self.effective_luck * 2  # 2% за каждый пункт удачи
+        base = 2 + luck_rare_find_bonus(self.effective_luck)
         artifact_bonus = self._artifact_bonuses.get('rare_find_chance', 0)
         passive_bonus = self._get_passive_bonuses().get('rare_find_chance', 0)
-        return max(0, min(100, base + artifact_bonus + passive_bonus))
+        return int(clamp(base + artifact_bonus + passive_bonus, 0, 45))
 
     @property
     def melee_damage(self) -> int:
@@ -699,7 +722,7 @@ class Player:
         self.level = min(self.MAX_LEVEL, target_level)
         self.experience = 0
         self.health = self.max_health
-        self.energy = 100
+        self.energy = self.max_energy
         gained_points = max(0, self.level - old_level)
 
         database.update_user_stats(
@@ -787,7 +810,7 @@ class Player:
 
         # Прогресс-бары
         hp_line = ui.meter_line("HP", self.health, self.max_health, width=14)
-        energy_line = ui.meter_line("Энергия", self.energy, 100, width=14)
+        energy_line = ui.meter_line("Энергия", self.energy, self.max_energy, width=14)
         exp_line = ui.meter_line("Опыт", min(exp_progress, exp_needed), exp_needed, width=14)
 
         # ═══════════════════════════════════════════════════
@@ -924,6 +947,8 @@ class Player:
         lines.append("")
         lines.append(f"📊 Урон: {self.melee_damage}  |  Броня: {self.total_defense}")
         lines.append(f"🎯 Крит: {self.crit_chance}%  |  Уклонение: {self.dodge_chance}%")
+        if self.damage_resist or self.max_energy != 100:
+            lines.append(f"🧬 Сопротивление: {self.damage_resist}%  |  Макс. энергия: {self.max_energy}")
         lines.append(f"🔍 Находки: {self.find_chance}%  |  Редкое: {self.rare_find_chance}%")
         lines.append("")
 
@@ -989,7 +1014,7 @@ class Player:
                 self._handle_death()
                 return
         if energy is not None:
-            self.energy = max(0, min(100, energy))
+            self.energy = max(0, min(self.max_energy, energy))
         if radiation is not None:
             self.radiation = max(0, radiation)
         if money is not None:
@@ -1165,7 +1190,7 @@ class Player:
                 level=self.level,
                 experience=self.experience,
                 health=self.health,
-                energy=100,
+                energy=self.energy,
                 max_weight=self.max_weight
             )
             database.increment_user_flag(self.user_id, UNSPENT_STAT_POINTS_FLAG, gained_points)
@@ -1504,7 +1529,7 @@ class Player:
             elif item_key in hp_restore:
                 self.health = min(self.max_health, self.health + hp_restore[item_key])
             if item_key in energy_restore:
-                self.energy = min(100, self.energy + energy_restore[item_key])
+                self.energy = min(self.max_energy, self.energy + energy_restore[item_key])
             if item_key in radiation_delta:
                 self.radiation = max(0, self.radiation + radiation_delta[item_key])
             database.update_user_stats(
@@ -1517,7 +1542,7 @@ class Player:
             if self.health != old_health:
                 parts.append(f"❤️ HP: {old_health} -> {self.health}/{self.max_health}{hp_percent_text}")
             if self.energy != old_energy:
-                parts.append(f"⚡ Энергия: {old_energy} -> {self.energy}/100")
+                parts.append(f"⚡ Энергия: {old_energy} -> {self.energy}/{self.max_energy}")
             if self.radiation != old_radiation:
                 parts.append(
                     "☢️ Радиация: "

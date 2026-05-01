@@ -3306,6 +3306,7 @@ def roll_artifact_from_anomaly(anomaly_type: str, luck: int, detector_bonus: int
     """Попытаться получить артефакт из аномалии с броском гильзы"""
     import random
     from game.anomalies import ANOMALIES
+    from game.stat_balance import clamp, luck_artifact_bonus
 
     if anomaly_type not in ANOMALIES:
         return None
@@ -3317,8 +3318,12 @@ def roll_artifact_from_anomaly(anomaly_type: str, luck: int, detector_bonus: int
         return None
 
     base_chance = anomaly.get("success_chance_with_detector", 50)
-    total_chance = (base_chance + (luck * 2) + detector_bonus) * max(0.0, chance_multiplier)
-    total_chance = min(95, total_chance)
+    total_chance = (
+        base_chance
+        + luck_artifact_bonus(luck)
+        + int(detector_bonus * 0.75)
+    ) * max(0.0, chance_multiplier)
+    total_chance = clamp(total_chance, 0, 82)
 
     if random.randint(1, 100) > total_chance:
         return None

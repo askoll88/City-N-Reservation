@@ -862,12 +862,12 @@ def handle_sleep(player, vk, user_id: int):
         rad_reduce = 10
 
         new_hp = min(player.max_health, old_hp + hp_heal)
-        new_energy = min(100, old_energy + energy_heal)
+        new_energy = min(player.max_energy, old_energy + energy_heal)
         new_rad = max(0, old_rad - rad_reduce)
 
         # Если и так всё в порядке — даём только лёгкий восстановительный тик.
         if new_hp == old_hp and new_energy == old_energy and new_rad == old_rad:
-            new_energy = min(100, old_energy + 8)
+            new_energy = min(player.max_energy, old_energy + 8)
 
         player.health = new_hp
         player.energy = new_energy
@@ -884,7 +884,7 @@ def handle_sleep(player, vk, user_id: int):
         message = (
             "🛏️ Ты устроился в убежище и немного выспался.\n\n"
             f"❤️ HP: {old_hp} → {new_hp}/{player.max_health}\n"
-            f"⚡ Энергия: {old_energy} → {new_energy}/100\n"
+            f"⚡ Энергия: {old_energy} → {new_energy}/{player.max_energy}\n"
             f"☢️ Радиация: {old_rad} → {new_rad} ед.\n"
             f"   ({format_radiation_rate(old_rad)} → {format_radiation_rate(new_rad)})\n"
             f"🧪 Стадия: {get_radiation_stage(new_rad)['name']}\n\n"
@@ -1056,7 +1056,7 @@ def _execute_hospital_heal(
 
     # Лечим полностью здоровье и восстанавливаем энергию
     player.health = player.max_health
-    player.energy = 100
+    player.energy = player.max_energy
     database.update_user_stats(user_id, health=player.health, energy=player.energy)
 
     # Списываем деньги и увеличиваем счетчик лечений
@@ -1083,7 +1083,7 @@ def _execute_hospital_heal(
         f"✅ЗДОРОВЬЕ ПОЛНОСТЬЮ ВОССТАНОВЛЕНО!\n"
         f"   HP: {old_hp} → {player.health}/{player.max_health}\n\n"
         f"⚡ЭНЕРГИЯ ВОССТАНОВЛЕНА!\n"
-        f"   Энергия: {old_energy} → {player.energy}/100\n\n"
+        f"   Энергия: {old_energy} → {player.energy}/{player.max_energy}\n\n"
         f"💰 Оплата: {price_text}\n"
         f"   Осталось денег: {new_money:,} руб.\n\n"
         f"📊 Всего лечений: {new_treatment_count}"
@@ -1115,7 +1115,7 @@ def handle_heal(player, vk, user_id: int):
         old_hp = int(player.health)
         old_energy = int(player.energy)
         missing_hp = max(0, int(player.max_health) - old_hp)
-        missing_energy = max(0, 100 - old_energy)
+        missing_energy = max(0, player.max_energy - old_energy)
 
         if missing_hp <= 0 and missing_energy <= 0:
             database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)
@@ -1231,7 +1231,7 @@ def handle_confirm_heal(player, vk, user_id: int):
     old_hp = int(player.health)
     old_energy = int(player.energy)
     missing_hp = max(0, int(player.max_health) - old_hp)
-    missing_energy = max(0, 100 - old_energy)
+    missing_energy = max(0, player.max_energy - old_energy)
 
     if missing_hp <= 0 and missing_energy <= 0:
         database.clear_runtime_state(user_id, HEAL_QUOTE_RUNTIME_KEY)

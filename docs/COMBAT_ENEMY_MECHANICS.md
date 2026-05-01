@@ -84,9 +84,9 @@
 
 Из `models/player.py`:
 
-- `max_health = PLAYER_HP_BASE + level * PLAYER_HP_PER_LEVEL + effective_stamina * PLAYER_HP_PER_STAMINA + max_health_bonus`
+- `max_health = PLAYER_HP_BASE + level * PLAYER_HP_PER_LEVEL + stamina_hp_bonus(effective_stamina) + max_health_bonus`
 - `melee_damage = 5 + effective_strength + passive_strength_bonus` (+% от артефактов на damage_boost)
-- `crit_chance = 5 + (effective_luck - 1) * 2 + artifact_crit + passive_crit`
+- `crit_chance = 5 + diminishing_luck_bonus + artifact_crit + passive_crit`, итоговый шанс capped ниже 100%.
 - `dodge_chance = 10 + passive_dodge + artifact_dodge`
 - `total_defense = armor_defense + artifact_defense + passive_defense`
 

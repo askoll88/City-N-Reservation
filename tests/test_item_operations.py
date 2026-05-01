@@ -80,6 +80,78 @@ class ItemOperationsTest(unittest.TestCase):
         self.assertTrue(result["success"])
         update_stats_mock.assert_called_once_with(1, equipped_artifact_4="Душа")
 
+    def test_artifact_energy_bonus_increases_player_max_energy(self):
+        player = Player.__new__(Player)
+        player._artifact_bonuses = {"energy": 15, "max_energy": 20}
+
+        self.assertEqual(player.max_energy, 135)
+
+    def test_artifact_damage_resist_reduces_incoming_damage_after_defense(self):
+        player = Player.__new__(Player)
+        player._artifact_bonuses = {"damage_resist": 25}
+        player._get_passive_bonuses = lambda: {}
+
+        self.assertEqual(player.damage_resist, 25)
+
+    @patch("models.player.database.update_user_stats")
+    @patch("models.player.database.get_artifact_bonuses", return_value={"energy": 20})
+    @patch("models.player.database.get_user_by_vk")
+    def test_player_reload_refreshes_artifact_slots_and_equipped_artifacts(
+        self,
+        get_user_mock,
+        get_artifact_bonuses_mock,
+        update_stats_mock,
+    ):
+        player = Player.__new__(Player)
+        player.user_id = 1
+        player.inventory = Inventory.__new__(Inventory)
+        player.inventory.reload = lambda: None
+        player._recalculate_max_weight = lambda: None
+        player._get_passive_bonuses = lambda: {}
+        player._data = {}
+
+        data = {
+            "location": "город",
+            "health": 100,
+            "energy": 130,
+            "radiation": 0,
+            "money": 0,
+            "level": 1,
+            "experience": 0,
+            "strength": 4,
+            "stamina": 4,
+            "perception": 4,
+            "luck": 4,
+            "armor_defense": 0,
+            "equipped_backpack": None,
+            "equipped_weapon": None,
+            "equipped_armor": None,
+            "equipped_device": None,
+            "newbie_kit_received": 0,
+            "artifact_slots": 4,
+            "inventory_section": None,
+            "previous_location": None,
+            "is_admin": 0,
+            "is_banned": 0,
+            "ban_reason": None,
+            "equipped_armor_head": None,
+            "equipped_armor_body": None,
+            "equipped_armor_legs": None,
+            "equipped_armor_hands": None,
+            "equipped_armor_feet": None,
+        }
+        for idx in range(1, config.MAX_ARTIFACT_SLOTS + 1):
+            data[f"equipped_artifact_{idx}"] = None
+        data["equipped_artifact_4"] = "Лунный свет"
+        get_user_mock.return_value = data
+
+        player.reload()
+
+        self.assertEqual(player.artifact_slots, 4)
+        self.assertEqual(player.equipped_artifact_4, "Лунный свет")
+        self.assertEqual(player.energy, 120)
+        update_stats_mock.assert_called_with(1, energy=120)
+
 
 if __name__ == "__main__":
     unittest.main()
