@@ -535,8 +535,10 @@ class Player:
         """
         target = self.RANK_TIERS[target_tier - 1]
         current = self.RANK_TIERS[max(0, target_tier - 2)]
+        current_cap = int(current.get("max_level", target.get("min_level", 1)) or target.get("min_level", 1))
         req = {
-            "level": int(current.get("max_level", target.get("min_level", 1)) or target.get("min_level", 1)),
+            "level": current_cap,
+            "rank_xp": self._get_rank_cap_xp_threshold(current_cap),
             "money": max(0, int((target_tier - 1) * 700)),
             "stat_total": 16 + max(0, (target_tier - 1) * 2),
         }
@@ -554,6 +556,7 @@ class Player:
         """Фактические метрики игрока для проверки ранга."""
         return {
             "level": int(self.level),
+            "rank_xp": int(self.experience),
             "money": int(self.money),
             "stat_total": int(self.strength + self.stamina + self.perception + self.luck),
             "has_class": 1 if self.player_class else 0,
@@ -569,6 +572,7 @@ class Player:
 
         labels = {
             "level": "Уровень",
+            "rank_xp": "Опыт до потолка ранга",
             "money": "Деньги",
             "stat_total": "Сумма характеристик",
             "has_class": "Класс",
@@ -611,6 +615,7 @@ class Player:
             tier = next_tier
             self._set_rank_tier(tier)
             promoted.append(self.RANK_TIERS[tier - 1]["name"])
+            self._apply_rank_unlock_progression(tier)
 
         return promoted
 
@@ -631,7 +636,10 @@ class Player:
         Блокировать набор XP на потолке текущего ранга,
         пока ранг не повышен у НПС.
         """
-        return int(self.level) >= self._get_current_rank_level_cap()
+        cap = self._get_current_rank_level_cap()
+        if int(self.level) < cap:
+            return False
+        return int(self.experience) >= self._get_rank_cap_xp_threshold(cap)
 
     def _get_current_rank_level_cap(self) -> int:
         """Максимальный уровень, доступный на текущем ранге."""
@@ -640,6 +648,43 @@ class Player:
             return self.MAX_LEVEL
         current_rank = self.RANK_TIERS[tier - 1]
         return min(self.MAX_LEVEL, int(current_rank.get("max_level", self.MAX_LEVEL) or self.MAX_LEVEL))
+
+    def _get_rank_cap_xp_threshold(self, cap_level: int | None = None) -> int:
+        """XP, на котором текущий ранг считается полностью заполненным."""
+        cap = max(1, int(cap_level or self._get_current_rank_level_cap()))
+        if cap >= self.MAX_LEVEL:
+            return int(self.LEVELS.get(self.MAX_LEVEL, 0) or 0)
+        return int(self.LEVELS.get(cap + 1, self.LEVELS[self.MAX_LEVEL]) or 0)
+
+    def _apply_rank_unlock_progression(self, new_tier: int):
+        """После повышения ранга перевести игрока в начало первого уровня нового ранга."""
+        if new_tier < 1 or new_tier > len(self.RANK_TIERS):
+            return
+        target_level = max(1, int(self.RANK_TIERS[new_tier - 1].get("min_level", self.level) or self.level))
+        if target_level <= int(self.level):
+            return
+
+        old_level = int(self.level)
+        self.level = min(self.MAX_LEVEL, target_level)
+        self.experience = int(self.LEVELS.get(self.level, self.experience) or self.experience)
+        self.health = self.max_health
+        self.energy = 100
+        gained_points = max(0, self.level - old_level)
+
+        database.update_user_stats(
+            self.user_id,
+            level=self.level,
+            experience=self.experience,
+            health=self.health,
+            energy=self.energy,
+            max_weight=self.max_weight,
+        )
+        if gained_points > 0:
+            current_notice_from = int(database.get_user_flag(self.user_id, LEVEL_NOTICE_FROM_FLAG, 0) or 0)
+            database.increment_user_flag(self.user_id, UNSPENT_STAT_POINTS_FLAG, gained_points)
+            database.set_user_flag(self.user_id, LEVEL_NOTICE_PENDING_FLAG, 1)
+            database.set_user_flag(self.user_id, LEVEL_NOTICE_FROM_FLAG, current_notice_from or old_level)
+            database.set_user_flag(self.user_id, LEVEL_NOTICE_TO_FLAG, self.level)
 
     @property
     def fire_defense(self) -> int:
@@ -697,14 +742,19 @@ class Player:
             self.equipped_device = user_data.get('equipped_device')
 
         loc = self.location
-        exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
+        exp_current = int(self.LEVELS.get(self.level, 0) or 0)
+        exp_next = int(self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL]) or 0)
+        exp_progress = max(0, int(self.experience) - exp_current)
+        exp_needed = max(1, exp_next - exp_current)
+        if self._is_rank_xp_locked() and self.level < self.MAX_LEVEL:
+            exp_progress = exp_needed
         current_weight = self.inventory.total_weight
         weight_status = "✅ В норме" if current_weight <= self.max_weight else "❌ ПЕРЕГРУЗ"
 
         # Прогресс-бары
         hp_line = ui.meter_line("HP", self.health, self.max_health, width=14)
         energy_line = ui.meter_line("Энергия", self.energy, 100, width=14)
-        exp_line = ui.meter_line("Опыт", self.experience, exp_needed, width=14)
+        exp_line = ui.meter_line("Опыт", min(exp_progress, exp_needed), exp_needed, width=14)
 
         # ═══════════════════════════════════════════════════
         # СНАРЯЖЕНИЕ
@@ -1126,7 +1176,12 @@ class Player:
             self._last_level_up_message = None
             return 0
         before = int(self.experience)
-        self.experience += gain
+        cap = self._get_current_rank_level_cap()
+        cap_threshold = self._get_rank_cap_xp_threshold(cap)
+        target_experience = before + gain
+        if cap < self.MAX_LEVEL:
+            target_experience = min(target_experience, cap_threshold)
+        self.experience = target_experience
         self._last_level_up_message = self._check_level_up()
         database.update_user_stats(self.user_id, experience=self.experience)
         return max(0, int(self.experience) - before)

@@ -3812,7 +3812,12 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
     else:
         rank_level_cap = max_level
     rank_level_cap = max(1, min(max_level, rank_level_cap))
+    if rank_level_cap >= max_level:
+        rank_cap_xp = int(levels.get(max_level, 0) or 0)
+    else:
+        rank_cap_xp = int(levels.get(rank_level_cap + 1, levels.get(max_level, 0)) or 0)
 
+    experience = min(experience, rank_cap_xp) if rank_cap_xp > 0 else experience
     max_health_bonus = int(user_row.get("max_health_bonus", 0) or 0)
     while level < max_level and level < rank_level_cap:
         exp_needed = int(levels.get(level + 1, levels.get(max_level, 0)) or 0)
@@ -3832,6 +3837,7 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
         """
         UPDATE users
         SET level = %s,
+            experience = %s,
             health = %s,
             energy = 100
         WHERE vk_id = %s
@@ -3840,6 +3846,7 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
         """,
         (
             level,
+            experience,
             max_health,
             vk_id,
         ),
@@ -3929,8 +3936,11 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
 
             user_internal_id = int(user_meta["id"])
             user_level = int(user_meta.get("level", 1) or 1)
+            user_experience = int(user_meta.get("experience", 0) or 0)
             user_rank_tier = max(1, int(user_meta.get("rank_tier", 1) or 1))
             rank_locked_xp = False
+            rank_level_cap = 0
+            rank_cap_xp = 0
             try:
                 from models.player import Player as _PlayerModel
                 tiers_total = len(_PlayerModel.RANK_TIERS)
@@ -3938,9 +3948,11 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 if safe_tier < tiers_total:
                     current_rank = _PlayerModel.RANK_TIERS[safe_tier - 1]
                     rank_level_cap = int(current_rank.get("max_level", 1) or 1)
-                    rank_locked_xp = user_level >= rank_level_cap
+                    rank_cap_xp = int(_PlayerModel.LEVELS.get(rank_level_cap + 1, 0) or 0)
+                    rank_locked_xp = user_level >= rank_level_cap and user_experience >= rank_cap_xp
             except Exception:
                 rank_locked_xp = False
+                rank_cap_xp = 0
 
             quests = row["quest_json"] or []
             progress = row["progress_json"] or {}
@@ -3996,6 +4008,8 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             total_xp = int(total_xp * _calc_daily_xp_scale(user_level, user_rank_tier))
             if rank_locked_xp:
                 total_xp = 0
+            elif rank_cap_xp > 0 and user_level >= rank_level_cap:
+                total_xp = max(0, min(total_xp, rank_cap_xp - user_experience))
 
             # Бонусный предмет выдаём только на пороговых значениях.
             from game.daily_quests import resolve_streak_bonus_item
