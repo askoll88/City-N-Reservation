@@ -1176,18 +1176,7 @@ def _do_callback_processing(event, vk):
             _apply_shelter_passive_energy_regen(player, user_id)
         except Exception:
             logger.exception("Ошибка пассивного регена энергии в callback (user_id=%s)", user_id)
-        return_location = payload.get("location") or player.previous_location or 'город'
-
-        vk_messages.send(
-            vk,
-            user_id=user_id,
-            message=f"↩️ Возвращаемся в {return_location}...",
-            keyboard=create_location_keyboard(return_location, player.level).get_keyboard(),
-        )
-
-        player.current_location_id = return_location
-        database.update_user_location(user_id, return_location)
-        _set_shelter_regen_anchor(user_id, in_shelter=(return_location == "убежище"))
+        go_back(player, vk, user_id)
         return
 
     _answer_callback(event, vk, "Действие устарело")

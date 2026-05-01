@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from models.player import Player, calculate_player_max_health
+from models.player import Player, calculate_player_max_health, get_level_xp_required, normalize_level_experience
 
 
 class RankXpProgressionTests(unittest.TestCase):
@@ -9,7 +9,7 @@ class RankXpProgressionTests(unittest.TestCase):
         player = Player.__new__(Player)
         player.user_id = 1001
         player.level = 4
-        player.experience = Player.LEVELS[5] - 50
+        player.experience = get_level_xp_required(4, Player.LEVELS, Player.MAX_LEVEL) - 50
         player.stamina = 4
         player.strength = 4
         player.perception = 4
@@ -21,12 +21,13 @@ class RankXpProgressionTests(unittest.TestCase):
         player._artifact_bonuses = {}
         player._last_level_up_message = None
         player._get_current_rank_level_cap = lambda: 4
+        player._get_rank_cap_xp_threshold = lambda cap_level=None: get_level_xp_required(4, Player.LEVELS, Player.MAX_LEVEL)
         player._check_level_up = lambda persist=True: None
         return player
 
     def test_xp_clamps_at_rank_cap_threshold(self):
         player = self._player()
-        cap_threshold = Player.LEVELS[5]
+        cap_threshold = get_level_xp_required(4, Player.LEVELS, Player.MAX_LEVEL)
 
         with patch("models.player.database.update_user_stats"):
             gained = player.add_experience(999)
@@ -38,7 +39,7 @@ class RankXpProgressionTests(unittest.TestCase):
 
     def test_rank_unlock_moves_to_next_rank_start_without_overflow(self):
         player = self._player()
-        player.experience = Player.LEVELS[5] + 500
+        player.experience = get_level_xp_required(4, Player.LEVELS, Player.MAX_LEVEL) + 500
 
         with patch("models.player.database.update_user_stats") as update_stats, \
                 patch("models.player.database.increment_user_flag"), \
@@ -47,10 +48,18 @@ class RankXpProgressionTests(unittest.TestCase):
             player._apply_rank_unlock_progression(2)
 
         self.assertEqual(player.level, 5)
-        self.assertEqual(player.experience, Player.LEVELS[5])
+        self.assertEqual(player.experience, 0)
         self.assertEqual(player.energy, 100)
         self.assertEqual(player.health, calculate_player_max_health(5, 4, 0))
         update_stats.assert_called()
+
+    def test_old_absolute_xp_is_normalized_to_current_level_progress(self):
+        self.assertEqual(normalize_level_experience(5, 10, Player.LEVELS, Player.MAX_LEVEL), 10)
+        self.assertEqual(normalize_level_experience(5, Player.LEVELS[5] + 42, Player.LEVELS, Player.MAX_LEVEL), 42)
+
+    def test_overflow_old_xp_on_rank_cap_normalizes_to_full_bar(self):
+        required = get_level_xp_required(4, Player.LEVELS, Player.MAX_LEVEL)
+        self.assertEqual(normalize_level_experience(4, 802, Player.LEVELS, Player.MAX_LEVEL), required)
 
 
 if __name__ == "__main__":

@@ -137,6 +137,33 @@ def calculate_player_max_health(
     return max(1, base + lvl * per_level + sta * per_stamina + bonus)
 
 
+def get_level_xp_required(level: int, levels: dict[int, int] | None = None, max_level: int | None = None) -> int:
+    """Сколько XP нужно набрать внутри текущего уровня до следующего."""
+    table = levels or build_level_thresholds(max_level or MAX_PLAYER_LEVEL)
+    cap = max(1, int(max_level or MAX_PLAYER_LEVEL))
+    lvl = max(1, min(cap, int(level or 1)))
+    if lvl >= cap:
+        return 1
+    current = int(table.get(lvl, 0) or 0)
+    nxt = int(table.get(lvl + 1, table.get(cap, current + 1)) or current + 1)
+    return max(1, nxt - current)
+
+
+def normalize_level_experience(level: int, experience: int, levels: dict[int, int] | None = None, max_level: int | None = None) -> int:
+    """
+    Нормализовать XP к новой модели: в БД хранится прогресс внутри текущего уровня.
+    Если встречаем старое абсолютное значение, сводим его к прогрессу этого уровня.
+    """
+    table = levels or build_level_thresholds(max_level or MAX_PLAYER_LEVEL)
+    lvl = max(1, int(level or 1))
+    xp = max(0, int(experience or 0))
+    required = get_level_xp_required(lvl, table, max_level or MAX_PLAYER_LEVEL)
+    level_floor = int(table.get(lvl, 0) or 0)
+    if xp >= level_floor and level_floor > 0:
+        xp -= level_floor
+    return max(0, min(required, xp))
+
+
 class Inventory:
     """Класс инвентаря игрока"""
 
@@ -284,7 +311,10 @@ class Player:
 
         # RPG параметры
         self.level = self._data['level']
-        self.experience = self._data['experience']
+        raw_experience = self._data['experience']
+        self.experience = normalize_level_experience(self.level, raw_experience, self.LEVELS, self.MAX_LEVEL)
+        if self.experience != int(raw_experience or 0):
+            database.update_user_stats(self.user_id, experience=self.experience)
         self.strength = self._data['strength']       # Сила - урон в ближнем бою, переносимый вес
         self.stamina = self._data['stamina']         # Выносливость - скорость восстановления энергии
         self.perception = self._data['perception']   # Восприятие - шанс найти артефакты
@@ -365,7 +395,10 @@ class Player:
             self.radiation = self._data['radiation']
             self.money = self._data['money']
             self.level = self._data['level']
-            self.experience = self._data['experience']
+            raw_experience = self._data['experience']
+            self.experience = normalize_level_experience(self.level, raw_experience, self.LEVELS, self.MAX_LEVEL)
+            if self.experience != int(raw_experience or 0):
+                database.update_user_stats(self.user_id, experience=self.experience)
             self.strength = self._data['strength']
             self.stamina = self._data['stamina']
             self.perception = self._data['perception']
@@ -652,9 +685,7 @@ class Player:
     def _get_rank_cap_xp_threshold(self, cap_level: int | None = None) -> int:
         """XP, на котором текущий ранг считается полностью заполненным."""
         cap = max(1, int(cap_level or self._get_current_rank_level_cap()))
-        if cap >= self.MAX_LEVEL:
-            return int(self.LEVELS.get(self.MAX_LEVEL, 0) or 0)
-        return int(self.LEVELS.get(cap + 1, self.LEVELS[self.MAX_LEVEL]) or 0)
+        return get_level_xp_required(cap, self.LEVELS, self.MAX_LEVEL)
 
     def _apply_rank_unlock_progression(self, new_tier: int):
         """После повышения ранга перевести игрока в начало первого уровня нового ранга."""
@@ -666,7 +697,7 @@ class Player:
 
         old_level = int(self.level)
         self.level = min(self.MAX_LEVEL, target_level)
-        self.experience = int(self.LEVELS.get(self.level, self.experience) or self.experience)
+        self.experience = 0
         self.health = self.max_health
         self.energy = 100
         gained_points = max(0, self.level - old_level)
@@ -733,6 +764,11 @@ class Player:
         # Обновляем значения из БД
         user_data = database.get_user_by_vk(self.user_id)
         if user_data:
+            self.level = user_data.get('level', self.level)
+            raw_experience = user_data.get('experience', self.experience)
+            self.experience = normalize_level_experience(self.level, raw_experience, self.LEVELS, self.MAX_LEVEL)
+            if self.experience != int(raw_experience or 0):
+                database.update_user_stats(self.user_id, experience=self.experience)
             self.health = user_data.get('health', 100)
             self.energy = user_data.get('energy', 100)
             self.radiation = user_data.get('radiation', 0)
@@ -742,10 +778,8 @@ class Player:
             self.equipped_device = user_data.get('equipped_device')
 
         loc = self.location
-        exp_current = int(self.LEVELS.get(self.level, 0) or 0)
-        exp_next = int(self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL]) or 0)
-        exp_progress = max(0, int(self.experience) - exp_current)
-        exp_needed = max(1, exp_next - exp_current)
+        exp_needed = get_level_xp_required(self.level, self.LEVELS, self.MAX_LEVEL)
+        exp_progress = normalize_level_experience(self.level, self.experience, self.LEVELS, self.MAX_LEVEL)
         if self._is_rank_xp_locked() and self.level < self.MAX_LEVEL:
             exp_progress = exp_needed
         current_weight = self.inventory.total_weight
@@ -1034,20 +1068,9 @@ class Player:
         self.money = max(0, self.money - int(self.money * 0.1))
         money_lost = old_money - self.money
 
-        # Теряем 25% опыта, но не ниже порога текущего уровня
+        # Теряем 25% прогресса текущего уровня без понижения уровня.
         exp_loss = int(old_experience * 0.25)
-        exp_needed_current = self.LEVELS.get(self.level, 0)
-        exp_needed_next = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
-
-        # Минимальный опыт для сохранения текущего уровня
-        min_exp = exp_needed_current
-
-        # Новый опыт не может быть ниже порога текущего уровня
-        self.experience = max(min_exp, old_experience - exp_loss)
-
-        # Дополнительно проверяем: если опыт был ниже следующего уровня, не опускаем ниже текущего
-        if old_experience < exp_needed_next:
-            self.experience = max(min_exp, self.experience)
+        self.experience = max(0, old_experience - exp_loss)
 
         experience_lost = old_experience - self.experience
 
@@ -1083,20 +1106,9 @@ class Player:
         self.money = max(0, self.money - int(self.money * 0.1))
         money_lost = old_money - self.money
 
-        # Теряем 25% опыта, но не ниже порога текущего уровня
+        # Теряем 25% прогресса текущего уровня без понижения уровня.
         exp_loss = int(old_experience * 0.25)
-        exp_needed_current = self.LEVELS.get(self.level, 0)
-        exp_needed_next = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
-
-        # Минимальный опыт для сохранения текущего уровня
-        min_exp = exp_needed_current
-
-        # Новый опыт не может быть ниже порога текущего уровня
-        self.experience = max(min_exp, old_experience - exp_loss)
-
-        # Дополнительно проверяем: если опыт был ниже следующего уровня, не опускаем ниже текущего
-        if old_experience < exp_needed_next:
-            self.experience = max(min_exp, self.experience)
+        self.experience = max(0, old_experience - exp_loss)
 
         experience_lost = old_experience - self.experience
 
@@ -1129,11 +1141,15 @@ class Player:
         rank_level_cap = self._get_current_rank_level_cap()
 
         while self.level < self.MAX_LEVEL and self.level < rank_level_cap:
-            exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
+            exp_needed = get_level_xp_required(self.level, self.LEVELS, self.MAX_LEVEL)
             if self.experience < exp_needed:
                 break
 
+            self.experience -= exp_needed
             self.level += 1
+
+        if self.level >= rank_level_cap and rank_level_cap < self.MAX_LEVEL:
+            self.experience = min(self.experience, self._get_rank_cap_xp_threshold(rank_level_cap))
 
         if self.level == old_level:
             return None
@@ -1147,6 +1163,7 @@ class Player:
             database.update_user_stats(
                 self.user_id,
                 level=self.level,
+                experience=self.experience,
                 health=self.health,
                 energy=100,
                 max_weight=self.max_weight
@@ -1177,14 +1194,28 @@ class Player:
             return 0
         before = int(self.experience)
         cap = self._get_current_rank_level_cap()
-        cap_threshold = self._get_rank_cap_xp_threshold(cap)
-        target_experience = before + gain
+        accepted_gain = gain
         if cap < self.MAX_LEVEL:
-            target_experience = min(target_experience, cap_threshold)
+            room = 0
+            lvl = int(self.level)
+            progress = before
+            while lvl <= cap:
+                required = get_level_xp_required(lvl, self.LEVELS, self.MAX_LEVEL)
+                room += max(0, required - progress)
+                if lvl >= cap:
+                    break
+                lvl += 1
+                progress = 0
+            accepted_gain = min(gain, room)
+        if accepted_gain <= 0:
+            self._last_level_up_message = None
+            return 0
+
+        target_experience = before + accepted_gain
         self.experience = target_experience
         self._last_level_up_message = self._check_level_up()
         database.update_user_stats(self.user_id, experience=self.experience)
-        return max(0, int(self.experience) - before)
+        return accepted_gain
 
     def equip_backpack(self, backpack_name: str = None) -> tuple[bool, str]:
         """Надеть или снять рюкзак"""

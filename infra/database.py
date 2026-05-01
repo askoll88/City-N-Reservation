@@ -3800,7 +3800,7 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
 
     old_level = int(user_row.get("level", 1) or 1)
     level = old_level
-    experience = int(user_row.get("experience", 0) or 0)
+    raw_experience = int(user_row.get("experience", 0) or 0)
     max_level = int(getattr(_PlayerModel, "MAX_LEVEL", 297) or 297)
     levels = getattr(_PlayerModel, "LEVELS", {}) or {}
     rank_tiers = getattr(_PlayerModel, "RANK_TIERS", []) or []
@@ -3812,24 +3812,25 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
     else:
         rank_level_cap = max_level
     rank_level_cap = max(1, min(max_level, rank_level_cap))
-    if rank_level_cap >= max_level:
-        rank_cap_xp = int(levels.get(max_level, 0) or 0)
-    else:
-        rank_cap_xp = int(levels.get(rank_level_cap + 1, levels.get(max_level, 0)) or 0)
+    from models.player import calculate_player_max_health, get_level_xp_required, normalize_level_experience
 
-    experience = min(experience, rank_cap_xp) if rank_cap_xp > 0 else experience
+    rank_cap_xp = get_level_xp_required(rank_level_cap, levels, max_level)
+    experience = normalize_level_experience(level, raw_experience, levels, max_level)
     max_health_bonus = int(user_row.get("max_health_bonus", 0) or 0)
     while level < max_level and level < rank_level_cap:
-        exp_needed = int(levels.get(level + 1, levels.get(max_level, 0)) or 0)
+        exp_needed = get_level_xp_required(level, levels, max_level)
         if exp_needed <= 0 or experience < exp_needed:
             break
 
+        experience -= exp_needed
         level += 1
 
-    if level == old_level:
+    if level >= rank_level_cap and rank_level_cap < max_level:
+        experience = min(experience, rank_cap_xp)
+
+    if level == old_level and experience == raw_experience:
         return None
 
-    from models.player import calculate_player_max_health
     max_health = calculate_player_max_health(level, int(user_row.get("stamina", 1) or 1), max_health_bonus)
     gained_points = int(level - old_level)
 
@@ -3852,6 +3853,9 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
         ),
     )
     updated = cursor.fetchone()
+    if level == old_level:
+        return {"user": updated, "normalized_only": True}
+
     user_internal_id = int(user_row.get("id") or updated.get("id"))
     points_flag = getattr(_PlayerModel, "UNSPENT_STAT_POINTS_FLAG", "unspent_stat_points")
     notice_pending_flag = getattr(_PlayerModel, "LEVEL_NOTICE_PENDING_FLAG", "level_notice_pending")
@@ -3942,13 +3946,14 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             rank_level_cap = 0
             rank_cap_xp = 0
             try:
-                from models.player import Player as _PlayerModel
+                from models.player import Player as _PlayerModel, get_level_xp_required, normalize_level_experience
                 tiers_total = len(_PlayerModel.RANK_TIERS)
                 safe_tier = max(1, min(tiers_total, user_rank_tier))
+                user_experience = normalize_level_experience(user_level, user_experience, _PlayerModel.LEVELS, _PlayerModel.MAX_LEVEL)
                 if safe_tier < tiers_total:
                     current_rank = _PlayerModel.RANK_TIERS[safe_tier - 1]
                     rank_level_cap = int(current_rank.get("max_level", 1) or 1)
-                    rank_cap_xp = int(_PlayerModel.LEVELS.get(rank_level_cap + 1, 0) or 0)
+                    rank_cap_xp = get_level_xp_required(rank_level_cap, _PlayerModel.LEVELS, _PlayerModel.MAX_LEVEL)
                     rank_locked_xp = user_level >= rank_level_cap and user_experience >= rank_cap_xp
             except Exception:
                 rank_locked_xp = False
@@ -4041,6 +4046,8 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
             level_up = _apply_level_ups_after_xp(cursor, vk_id, user_row) if user_row else None
             if level_up and level_up.get("user"):
                 user_row = level_up["user"]
+            if level_up and level_up.get("normalized_only"):
+                level_up = None
 
             # Бонусные предметы выдаём здесь же, в той же транзакции.
             if user_internal_id:

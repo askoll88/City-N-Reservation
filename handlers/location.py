@@ -817,9 +817,6 @@ def go_back(player, vk, user_id: int):
         target_location = player.previous_location or "кпп"
         player.current_location_id = target_location
         database.update_user_location(user_id, target_location)
-    elif player.previous_location and player.previous_location != player.current_location_id:
-        player.current_location_id = player.previous_location
-        database.update_user_location(user_id, player.previous_location)
     _send_location_message(
         vk,
         user_id,
