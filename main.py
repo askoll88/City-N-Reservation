@@ -59,6 +59,7 @@ from handlers.commands import (
 )
 
 from handlers.location import go_to_location, go_back, handle_travel_commands, travel_tick
+from handlers.leveling import handle_stat_choice_callback, maybe_send_level_up_notification, send_stat_choice_prompt
 from handlers.map_screen import handle_map_command, show_map
 from handlers.admin import handle_admin_commands
 from infra.state_manager import (
@@ -279,9 +280,24 @@ def handle_message(event, vk):
         if handle_travel_commands(player, vk, user_id, text):
             return
 
+    try:
+        maybe_send_level_up_notification(vk, user_id)
+    except Exception:
+        logger.exception("Ошибка уведомления о новом уровне (user_id=%s)", user_id)
+
     # === Приоритет 4: Команда /start ===
     if text in ['/start', '/help', 'начать', 'старт']:
         handle_start_command(vk, user_id)
+        return
+
+    if text in ['прокачка', 'очки', 'очки характеристик', 'характеристики', 'статы']:
+        if not send_stat_choice_prompt(vk, user_id):
+            vk.messages.send(
+                user_id=user_id,
+                message="Свободных очков характеристик нет.",
+                keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+                random_id=0,
+            )
         return
 
     # === Приоритет 4.5: Экран персонажа ===
@@ -962,6 +978,27 @@ def _do_callback_processing(event, vk):
     payload = event.obj.payload or {}
     user_id = getattr(event.obj, "user_id", 0)
     command = str(payload.get("command") or "")
+
+    if payload.get("command") == "stat_choice":
+        if user_id and (
+            is_in_combat(user_id)
+            or is_researching(user_id)
+            or has_travel_state(user_id)
+            or is_in_anomaly(user_id)
+            or has_pending_purchase(user_id)
+            or has_pending_loot_choice(user_id)
+            or has_pending_emission_risk_exit(user_id)
+        ):
+            _answer_callback(event, vk, "Сначала заверши текущее событие")
+            return
+        from infra.state_manager import has_pending_event
+        if user_id and has_pending_event(user_id):
+            _answer_callback(event, vk, "Сначала заверши событие")
+            return
+        stat = str(payload.get("stat") or "").strip()
+        _answer_callback(event, vk, "Характеристика обновлена")
+        handle_stat_choice_callback(vk, user_id, stat)
+        return
 
     if user_id and is_researching(user_id):
         blocked_research_callbacks = {

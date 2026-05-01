@@ -4219,9 +4219,6 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
         f"Энергия {ui.bar(player.energy, 100, width=14)} {player.energy}/100\n"
     )
 
-    if level_up:
-        message += f"\n{level_up}"
-    
     return message
 
 

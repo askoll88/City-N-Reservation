@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 RADIATION_RPH_PER_POINT = 0.2
+UNSPENT_STAT_POINTS_FLAG = "unspent_stat_points"
+LEVEL_NOTICE_PENDING_FLAG = "level_notice_pending"
+LEVEL_NOTICE_FROM_FLAG = "level_notice_from"
+LEVEL_NOTICE_TO_FLAG = "level_notice_to"
 MAX_PLAYER_LEVEL = max(20, int(getattr(game_config, "MAX_PLAYER_LEVEL", 297) or 297))
 BASE_LEVEL_THRESHOLDS = {
     1: 0, 2: 100, 3: 250, 4: 450, 5: 700,
@@ -821,6 +825,9 @@ class Player:
 
         # --- Характеристики ---
         lines.append(ui.section("Характеристики"))
+        unspent_points = int(database.get_user_flag(self.user_id, UNSPENT_STAT_POINTS_FLAG, 0) or 0)
+        if unspent_points > 0:
+            lines.append(f"⬆️ Свободные очки: {unspent_points}")
         strength_per_level = max(0, int(getattr(game_config, "STRENGTH_DAMAGE_PER_LEVEL", 2) or 2))
         strength_damage_bonus = self.effective_strength * strength_per_level
         lines.append(f"⚔️ Сила: {self.effective_strength} (+{strength_damage_bonus} урона)  |  🏃 Выносливость: {self.effective_stamina}")
@@ -1070,15 +1077,6 @@ class Player:
 
         old_level = int(self.level)
         rank_level_cap = self._get_current_rank_level_cap()
-        stat_changes = []
-
-        import random
-        stat_names = {
-            'strength': 'Сила',
-            'stamina': 'Выносливость',
-            'perception': 'Восприятие',
-            'luck': 'Удача'
-        }
 
         while self.level < self.MAX_LEVEL and self.level < rank_level_cap:
             exp_needed = self.LEVELS.get(self.level + 1, self.LEVELS[self.MAX_LEVEL])
@@ -1086,40 +1084,33 @@ class Player:
                 break
 
             self.level += 1
-            stat = random.choice(['strength', 'stamina', 'perception', 'luck'])
-            old_value = getattr(self, stat)
-            setattr(self, stat, old_value + 1)
-            stat_changes.append((stat, old_value, old_value + 1))
 
         if self.level == old_level:
             return None
 
         self.health = self.max_health
         self.energy = 100
-        self._recalculate_max_weight()
+        gained_points = int(self.level - old_level)
 
         if persist:
+            current_notice_from = int(database.get_user_flag(self.user_id, LEVEL_NOTICE_FROM_FLAG, 0) or 0)
             database.update_user_stats(
                 self.user_id,
                 level=self.level,
                 health=self.health,
                 energy=100,
-                strength=self.strength,
-                stamina=self.stamina,
-                perception=self.perception,
-                luck=self.luck,
                 max_weight=self.max_weight
             )
-
-        stat_lines = []
-        for stat, old_value, new_value in stat_changes:
-            stat_lines.append(f"+1 к характеристике {stat_names[stat]}: {old_value} -> {new_value}")
+            database.increment_user_flag(self.user_id, UNSPENT_STAT_POINTS_FLAG, gained_points)
+            database.set_user_flag(self.user_id, LEVEL_NOTICE_PENDING_FLAG, 1)
+            database.set_user_flag(self.user_id, LEVEL_NOTICE_FROM_FLAG, current_notice_from or old_level)
+            database.set_user_flag(self.user_id, LEVEL_NOTICE_TO_FLAG, self.level)
 
         message = (
             f"НОВЫЙ УРОВЕНЬ!\n\n"
             f"Был уровень: {old_level} -> Стал: {self.level}\n"
-            f"Здоровье восстановлено: {self.health}\n\n"
-            + "\n".join(stat_lines)
+            f"Здоровье и энергия восстановлены.\n"
+            f"Свободных очков характеристик: +{gained_points}"
         )
         if self.level >= rank_level_cap and self.level < self.MAX_LEVEL:
             message += "\n\nДостигнут потолок текущего ранга. Для дальнейшего роста повысь ранг у Куратора рангов."

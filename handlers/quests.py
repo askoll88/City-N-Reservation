@@ -120,20 +120,13 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
 
     level_up = result.get("level_up")
     if level_up:
-        stat_names = {
-            "strength": "Сила",
-            "stamina": "Выносливость",
-            "perception": "Восприятие",
-            "luck": "Удача",
-        }
         msg += (
             "\n⭐ НОВЫЙ УРОВЕНЬ!\n"
             f"   {level_up['old_level']} → {level_up['new_level']}\n"
             "   Здоровье и энергия восстановлены.\n"
+            f"   Очков характеристик: +{level_up.get('stat_points', 0)}\n"
+            "   Выбор характеристики появится отдельным сообщением, когда не будет активных событий.\n"
         )
-        for change in level_up.get("stat_changes", []):
-            stat = stat_names.get(change.get("stat"), change.get("stat", "Характеристика"))
-            msg += f"   +1 {stat}: {change.get('old')} → {change.get('new')}\n"
         if level_up.get("rank_cap_reached"):
             msg += "   Достигнут потолок текущего ранга. Для дальнейшего роста повысь ранг у Куратора рангов.\n"
 

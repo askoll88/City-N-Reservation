@@ -3537,6 +3537,29 @@ def set_user_flag(vk_id: int, flag_name: str, value: int):
         )
 
 
+def increment_user_flag(vk_id: int, flag_name: str, delta: int = 1) -> int:
+    """Изменить числовой флаг пользователя и вернуть новое значение."""
+    safe_delta = int(delta or 0)
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return 0
+
+        cursor.execute(
+            """
+            INSERT INTO user_flags (user_id, flag_name, value)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, flag_name) DO UPDATE
+            SET value = user_flags.value + EXCLUDED.value
+            RETURNING value
+            """,
+            (user['id'], flag_name, safe_delta),
+        )
+        row = cursor.fetchone()
+        return int(row["value"] if row else 0)
+
+
 def set_runtime_state(vk_id: int, state_key: str, payload: dict):
     """Сохранить runtime-состояние пользователя как JSON."""
     if not state_key:
@@ -3790,14 +3813,6 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
         rank_level_cap = max_level
     rank_level_cap = max(1, min(max_level, rank_level_cap))
 
-    stat_changes = []
-    stats = {
-        "strength": int(user_row.get("strength", 1) or 1),
-        "stamina": int(user_row.get("stamina", 1) or 1),
-        "perception": int(user_row.get("perception", 1) or 1),
-        "luck": int(user_row.get("luck", 1) or 1),
-    }
-    max_weight = int(user_row.get("max_weight", 10) or 10)
     max_health_bonus = int(user_row.get("max_health_bonus", 0) or 0)
     while level < max_level and level < rank_level_cap:
         exp_needed = int(levels.get(level + 1, levels.get(max_level, 0)) or 0)
@@ -3805,30 +3820,20 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
             break
 
         level += 1
-        stat = random.choice(("strength", "stamina", "perception", "luck"))
-        old_value = stats[stat]
-        stats[stat] = old_value + 1
-        stat_changes.append({"stat": stat, "old": old_value, "new": stats[stat]})
-        if stat == "strength":
-            max_weight += 2
 
     if level == old_level:
         return None
 
     from models.player import calculate_player_max_health
-    max_health = calculate_player_max_health(level, stats["stamina"], max_health_bonus)
+    max_health = calculate_player_max_health(level, int(user_row.get("stamina", 1) or 1), max_health_bonus)
+    gained_points = int(level - old_level)
 
     cursor.execute(
         """
         UPDATE users
         SET level = %s,
             health = %s,
-            energy = 100,
-            strength = %s,
-            stamina = %s,
-            perception = %s,
-            luck = %s,
-            max_weight = %s
+            energy = 100
         WHERE vk_id = %s
         RETURNING id, money, experience, level, health, energy,
                   strength, stamina, perception, luck, max_weight
@@ -3836,20 +3841,56 @@ def _apply_level_ups_after_xp(cursor, vk_id: int, user_row: dict) -> dict | None
         (
             level,
             max_health,
-            stats["strength"],
-            stats["stamina"],
-            stats["perception"],
-            stats["luck"],
-            max_weight,
             vk_id,
         ),
     )
     updated = cursor.fetchone()
+    user_internal_id = int(user_row.get("id") or updated.get("id"))
+    points_flag = getattr(_PlayerModel, "UNSPENT_STAT_POINTS_FLAG", "unspent_stat_points")
+    notice_pending_flag = getattr(_PlayerModel, "LEVEL_NOTICE_PENDING_FLAG", "level_notice_pending")
+    notice_from_flag = getattr(_PlayerModel, "LEVEL_NOTICE_FROM_FLAG", "level_notice_from")
+    notice_to_flag = getattr(_PlayerModel, "LEVEL_NOTICE_TO_FLAG", "level_notice_to")
+    cursor.execute(
+        """
+        INSERT INTO user_flags (user_id, flag_name, value)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id, flag_name) DO UPDATE
+        SET value = user_flags.value + EXCLUDED.value
+        """,
+        (user_internal_id, points_flag, gained_points),
+    )
+    cursor.execute(
+        """
+        INSERT INTO user_flags (user_id, flag_name, value)
+        VALUES (%s, %s, 1)
+        ON CONFLICT (user_id, flag_name) DO UPDATE
+        SET value = 1
+        """,
+        (user_internal_id, notice_pending_flag),
+    )
+    cursor.execute(
+        """
+        INSERT INTO user_flags (user_id, flag_name, value)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id, flag_name) DO UPDATE
+        SET value = CASE WHEN user_flags.value > 0 THEN user_flags.value ELSE EXCLUDED.value END
+        """,
+        (user_internal_id, notice_from_flag, old_level),
+    )
+    cursor.execute(
+        """
+        INSERT INTO user_flags (user_id, flag_name, value)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id, flag_name) DO UPDATE
+        SET value = EXCLUDED.value
+        """,
+        (user_internal_id, notice_to_flag, level),
+    )
     return {
         "old_level": old_level,
         "new_level": level,
         "rank_level_cap": rank_level_cap,
-        "stat_changes": stat_changes,
+        "stat_points": gained_points,
         "rank_cap_reached": level >= rank_level_cap and level < max_level,
         "user": updated,
     }
