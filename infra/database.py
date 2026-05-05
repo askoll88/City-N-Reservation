@@ -1676,8 +1676,11 @@ _NPC_SHOPS = {
     # Барыга продаёт снаряжение и припасы, но артефакты только выкупает.
     NPC_MERCHANT_TRADER: {"categories": ("weapons", "rare_weapons", "armor", "backpacks", "meds", "food")},
 }
-_TRADER_BLOCKED_RARITIES = frozenset({"legendary"})
+_TRADER_BLOCKED_RARITIES = frozenset({"epic", "legendary"})
 _TRADER_BUY_BLOCKED_CATEGORIES = frozenset({"artifacts", "rare_artifacts", "legendary_artifacts"})
+_TRADER_SINGLE_STOCK_CATEGORIES = frozenset({"weapons", "rare_weapons", "armor"})
+_TRADER_ESSENTIAL_STOCK_CATEGORIES = frozenset({"meds", "food"})
+_TRADER_ESSENTIAL_STOCK_BONUS = 4
 
 _SHOP_EVENT_POOL = [
     {
@@ -1772,7 +1775,7 @@ def _get_shop_candidates(merchant_id: str, category: str | None = None, rarity: 
             if is_gacha_event_item(name):
                 continue
             item_rarity = (row.get("rarity") or "common").lower()
-            # Барыга пока не продаёт легендарные предметы.
+            # Барыга держит ходовой низко-/среднеуровневый товар, без epic/legendary.
             if merchant_id == NPC_MERCHANT_TRADER and item_rarity in _TRADER_BLOCKED_RARITIES:
                 continue
             if rarity and (row.get("rarity") or "common").lower() != rarity.lower():
@@ -1795,7 +1798,11 @@ def _pick_featured_item(merchant_id: str, candidates: list[dict], now_utc: datet
     return eligible[idx]
 
 
-def _initial_shop_stock(item: dict, is_featured: bool = False) -> int:
+def _initial_shop_stock(item: dict, is_featured: bool = False, merchant_id: str | None = None) -> int:
+    category = (item.get("category") or "").lower()
+    if merchant_id == NPC_MERCHANT_TRADER and category in _TRADER_SINGLE_STOCK_CATEGORIES:
+        return 1
+
     rarity = (item.get("rarity") or "common").lower()
     if rarity == "legendary":
         stock = config.SHOP_STOCK_LEGENDARY
@@ -1807,6 +1814,8 @@ def _initial_shop_stock(item: dict, is_featured: bool = False) -> int:
         stock = config.SHOP_STOCK_DEFAULT
     if is_featured:
         stock += 1
+    if merchant_id == NPC_MERCHANT_TRADER and category in _TRADER_ESSENTIAL_STOCK_CATEGORIES:
+        stock += _TRADER_ESSENTIAL_STOCK_BONUS
     return max(1, int(stock))
 
 
@@ -1814,12 +1823,19 @@ def _ensure_shop_stock_rows_tx(cursor, period_key: str, merchant_id: str, items:
     for item in items:
         item_id = int(item["id"])
         is_featured = (featured_item_id is not None and item_id == featured_item_id)
-        stock_total = _initial_shop_stock(item, is_featured=is_featured)
+        stock_total = _initial_shop_stock(item, is_featured=is_featured, merchant_id=merchant_id)
         cursor.execute(
             """
             INSERT INTO npc_shop_stock (period_key, merchant_id, item_id, stock_total, stock_left, is_featured, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (period_key, merchant_id, item_id) DO NOTHING
+            ON CONFLICT (period_key, merchant_id, item_id) DO UPDATE SET
+                stock_total = EXCLUDED.stock_total,
+                stock_left = GREATEST(
+                    0,
+                    EXCLUDED.stock_total - GREATEST(0, npc_shop_stock.stock_total - npc_shop_stock.stock_left)
+                ),
+                is_featured = EXCLUDED.is_featured,
+                updated_at = NOW()
             """,
             (period_key, merchant_id, item_id, stock_total, stock_total, is_featured),
         )
@@ -1991,7 +2007,7 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
                 return {"success": False, "message": "Барыга артефакты не продаёт. Только выкупает найденное."}
             item_rarity = (item_data.get("rarity") or "common").lower()
             if merchant_id == NPC_MERCHANT_TRADER and item_rarity in _TRADER_BLOCKED_RARITIES:
-                return {"success": False, "message": "Легендарные предметы у Барыги пока не продаются."}
+                return {"success": False, "message": "Epic и легендарные предметы у Барыги пока не продаются."}
             period_key = _get_shop_period_key()
             cursor.execute(
                 """

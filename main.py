@@ -339,12 +339,14 @@ def handle_message(event, vk):
         if 'инвентарь' in text or 'инвентар' in text:
             handle_inventory_command(player, vk, user_id)
             return
+        if handle_map_command(player, vk, user_id, text):
+            return
         from handlers.commands import handle_quests_commands
         if handle_quests_commands(player, vk, user_id, text):
             return
         vk.messages.send(
             user_id=user_id,
-            message="В меню 'Персонаж' доступны: Статус, Инвентарь, Задания и Назад.",
+            message="В меню 'Персонаж' доступны: Статус, Инвентарь, Карта, Задания и Назад.",
             keyboard=create_character_keyboard().get_keyboard(),
             random_id=0
         )

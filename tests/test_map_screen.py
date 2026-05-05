@@ -1,7 +1,12 @@
 import unittest
 import json
 
-from handlers.keyboards import create_location_keyboard, create_map_overview_keyboard, create_map_region_keyboard
+from handlers.keyboards import (
+    create_character_keyboard,
+    create_location_keyboard,
+    create_map_overview_keyboard,
+    create_map_region_keyboard,
+)
 from handlers.map_screen import (
     format_map_overview,
     format_region_map,
@@ -77,15 +82,24 @@ class MapScreenTests(unittest.TestCase):
 
     def test_map_buttons_do_not_duplicate_location_navigation(self):
         location_keyboard = create_location_keyboard("город").get_keyboard()
+        character_keyboard = create_character_keyboard().get_keyboard()
         overview_from_service = create_map_overview_keyboard("больница").get_keyboard()
         region_keyboard = create_map_region_keyboard("science", "кпп").get_keyboard()
 
-        self.assertIn("Карта", location_keyboard)
+        self.assertNotIn("Карта", location_keyboard)
+        self.assertIn("Карта", character_keyboard)
         self.assertNotIn("В город", overview_from_service)
         self.assertNotIn("КПП", overview_from_service)
         self.assertNotIn("Дорога на НИИ", region_keyboard)
         self.assertIn("Обзор", region_keyboard)
         self.assertIn("Назад", region_keyboard)
+
+    def test_military_map_shows_warehouse_17_dungeon(self):
+        player = DummyPlayer(level=10, rank_tier=3, current_location_id="дорога_военная_часть")
+        text = format_region_map(player, "military")
+
+        self.assertIn("Склад 17", text)
+        self.assertIn("материалы прорыва оружия", text)
 
     def test_map_region_buttons_are_callbacks(self):
         keyboard = json.loads(create_map_overview_keyboard("город").get_keyboard())

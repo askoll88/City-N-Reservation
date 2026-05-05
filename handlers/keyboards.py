@@ -38,8 +38,8 @@ INNER_TO_ROAD_LOCATION = {
 # Helper — стандартный нижний ряд (всегда одинаковый)
 # ============================================================
 
-def _add_meta_row(keyboard, include_map: bool = True):
-    """Добавить нижний ряд: Карта/Персонаж."""
+def _add_meta_row(keyboard, include_map: bool = False):
+    """Добавить нижний ряд мета-навигации."""
     if include_map:
         keyboard.add_button("Карта", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("Персонаж", color=VkKeyboardColor.SECONDARY)
@@ -51,11 +51,12 @@ def _add_callback_button(keyboard, label: str, *, command: str, color=VkKeyboard
 
 
 def create_character_keyboard():
-    """Экран персонажа: статус, инвентарь, задания."""
+    """Экран персонажа: статус, инвентарь, карта, задания."""
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("Статус", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("Инвентарь", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
+    keyboard.add_button("Карта", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("Задания", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)

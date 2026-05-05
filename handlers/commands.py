@@ -773,11 +773,15 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
         show_artifact_shop(player, vk, user_id)
         return True
 
-    if text in ['купить', 'оружие', 'броня']:
+    if text in ['купить', 'купить товары', 'товары', 'лавка', 'витрина', 'оружие', 'броня']:
         show_trader_shop_all(player, vk, user_id)
         return True
 
-    if text in ['артефакты', 'артефакт', 'купить артефакты', 'артефакты купить', 'продать', 'продать артефакты', 'продать артефакт', 'продажа артефактов']:
+    if text in [
+        'артефакты', 'артефакт', 'купить артефакты', 'артефакты купить',
+        'продать', 'продать предметы', 'продажа предметов', 'продать вещи',
+        'скупка', 'продать артефакты', 'продать артефакт', 'продажа артефактов'
+    ]:
         show_trader_sell_all(player, vk, user_id)
         return True
 
@@ -803,6 +807,19 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts",
         "buy_all", "sell_all",
     }
+    if npc_id == "барыга" and stage in shop_stages:
+        from infra.state_manager import set_dialog_state
+        from handlers.inventory import show_trader_shop_all, show_trader_sell_all
+
+        if text in {"купить товары", "купить", "товары", "лавка", "витрина"}:
+            set_dialog_state(user_id, npc_id, "buy_all")
+            show_trader_shop_all(player, vk, user_id)
+            return True
+        if text in {"продать предметы", "продажа предметов", "продать", "продать вещи", "скупка"}:
+            set_dialog_state(user_id, npc_id, "sell_all")
+            show_trader_sell_all(player, vk, user_id)
+            return True
+
     if stage in shop_stages:
         shop_passthrough = (
             text.startswith("купить ")
@@ -868,12 +885,15 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
             show_trader_sell_all(player, vk, user_id)
             return True
 
-        if text in ["купить", "оружие", "броня"]:
+        if text in ["купить", "купить товары", "товары", "лавка", "витрина", "оружие", "броня"]:
             set_dialog_state(user_id, npc_id, "buy_all")
             show_trader_shop_all(player, vk, user_id)
             return True
 
-        if text in ["артефакты", "продать", "продать артефакты", "продажа артефактов"]:
+        if text in [
+            "артефакты", "продать", "продать предметы", "продажа предметов",
+            "продать вещи", "скупка", "продать артефакты", "продажа артефактов"
+        ]:
             set_dialog_state(user_id, npc_id, "sell_all")
             show_trader_sell_all(player, vk, user_id)
             return True
