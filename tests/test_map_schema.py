@@ -71,6 +71,14 @@ class MapSchemaTests(unittest.TestCase):
             list(RESEARCH_LOCATIONS),
         )
 
+    def test_warehouse17_is_threat_dungeon_not_research_location(self):
+        record = get_map_location("склад_17")
+
+        self.assertNotIn("склад_17", RESEARCH_LOCATIONS)
+        self.assertNotIn("research", record["activities"])
+        self.assertNotIn("research", record["tags"])
+        self.assertIn("threat_select", record["activities"])
+
     def test_safe_locations_are_safe_hubs_or_safehouses(self):
         for location_id in SAFE_LOCATIONS:
             record = get_map_location(location_id)

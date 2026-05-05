@@ -381,26 +381,6 @@ REGION_GAMEPLAY_LOOPS = {
         },
         "force_threshold": 82,
     },
-    "склад_17": {
-        "name": "Резонанс склада",
-        "field": "alert",
-        "max": 100,
-        "event_deltas": {
-            "military": 16,
-            "trap": 14,
-            "bandit": 10,
-            "mutant": 6,
-            "military_cache": -18,
-            "stash": -12,
-            "nothing": -4,
-        },
-        "pressure_weights": {
-            "military": 0.005,
-            "trap": 0.004,
-            "military_cache": 0.003,
-        },
-        "force_threshold": 84,
-    },
     "дорога_нии": {
         "name": "Нестабильность НИИ",
         "field": "instability",
@@ -709,7 +689,7 @@ def get_location_modifier(location_id: str) -> dict | None:
 
 def is_research_location(location_id: str) -> bool:
     """Проверить, является ли локация исследовательской с модификаторами"""
-    return location_id in LOCATION_MODIFIERS
+    return location_id in RESEARCH_LOCATIONS and location_id in LOCATION_MODIFIERS
 
 
 def get_anomaly_weights(location_id: str) -> dict:

@@ -145,7 +145,6 @@ COMMANDS = {
 # === Исследовательские локации ===
 RESEARCH_LOCATIONS = [
     LocationType.MILITARY_ROAD.value,
-    LocationType.WAREHOUSE_17.value,
     LocationType.MILITARY_BASE.value,
     LocationType.NII_ROAD.value,
     LocationType.NII_MAIN_BUILDING.value,

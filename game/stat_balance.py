@@ -99,3 +99,15 @@ def next_stamina_energy_regen_breakpoint(stamina: int | float, *, max_stamina: i
 def stamina_research_energy_discount(stamina: int | float) -> int:
     """Percent discount for research energy cost from stamina."""
     return int(round(diminishing_bonus(stamina, baseline=4, cap=20, scale=80)))
+
+
+def rank_stat_cap(rank_tier: int | float | None) -> int:
+    """
+    Maximum base value for one player stat at the current rank.
+
+    The old effective cap of 20 was too small for mid/late game, while having no
+    cap lets a player dump every level point into one stat. This curve keeps
+    early ranks familiar and opens enough room for real builds by level 167+.
+    """
+    tier = max(1, int(rank_tier or 1))
+    return min(100, 20 + int(round((tier - 1) * 80 / 23)))

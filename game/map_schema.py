@@ -156,9 +156,9 @@ LOCATION_METADATA: dict[str, dict[str, Any]] = {
         "level_min": 3,
         "level_max": 12,
         "danger": "medium",
-        "tags": ["research", "dungeon", "military", "weapon_upgrade", "materials", "bunker"],
+        "tags": ["dungeon", "military", "weapon_upgrade", "materials", "bunker", "threat"],
         "requires": {},
-        "activities": ["research", "dungeon", "combat", "weapon_upgrade_materials"],
+        "activities": ["dungeon", "combat", "weapon_upgrade_materials", "threat_select"],
         "loot_profile": "warehouse_17",
     },
     "дорога_нии": {

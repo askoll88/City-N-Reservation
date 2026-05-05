@@ -15,6 +15,7 @@ from game.stat_balance import (
     luck_outcome_bonus,
     next_stamina_max_energy_breakpoint,
     next_stamina_energy_regen_breakpoint,
+    rank_stat_cap,
     stamina_energy_regen,
     stamina_hp_bonus,
     stamina_max_energy_bonus,
@@ -628,6 +629,10 @@ class Player:
         value = max(1, min(tiers_total, int(tier or 1)))
         database.set_user_rank_tier(self.user_id, value)
 
+    def _get_stat_cap(self) -> int:
+        """Лимит базовой характеристики по текущему рангу."""
+        return rank_stat_cap(self._get_rank_tier())
+
     def get_rank_name(self) -> str:
         """Название текущего ранга игрока."""
         tier = self._get_rank_tier()
@@ -1088,14 +1093,15 @@ class Player:
         if experience is not None:
             self.experience = max(0, experience)
             self._last_level_up_message = self._check_level_up(persist=False)
+        stat_cap = self._get_stat_cap()
         if strength is not None:
-            self.strength = max(1, min(20, strength))
+            self.strength = max(1, min(stat_cap, strength))
         if stamina is not None:
-            self.stamina = max(1, min(20, stamina))
+            self.stamina = max(1, min(stat_cap, stamina))
         if perception is not None:
-            self.perception = max(1, min(20, perception))
+            self.perception = max(1, min(stat_cap, perception))
         if luck is not None:
-            self.luck = max(1, min(20, luck))
+            self.luck = max(1, min(stat_cap, luck))
         if armor_defense is not None:
             self.armor_defense = max(0, armor_defense)
         if max_weight is not None:

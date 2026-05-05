@@ -710,19 +710,23 @@ def _get_enemy_by_type_for_location(location_id: str, enemy_type: str):
 
 
 def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_elite: bool = True) -> dict:
-    """Собрать боевой профиль врага со стабильным скейлингом по уровню игрока."""
+    """Собрать боевой профиль врага для обычного исследования локации."""
     player_level = max(1, int(getattr(player, "level", 1) or 1))
     rank_tier = _get_player_rank_tier(player)
     zone_level = _get_zone_level(location_id)
+    bounds = _get_location_level_thresholds(location_id) or (zone_level, zone_level)
+    loc_min, loc_max = bounds
 
-    # Раньше уровень был зажат до zone+4, из-за чего на хай-левеле враги "застревали" около 20.
-    # Новый подход: смесь уровня зоны и игрока + шум, с мягкими ограничениями.
-    rank_level_bonus = int(max(0, rank_tier - 1) * 0.45)
-    desired_level = int(round(zone_level * 0.35 + player_level * 0.75)) + rank_level_bonus
-    spread = 1 + min(4, player_level // 20)  # 1..5
+    # Обычная карта не должна превращать стартовые локации в L130+ только
+    # потому, что игрок уже в мидгейме. Высокий ранг слегка усиливает Зону, а
+    # настоящий хай-левел выносится в режимы угроз/домены.
+    rank_level_bonus = int(max(0, rank_tier - 1) * 1.35)
+    player_pressure = int(min(player_level, loc_max + rank_level_bonus) * 0.10)
+    desired_level = zone_level + rank_level_bonus + player_pressure
+    spread = 1 + min(4, rank_tier // 6)  # 1..5
     enemy_level = desired_level + random.randint(-spread, spread)
-    min_enemy_level = max(1, int(player_level * 0.55) - 2)
-    max_enemy_level = max(zone_level + 6, int(player_level * 1.15) + 4)
+    min_enemy_level = max(1, loc_min)
+    max_enemy_level = max(loc_max + 4, loc_max + rank_level_bonus + 10)
     enemy_level = _clamp(enemy_level, min_enemy_level, max_enemy_level)
 
     # Плавный рост статов без резких скачков.
@@ -793,12 +797,15 @@ def _scale_enemy_for_fixed_level(
     *,
     reward_mult: float = 1.0,
     allow_elite: bool = False,
+    elite_chance: float = 0.10,
 ) -> dict:
     """Собрать профиль врага для домена с выбранным уровнем угрозы."""
     rank_tier = _get_player_rank_tier(player)
     fixed_level = max(1, int(enemy_level or 1))
     hp_mult = 1.0 + 0.040 * max(0, fixed_level - 1)
-    dmg_mult = 1.0 + 0.032 * max(0, fixed_level - 1)
+    dmg_mult = 1.0 + 0.038 * max(0, fixed_level - 1)
+    hp_mult *= 1.0 + max(0, fixed_level - 30) * 0.012
+    dmg_mult *= 1.0 + max(0, fixed_level - 70) * 0.004
     hp_mult *= 1.0 + min(0.50, max(0, rank_tier - 1) * 0.015)
     dmg_mult *= 1.0 + min(0.35, max(0, rank_tier - 1) * 0.010)
 
@@ -811,7 +818,8 @@ def _scale_enemy_for_fixed_level(
     hp_mult *= role.get("hp_mult", 1.0)
     dmg_mult *= role.get("dmg_mult", 1.0)
 
-    is_elite = bool(allow_elite and fixed_level >= 30 and random.random() < 0.10)
+    elite_roll_chance = max(0.0, min(1.0, float(elite_chance or 0.0)))
+    is_elite = bool(allow_elite and fixed_level >= 30 and random.random() < elite_roll_chance)
     if is_elite:
         hp_mult *= 1.18
         dmg_mult *= 1.12
@@ -2938,12 +2946,15 @@ def _build_dungeon_wave(player, user_id: int, dungeon_run: dict) -> tuple[dict |
     wave = max(1, int(dungeon_run.get("wave", 1) or 1))
     waves_total = max(wave, int(dungeon_run.get("waves_total", 3) or 3))
     enemy_level = max(1, int(dungeon_run.get("enemy_level", 1) or 1))
+    threat_id = str(dungeon_run.get("threat_id") or "").strip().lower()
+    elite_chance = 0.20 if threat_id == "v" else 0.15 if threat_id == "iv" else 0.10
     scaled_enemy = _scale_enemy_for_fixed_level(
         player,
         base_enemy,
         enemy_level + max(0, wave - 1) * 2,
         reward_mult=float(dungeon_run.get("reward_mult", 1.0) or 1.0),
         allow_elite=wave >= waves_total,
+        elite_chance=elite_chance,
     )
     initiative = _roll_initiative(player, scaled_enemy["enemy_speed"])
     combat = {

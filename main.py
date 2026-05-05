@@ -474,7 +474,17 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
 
     # Исследование
     if 'исследовать' in text:
-        if player.current_location_id in RESEARCH_LOCATIONS:
+        if player.current_location_id == "склад_17":
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    "Склад 17 не исследуют свободно.\n"
+                    "Это домен материалов: выбери уровень угрозы и запускай зачистку."
+                ),
+                keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+                random_id=0,
+            )
+        elif player.current_location_id in RESEARCH_LOCATIONS:
             handle_explore_time(player, vk, user_id)
         else:
             vk.messages.send(

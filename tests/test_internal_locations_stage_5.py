@@ -92,6 +92,12 @@ class InternalLocationsStage5Tests(unittest.TestCase):
         self.assertNotIn("Зараженный лес", map_keyboard)
         self.assertIn("Лес", map_keyboard)
 
+    def test_warehouse17_keyboard_starts_threat_selection_not_research(self):
+        keyboard = create_location_keyboard("склад_17").get_keyboard()
+
+        self.assertIn("Выбор угрозы", keyboard)
+        self.assertNotIn("Исследовать", keyboard)
+
     def test_navigation_uses_existing_go_to_location_for_internal_steps(self):
         player = DummyPlayer(current_location_id="дорога_военная_часть")
         vk = Mock()

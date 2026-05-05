@@ -202,6 +202,14 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_line()
         _add_meta_row(keyboard)
 
+    # --- Склад 17: домен материалов, без обычного исследования ---
+    elif location_id == "склад_17":
+        keyboard.add_button("Выбор угрозы", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_line()
+        keyboard.add_button("Дорога на военную часть", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        _add_meta_row(keyboard)
+
     # --- Дороги (исследовательские локации) ---
     elif location_id in RESEARCH_LOCATIONS:
         # Главное действие — исследование
@@ -210,8 +218,6 @@ def create_location_keyboard(location_id: str, player_level: int = None):
             keyboard.add_button("Склад 17", color=VkKeyboardColor.POSITIVE)
             keyboard.add_line()
             keyboard.add_button("Военная часть", color=VkKeyboardColor.PRIMARY)
-        elif location_id == "склад_17":
-            keyboard.add_button("Зачистить склад", color=VkKeyboardColor.POSITIVE)
         elif location_id in ROAD_TO_INNER_LOCATION:
             label, color = ROAD_TO_INNER_LOCATION[location_id]
             keyboard.add_button(label, color=color)

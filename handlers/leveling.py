@@ -8,7 +8,7 @@ from models.player import (
     UNSPENT_STAT_POINTS_FLAG,
     calculate_player_max_health,
 )
-from game.stat_balance import stamina_max_energy_bonus
+from game.stat_balance import rank_stat_cap, stamina_max_energy_bonus
 
 STAT_LABELS = {
     "strength": "Сила",
@@ -135,7 +135,7 @@ def apply_stat_choice(vk, user_id: int, stat: str) -> dict:
     with database.db_cursor() as (cursor, _):
         cursor.execute(
             """
-            SELECT id, level, health, energy, stamina, max_health_bonus,
+            SELECT id, level, rank_tier, health, energy, stamina, max_health_bonus,
                    strength, perception, luck, max_weight
             FROM users
             WHERE vk_id = %s
@@ -162,6 +162,15 @@ def apply_stat_choice(vk, user_id: int, stat: str) -> dict:
             return {"success": False, "message": "Свободных очков нет."}
 
         old_value = int(user.get(stat, 1) or 1)
+        stat_cap = rank_stat_cap(user.get("rank_tier", 1))
+        if old_value >= stat_cap:
+            return {
+                "success": False,
+                "message": (
+                    f"{STAT_LABELS[stat]} уже упёрлась в лимит текущего ранга: {stat_cap}.\n"
+                    "Подними ранг, чтобы открыть дальнейшую прокачку."
+                ),
+            }
         new_value = old_value + 1
         remaining = points - 1
         updates = {stat: new_value}
