@@ -20,6 +20,7 @@ from psycopg2.extras import RealDictCursor
 
 from infra import config
 from game.item_pool import ITEMS_POOL
+from game.gacha.event_items import GACHA_EVENT_ITEMS, is_gacha_event_item
 from game.constants import ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION
 from game.weapon_progression import (
     calc_weapon_attack,
@@ -527,7 +528,7 @@ def _migrate_legacy_schema():
 
 def _seed_items():
     """Заполнить таблицу items начальными данными."""
-    items = ITEMS_POOL
+    items = [*ITEMS_POOL, *GACHA_EVENT_ITEMS]
 
     with db_cursor() as (cursor, conn):
         for item in items:
@@ -1940,6 +1941,8 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
         item = cursor.fetchone()
         if not item:
             return {"success": False, "message": f"Предмет '{item_name}' не найден"}
+        if is_gacha_event_item(item["name"]):
+            return {"success": False, "message": "Ивентовые предметы Резонанса нельзя продавать."}
 
         cursor.execute("SELECT id, shells FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
@@ -2496,6 +2499,8 @@ def _get_market_price_bounds(item: dict) -> tuple[int, int]:
 
 def _is_market_item_tradable(item: dict) -> bool:
     category = (item.get("category") or "").lower()
+    if is_gacha_event_item(item.get("name")):
+        return False
     return category in _MARKET_TRADABLE_CATEGORIES
 
 

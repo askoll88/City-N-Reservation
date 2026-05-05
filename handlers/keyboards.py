@@ -169,6 +169,7 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_button("Крафт", color=VkKeyboardColor.SECONDARY)
         keyboard.add_button("Шкаф", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
+        keyboard.add_button("Резонанс Зоны", color=VkKeyboardColor.PRIMARY)
         keyboard.add_button("В город", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()
         _add_meta_row(keyboard)
@@ -652,6 +653,8 @@ def create_admin_keyboard():
     keyboard.add_line()
     keyboard.add_button("🏪 Маркет", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("❓ Помощь", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("🌀 Резонанс", color=VkKeyboardColor.POSITIVE)
     return keyboard
 
 
@@ -740,6 +743,21 @@ def create_admin_market_keyboard():
     keyboard.add_button("⛔ Маркет OFF", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
     keyboard.add_button("✖️ Снять лот", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+# ---------- Резонанс Зоны ----------
+
+def create_admin_gacha_keyboard():
+    """Подменю: Резонанс Зоны"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("🟢 Гача ON", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("🔴 Гача OFF", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    keyboard.add_button("📊 Гача статус", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("💠 Выдать осколки", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard

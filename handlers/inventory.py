@@ -209,6 +209,8 @@ def _artifact_effect_lines(item_name: str) -> list[str]:
 
 def build_item_details(item: dict) -> str:
     """Красивый блок с подробностями по предмету."""
+    from game.gacha.event_items import is_ssr_event_item
+
     name = item.get("name", "Неизвестный предмет")
     category = item.get("category", "other")
     rarity = item.get("rarity")
@@ -239,6 +241,11 @@ def build_item_details(item: dict) -> str:
         lines.append(f"🛡️ Защита: {defense}")
     if backpack_bonus:
         lines.append(f"🎒 Бонус веса: +{backpack_bonus} кг")
+
+    if is_ssr_event_item(name):
+        lines.append("")
+        lines.append(ui.section("Эксклюзив"))
+        lines.append("SSR Резонанса Зоны. Не продаётся, не выставляется на рынок и не выпадает в обычном луте.")
 
     artifact_lines = _artifact_effect_lines(name)
     if artifact_lines:
@@ -326,6 +333,8 @@ def handle_inventory_digit(player, text: str, vk, user_id: int) -> bool:
 def handle_inspect_item(player, target: str, vk, user_id: int):
     """Показать подробное описание предмета из инвентаря."""
     from main import create_inventory_keyboard, create_location_keyboard
+    from infra import vk_messages
+    from game.gacha.assets import upload_item_image
 
     item, err = _get_inventory_item_by_target(player, target.strip())
     if err:
@@ -335,7 +344,8 @@ def handle_inspect_item(player, target: str, vk, user_id: int):
 
     details = build_item_details(item)
     keyboard = create_inventory_keyboard().get_keyboard() if player.current_location_id == "инвентарь" else create_location_keyboard(player.current_location_id).get_keyboard()
-    vk.messages.send(user_id=user_id, message=details, keyboard=keyboard, random_id=0)
+    attachment = upload_item_image(vk, user_id, item.get("name"))
+    vk_messages.send(vk, user_id=user_id, message=details, keyboard=keyboard, attachment=attachment)
 
 
 def _equip_weapon(player, index: int, vk, user_id: int) -> bool:

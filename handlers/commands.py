@@ -187,6 +187,7 @@ def handle_location_actions(player, vk, user_id: int, text: str):
     from handlers.location import handle_sleep, handle_confirm_heal, handle_cancel_heal
     from handlers.crafting import show_crafting_menu, craft_recipe
     from handlers.storage import show_storage, put_to_storage, take_from_storage
+    from game.gacha.ui import handle_resonance_command
 
     if text == 'подтвердить лечение' or text.startswith('подтвердить лечение'):
         handle_confirm_heal(player, vk, user_id)
@@ -194,6 +195,9 @@ def handle_location_actions(player, vk, user_id: int, text: str):
 
     if text == 'отмена лечения' or text.startswith('отмена лечения'):
         handle_cancel_heal(player, vk, user_id)
+        return True
+
+    if handle_resonance_command(player, vk, user_id, text):
         return True
 
     # Лечение

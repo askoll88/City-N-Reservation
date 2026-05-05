@@ -65,6 +65,37 @@ class AdminHandlersTest(unittest.TestCase):
         self.assertTrue(handled)
         set_game_setting_mock.assert_called_once_with("p2p_market_enabled", "0")
 
+    @patch("handlers.admin.create_admin_gacha_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.create_admin_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.database.is_user_admin", return_value=True)
+    @patch("game.gacha.service.set_resonance_enabled")
+    def test_gacha_toggle(self, set_enabled_mock, _is_admin_mock, _main_kbd_mock, _gacha_kbd_mock):
+        handled = admin.handle_admin_commands(
+            self.player, self.vk, 1, "админ: гача on", "админ: гача on"
+        )
+        self.assertTrue(handled)
+        set_enabled_mock.assert_called_once_with(True)
+
+    @patch("handlers.admin.create_admin_gacha_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.create_admin_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.database.is_user_admin", return_value=True)
+    @patch("game.gacha.service.get_signal_shards", return_value=100)
+    @patch("game.gacha.service.add_signal_shards", return_value=260)
+    def test_gacha_give_shards(
+        self,
+        add_shards_mock,
+        get_shards_mock,
+        _is_admin_mock,
+        _main_kbd_mock,
+        _gacha_kbd_mock,
+    ):
+        handled = admin.handle_admin_commands(
+            self.player, self.vk, 1, "админ гача осколки 777 160", "админ гача осколки 777 160"
+        )
+        self.assertTrue(handled)
+        get_shards_mock.assert_called_once_with(777)
+        add_shards_mock.assert_called_once_with(777, 160)
+
 
 if __name__ == "__main__":
     unittest.main()

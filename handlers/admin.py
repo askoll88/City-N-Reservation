@@ -14,6 +14,7 @@ from handlers.keyboards import (
     create_admin_give_keyboard,
     create_admin_events_keyboard,
     create_admin_market_keyboard,
+    create_admin_gacha_keyboard,
     create_admin_help_keyboard,
 )
 from infra import database
@@ -23,8 +24,8 @@ MSK_TZ = timezone(timedelta(hours=3))
 
 
 def _set_admin_menu(user_id: int, category: str):
-    # Храним как строку: 1=users, 2=emission, 3=give, 4=events, 5=market, 6=help
-    codes = {"users": 1, "emission": 2, "give": 3, "events": 4, "market": 5, "help": 6}
+    # 1=users, 2=emission, 3=give, 4=events, 5=market, 6=help, 7=gacha
+    codes = {"users": 1, "emission": 2, "give": 3, "events": 4, "market": 5, "help": 6, "gacha": 7}
     database.set_user_flag(user_id, "_admin_menu", codes.get(category, 0))
 
 
@@ -32,7 +33,7 @@ def _get_admin_menu(user_id: int) -> str | None:
     val = database.get_user_flag(user_id, "_admin_menu", 0)
     if val == 0:
         return None
-    mapping = {1: "users", 2: "emission", 3: "give", 4: "events", 5: "market", 6: "help"}
+    mapping = {1: "users", 2: "emission", 3: "give", 4: "events", 5: "market", 6: "help", 7: "gacha"}
     return mapping.get(val)
 
 
@@ -70,6 +71,7 @@ def _show_category(vk, user_id: int, category: str):
         "give": create_admin_give_keyboard(),
         "events": create_admin_events_keyboard(),
         "market": create_admin_market_keyboard(),
+        "gacha": create_admin_gacha_keyboard(),
         "help": create_admin_help_keyboard(),
     }
     kb = keyboards.get(category, create_admin_keyboard())
@@ -79,6 +81,10 @@ def _show_category(vk, user_id: int, category: str):
         "give": "📦 ВЫДАЧА\n\nВыдача/удаление предметов и статов:",
         "events": "🎲 ИВЕНТЫ\n\nУправление событиями и квестами:",
         "market": "🏪 МАРКЕТ\n\nУправление P2P рынком:",
+        "gacha": "🌀 РЕЗОНАНС ЗОНЫ\n\nТестовый доступ только для админов:\n"
+                 "• админ гача on|off\n"
+                 "• админ гача статус\n"
+                 "• админ гача осколки <vk_id> <кол-во>\n",
         "help": "📖 СПРАВКА АДМИНА\n\nВсе команды начинаются с админ:\n"
                 "• админ пользователи [поиск] — список/поиск\n"
                 "• админ профиль <vk_id> — профиль\n"
@@ -93,6 +99,8 @@ def _show_category(vk, user_id: int, category: str):
                 "• бан <vk_id> [причина]\n"
                 "• разбан <vk_id>\n"
                 "• админ маркет on|off\n"
+                "• админ гача on|off\n"
+                "• админ гача осколки <vk_id> <кол-во>\n"
                 "• админ лоты [active|sold|cancelled|expired|all]\n"
                 "• админ снять лот <id>\n"
                 "• админ квесты <vk_id>\n"
@@ -121,7 +129,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                 or text.startswith("разбан ")
                 or text in {"админка", "admin", "админ",
                             "👥 пользователи", "☢️ выброс", "📦 выдача",
-                            "🎲 ивенты", "🏪 маркет", "❓ помощь",
+                            "🎲 ивенты", "🏪 маркет", "🌀 резонанс", "❓ помощь",
                             "последние пользователи", "забаненные",
                             "профиль (по vk_id)", "инвентарь (по vk_id)",
                             "права on/off", "локация (телепорт)",
@@ -133,6 +141,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                             "⏰ кулдаун инфо", "⏰ кулдаун снять", "👥 онлайн",
                             "📋 активные лоты", "🗂️ все лоты",
                             "✅ маркет on", "⛔ маркет off", "✖️ снять лот",
+                            "🟢 гача on", "🔴 гача off", "📊 гача статус", "💠 выдать осколки",
                             "⬅️ назад"}):
             return False
 
@@ -151,6 +160,8 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         _show_category(vk, user_id, "events"); return True
     if text in {"🏪 маркет", "маркет"}:
         _show_category(vk, user_id, "market"); return True
+    if text in {"🌀 резонанс", "резонанс"}:
+        _show_category(vk, user_id, "gacha"); return True
     if text in {"❓ помощь", "помощь", "админка", "admin", "админ"}:
         _show_main_menu(vk, user_id); return True
 
@@ -339,7 +350,52 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     if text == "✖️ снять лот":
         _send(vk, user_id, "Введи:\nадмин снять лот <id>", create_admin_market_keyboard()); return True
 
+    # === Кнопки: Резонанс Зоны ===
+    if text == "🟢 гача on":
+        from game.gacha.service import set_resonance_enabled
+        set_resonance_enabled(True)
+        _send(vk, user_id, "✅ Резонанс Зоны включён для админ-теста.", create_admin_gacha_keyboard()); return True
+    if text == "🔴 гача off":
+        from game.gacha.service import set_resonance_enabled
+        set_resonance_enabled(False)
+        _send(vk, user_id, "⛔ Резонанс Зоны отключён.", create_admin_gacha_keyboard()); return True
+    if text == "📊 гача статус":
+        from game.gacha.service import is_resonance_enabled
+        status = "включён" if is_resonance_enabled() else "отключён"
+        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: только админы.", create_admin_gacha_keyboard()); return True
+    if text == "💠 выдать осколки":
+        _send(vk, user_id, "Введи:\nадмин гача осколки <vk_id> <кол-во>", create_admin_gacha_keyboard()); return True
+
     # === Текстовые команды (работают из любого состояния) ===
+    m = re.match(r"^админ:?\s+гача\s+(on|off)$", text)
+    if m:
+        from game.gacha.service import set_resonance_enabled
+        enabled = m.group(1) == "on"
+        set_resonance_enabled(enabled)
+        message = "✅ Резонанс Зоны включён для админ-теста." if enabled else "⛔ Резонанс Зоны отключён."
+        _send(vk, user_id, message, create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ:?\s+гача\s+статус$", text)
+    if m:
+        from game.gacha.service import is_resonance_enabled
+        status = "включён" if is_resonance_enabled() else "отключён"
+        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: только админы.", create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ\s+гача\s+осколки\s+(\d+)\s+(-?\d+)$", text)
+    if m:
+        from game.gacha.service import add_signal_shards, get_signal_shards
+        target = int(m.group(1))
+        amount = int(m.group(2))
+        before = get_signal_shards(target)
+        after = add_signal_shards(target, amount)
+        _send(
+            vk,
+            user_id,
+            f"💠 Осколки сигнала vk:{target}: {before} -> {after} ({amount:+d})",
+            create_admin_gacha_keyboard(),
+        )
+        return True
+
     m = re.match(r"^админ:?\s+маркет\s+(on|off)$", text)
     if m:
         enabled = "1" if m.group(1) == "on" else "0"
