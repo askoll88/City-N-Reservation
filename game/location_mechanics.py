@@ -90,6 +90,29 @@ LOCATION_MODIFIERS = {
         "ambush_chance": 0.10,
     },
 
+    "склад_17": {
+        "name": "Склад 17",
+        "emoji": "🧰",
+        "description": "Оружейный бункер — материалы усиления и раннего прорыва оружия",
+        "energy_cost_mult": 1.1,
+        "find_chance_mult": 1.08,
+        "danger_mult": 1.12,
+        "radiation_mult": 1.02,
+        "loot_quality": "warehouse_17",
+        "anomaly_weights": {},
+        "anomaly_rarity_chances": {},
+        "event_weights": {
+            "mutant": 0.75,
+            "bandit": 1.1,
+            "military": 1.2,
+            "stash": 1.35,
+            "trap": 1.35,
+            "military_cache": 1.45,
+        },
+        "unique_mechanic": "ambush",
+        "ambush_chance": 0.08,
+    },
+
     "дорога_нии": {
         "name": "НИИ",
         "emoji": "🔬",
@@ -357,6 +380,26 @@ REGION_GAMEPLAY_LOOPS = {
             "armory_locker": 0.002,
         },
         "force_threshold": 82,
+    },
+    "склад_17": {
+        "name": "Резонанс склада",
+        "field": "alert",
+        "max": 100,
+        "event_deltas": {
+            "military": 16,
+            "trap": 14,
+            "bandit": 10,
+            "mutant": 6,
+            "military_cache": -18,
+            "stash": -12,
+            "nothing": -4,
+        },
+        "pressure_weights": {
+            "military": 0.005,
+            "trap": 0.004,
+            "military_cache": 0.003,
+        },
+        "force_threshold": 84,
     },
     "дорога_нии": {
         "name": "Нестабильность НИИ",

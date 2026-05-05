@@ -7,6 +7,7 @@ from game.crafting import (
     get_recipe_by_index,
 )
 from game.item_pool import ITEMS_POOL
+from handlers.keyboards import create_location_keyboard, create_weapon_upgrade_keyboard, create_workbench_keyboard
 
 
 class CraftingSystemTest(unittest.TestCase):
@@ -23,6 +24,19 @@ class CraftingSystemTest(unittest.TestCase):
         first = get_recipe_by_index(1)
         self.assertIsNotNone(first)
         self.assertEqual(first["id"], CRAFT_RECIPES[0]["id"])
+
+    def test_shelter_opens_workbench_instead_of_raw_craft(self):
+        shelter_keyboard = create_location_keyboard("убежище").get_keyboard()
+        self.assertIn("Верстак", shelter_keyboard)
+        self.assertNotIn("Крафт", shelter_keyboard)
+
+        workbench_keyboard = create_workbench_keyboard().get_keyboard()
+        self.assertIn("Крафт", workbench_keyboard)
+        self.assertIn("Улучшение оружия", workbench_keyboard)
+
+        weapon_keyboard = create_weapon_upgrade_keyboard().get_keyboard()
+        self.assertIn("Улучшить оружие", weapon_keyboard)
+        self.assertIn("Прорыв оружия", weapon_keyboard)
 
     def test_newbie_kit_contains_basic_anomaly_detector(self):
         kit_items = {name for name, _quantity in NEWBIE_KIT_ITEMS}

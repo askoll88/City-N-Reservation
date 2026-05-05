@@ -28,6 +28,7 @@ ROAD_TO_INNER_LOCATION = {
 
 INNER_TO_ROAD_LOCATION = {
     "военная_часть": "Дорога на военную часть",
+    "склад_17": "Дорога на военную часть",
     "главный_корпус_нии": "Дорога на НИИ",
     "зараженный_лес": "Дорога на зараженный лес",
 }
@@ -58,6 +59,25 @@ def create_character_keyboard():
     keyboard.add_button("Задания", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_status_keyboard(page: int = 0, total_pages: int = 1):
+    """Inline-клавиатура вкладок статуса персонажа."""
+    total = max(1, int(total_pages or 1))
+    current = max(0, min(total - 1, int(page or 0)))
+    prev_page = (current - 1) % total
+    next_page = (current + 1) % total
+    keyboard = VkKeyboard(one_time=False, inline=True)
+    _add_callback_button(keyboard, "Пред.", command="status_page", page=prev_page, color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(
+        keyboard,
+        f"{current + 1}/{total}",
+        command="status_page",
+        page=current,
+        color=VkKeyboardColor.PRIMARY,
+    )
+    _add_callback_button(keyboard, "След.", command="status_page", page=next_page, color=VkKeyboardColor.SECONDARY)
     return keyboard
 
 
@@ -131,7 +151,13 @@ def create_location_keyboard(location_id: str, player_level: int = None):
     elif location_id in RESEARCH_LOCATIONS:
         # Главное действие — исследование
         keyboard.add_button("Исследовать", color=VkKeyboardColor.POSITIVE)
-        if location_id in ROAD_TO_INNER_LOCATION:
+        if location_id == "дорога_военная_часть":
+            keyboard.add_button("Склад 17", color=VkKeyboardColor.POSITIVE)
+            keyboard.add_line()
+            keyboard.add_button("Военная часть", color=VkKeyboardColor.PRIMARY)
+        elif location_id == "склад_17":
+            keyboard.add_button("Зачистить склад", color=VkKeyboardColor.POSITIVE)
+        elif location_id in ROAD_TO_INNER_LOCATION:
             label, color = ROAD_TO_INNER_LOCATION[location_id]
             keyboard.add_button(label, color=color)
         keyboard.add_line()
@@ -166,7 +192,7 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_button("Поговорить", color=VkKeyboardColor.PRIMARY)
         keyboard.add_button("Спать", color=VkKeyboardColor.POSITIVE)
         keyboard.add_line()
-        keyboard.add_button("Крафт", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Верстак", color=VkKeyboardColor.SECONDARY)
         keyboard.add_button("Шкаф", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
         keyboard.add_button("Резонанс Зоны", color=VkKeyboardColor.PRIMARY)
@@ -192,6 +218,32 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_line()
         _add_meta_row(keyboard)
 
+    return keyboard
+
+
+def create_workbench_keyboard():
+    """Верстак убежища: крафт и прокачка оружия."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Крафт", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Улучшение оружия", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("Шкаф", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("В город", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    _add_meta_row(keyboard)
+    return keyboard
+
+
+def create_weapon_upgrade_keyboard():
+    """Быстрые действия для оружия на верстаке."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Улучшить оружие", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("Прорыв оружия", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("Крафт", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("В город", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_line()
+    _add_meta_row(keyboard)
     return keyboard
 
 
@@ -549,6 +601,26 @@ def create_npc_dialog_keyboard(npc_id: str):
             keyboard.add_button(question, color=VkKeyboardColor.SECONDARY)
             keyboard.add_line()
     keyboard.add_button("К выбору NPC", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_warehouse17_threat_keyboard(player):
+    """Выбор уровня угрозы оружейного данжа."""
+    from game.weapon_dungeons import get_available_warehouse17_threats
+
+    rank_tier = player._get_rank_tier() if hasattr(player, "_get_rank_tier") else getattr(player, "rank_tier", 1)
+    threats = get_available_warehouse17_threats(rank_tier)
+    keyboard = VkKeyboard(one_time=False)
+    row_count = 0
+    for threat in threats:
+        keyboard.add_button(threat.label, color=VkKeyboardColor.PRIMARY)
+        row_count += 1
+        if row_count >= 2:
+            keyboard.add_line()
+            row_count = 0
+    if row_count:
+        keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 

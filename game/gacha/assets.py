@@ -70,7 +70,8 @@ def upload_item_image(vk, user_id: int, item_name: str | None) -> str | None:
 def first_ssr_attachment(vk, user_id: int, rewards: list) -> str | None:
     for reward in rewards or []:
         if getattr(reward, "rarity", None) == "SSR":
-            attachment = upload_item_image(vk, user_id, getattr(reward, "name", None))
+            item_name = getattr(reward, "source_name", None) or getattr(reward, "name", None)
+            attachment = upload_item_image(vk, user_id, item_name)
             if attachment:
                 return attachment
     return None

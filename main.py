@@ -333,12 +333,8 @@ def handle_message(event, vk):
             go_back(player, vk, user_id)
             return
         if text in ['/status', 'статус']:
-            vk.messages.send(
-                user_id=user_id,
-                message=player.get_status(),
-                keyboard=create_character_keyboard().get_keyboard(),
-                random_id=0
-            )
+            from handlers.status import show_status_page
+            show_status_page(player, vk, user_id, page=0)
             return
         if 'инвентарь' in text or 'инвентар' in text:
             handle_inventory_command(player, vk, user_id)
@@ -382,12 +378,8 @@ def handle_message(event, vk):
 
     # Статус
     if text == '/status' or text == 'статус':
-        vk.messages.send(
-            user_id=user_id,
-            message="Открой раздел 'Персонаж' и выбери 'Статус'.",
-            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
-            random_id=0
-        )
+        from handlers.status import show_status_page
+        show_status_page(player, vk, user_id, page=0)
         return
     
     # Класс персонажа
@@ -672,6 +664,12 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
     if text.startswith('улучшить оружие') or text.startswith('прокачать оружие'):
         item_name = text.replace('улучшить оружие', '').replace('прокачать оружие', '').strip()
         success, msg = player.upgrade_weapon(item_name or None)
+        vk.messages.send(user_id=user_id, message=msg, random_id=0)
+        return True
+
+    if text.startswith('прорыв оружия') or text.startswith('возвысить оружие'):
+        item_name = text.replace('прорыв оружия', '').replace('возвысить оружие', '').strip()
+        success, msg = player.ascend_weapon(item_name or None)
         vk.messages.send(user_id=user_id, message=msg, random_id=0)
         return True
 
@@ -1019,6 +1017,13 @@ def _do_callback_processing(event, vk):
         _answer_callback(event, vk, "Карта обновлена")
         player = get_player(user_id)
         show_map(player, vk, user_id, region)
+        return
+
+    if payload.get("command") == "status_page":
+        _answer_callback(event, vk, "Статус обновлен")
+        player = get_player(user_id)
+        from handlers.status import handle_status_callback
+        handle_status_callback(player, vk, user_id, payload)
         return
 
     if payload.get("command") == "inventory_section":

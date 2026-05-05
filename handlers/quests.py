@@ -109,9 +109,14 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
         return True
 
     # Успешная награда
+    from game.gacha.service import grant_daily_quest_shards
+
+    shard_reward = grant_daily_quest_shards(user_id, int(result.get("new_streak", 1) or 1))
     msg = "🎉 НАГРАДА ПОЛУЧЕНА!\n\n"
     msg += f"⭐ Опыт: +{result['xp']:,} XP\n"
     msg += f"💰 Деньги: +{result['money']:,} руб.\n"
+    if shard_reward.get("granted", 0) > 0:
+        msg += f"💠 Осколки сигнала: +{shard_reward['granted']}\n"
 
     if result.get("bonus_items"):
         msg += "\n🎁 Бонусные предметы:\n"

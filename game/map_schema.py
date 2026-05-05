@@ -150,6 +150,17 @@ LOCATION_METADATA: dict[str, dict[str, Any]] = {
         "activities": ["research", "combat", "stash", "raid"],
         "loot_profile": "military_base",
     },
+    "склад_17": {
+        "region": "military",
+        "type": "dungeon",
+        "level_min": 3,
+        "level_max": 12,
+        "danger": "medium",
+        "tags": ["research", "dungeon", "military", "weapon_upgrade", "materials", "bunker"],
+        "requires": {},
+        "activities": ["research", "dungeon", "combat", "weapon_upgrade_materials"],
+        "loot_profile": "warehouse_17",
+    },
     "дорога_нии": {
         "region": "science",
         "type": "route",

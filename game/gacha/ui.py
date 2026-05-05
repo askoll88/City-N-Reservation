@@ -103,7 +103,7 @@ def format_rates() -> str:
         "• ШАНСЫ\n"
         "🟨 SSR: 1.6% базово. После 65 откликов сигнал усиливается. На 80 — гарант.\n"
         "🟪 SR: 12% базово. На 10 отклике — гарант.\n"
-        "⬜ R: расходники, гильзы и материалы для тестовой экономики.\n\n"
+        "⬜ R: расходники и материалы для тестовой экономики.\n\n"
         "• RATE-UP\n"
         "Первый SSR проходит через 50/50. Если rate-up не выпал, следующий SSR "
         "на этом типе баннера будет гарантированно rate-up.\n\n"
@@ -120,11 +120,18 @@ def _format_pull_result(result: dict) -> str:
         f"▰ {best_title}",
         f"{result['banner'].name} | Откликов: x{result['count']}",
         f"Потрачено: {result['cost']} осколков | Осталось: {result['shards_left']}",
-        "Предметы отправлены в шкаф убежища.",
+        "Предметы отправлены в шкаф убежища. Дубли SSR конвертируются в осколки.",
         "",
         "• РАСШИФРОВКА СИГНАЛА",
     ]
     for idx, reward in enumerate(rewards, 1):
+        if reward.duplicate and reward.kind == "currency":
+            source = reward.source_name or "SSR предмет"
+            lines.append(
+                f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} — {source} "
+                f"(дубликат -> +{reward.quantity} осколков сигнала)"
+            )
+            continue
         suffix = " (дубликат)" if reward.duplicate else ""
         qty = f" x{reward.quantity}" if reward.quantity != 1 else ""
         lines.append(f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} — {reward.name}{qty}{suffix}")

@@ -1317,17 +1317,14 @@ class Player:
         weapon = next((w for w in self.inventory.weapons if w['name'] == weapon_name), None)
         if not weapon:
             return False, f"У тебя нет оружия '{weapon_name}' в инвентаре."
-        required_level = int(weapon.get("required_level", 1) or 1)
-        weapon_level = int(weapon.get("item_level", required_level) or required_level)
-        if required_level > self.level:
+        from game.weapon_progression import get_rank_weapon_level_cap
+
+        weapon_level = int(weapon.get("item_level", 1) or 1)
+        rank_cap = get_rank_weapon_level_cap(self._get_rank_tier())
+        if weapon_level > rank_cap:
             return False, (
-                f"{weapon_name} требует {required_level} уровень.\n"
-                f"Твой уровень: {self.level}. Оружие можно хранить, но нельзя использовать."
-            )
-        if weapon_level > self.level:
-            return False, (
-                f"{weapon_name} L{weapon_level} выше твоего уровня {self.level}.\n"
-                "Прокачай персонажа или используй оружие ниже уровнем."
+                f"{weapon_name} L{weapon_level} выше лимита твоего ранга L{rank_cap}.\n"
+                "Повысь ранг или используй оружие ниже уровнем."
             )
 
         self.equipped_weapon = weapon_name
@@ -1335,10 +1332,15 @@ class Player:
         database.update_user_stats(self.user_id, equipped_weapon=weapon_name)
 
         rank = weapon.get("item_rank", "common")
-        return True, f"Надето оружие: {weapon_name} L{weapon_level} [{rank}] | урон {attack}"
+        effect = ""
+        if weapon.get("event_bonus_text"):
+            effect = f" | {weapon.get('event_bonus_name')}: {weapon.get('event_bonus_text')}"
+        return True, f"Надето оружие: {weapon_name} L{weapon_level} [{rank}] | урон {attack}{effect}"
 
     def upgrade_weapon(self, weapon_name: str | None = None) -> tuple[bool, str]:
-        """Прокачать оружие до текущего уровня игрока."""
+        """Прокачать оружие материалами до текущего капа."""
+        if self.current_location_id != "убежище":
+            return False, "Улучшение оружия доступно только на верстаке в убежище."
         self.inventory.reload()
         if not weapon_name:
             weapon_name = self.equipped_weapon
@@ -1352,6 +1354,23 @@ class Player:
             self.money = max(0, int(self.money))
             self.inventory.reload()
         return bool(result.get("success")), result.get("message", "Ошибка прокачки оружия.")
+
+    def ascend_weapon(self, weapon_name: str | None = None) -> tuple[bool, str]:
+        """Сделать прорыв оружия материалами данжей."""
+        if self.current_location_id != "убежище":
+            return False, "Прорыв оружия доступен только на верстаке в убежище."
+        self.inventory.reload()
+        if not weapon_name:
+            weapon_name = self.equipped_weapon
+        if not weapon_name:
+            return False, "Укажи оружие или надень его: 'прорыв оружия <название>'."
+        weapon = next((w for w in self.inventory.weapons if w['name'].lower() == weapon_name.lower()), None)
+        if not weapon:
+            return False, f"У тебя нет оружия '{weapon_name}'."
+        result = database.ascend_weapon_transaction(self.user_id, weapon["name"])
+        if result.get("success"):
+            self.inventory.reload()
+        return bool(result.get("success")), result.get("message", "Ошибка прорыва оружия.")
 
     def equip_armor(self, armor_name: str = None) -> tuple[bool, str]:
         """Надеть или снять броню"""

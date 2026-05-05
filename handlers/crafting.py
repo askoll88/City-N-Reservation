@@ -10,7 +10,12 @@ from game.crafting import (
     get_crafting_progress,
     get_recipe_by_index,
 )
-from handlers.keyboards import create_location_keyboard
+from game.weapon_progression import ASCENSION_MATERIALS, WEAPON_XP_MATERIALS
+from handlers.keyboards import (
+    create_location_keyboard,
+    create_weapon_upgrade_keyboard,
+    create_workbench_keyboard,
+)
 from infra import database
 
 
@@ -27,7 +32,7 @@ def show_crafting_menu(player, vk, user_id: int):
     if player.current_location_id != "убежище":
         vk.messages.send(
             user_id=user_id,
-            message="Крафт доступен только в убежище.",
+            message="Верстак доступен только в убежище.",
             keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
             random_id=0,
         )
@@ -61,6 +66,95 @@ def show_crafting_menu(player, vk, user_id: int):
         user_id=user_id,
         message="\n".join(lines),
         keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+        random_id=0,
+    )
+
+
+def show_workbench_menu(player, vk, user_id: int):
+    """Главный экран верстака в убежище."""
+    if player.current_location_id != "убежище":
+        vk.messages.send(
+            user_id=user_id,
+            message="Верстак доступен только в убежище.",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0,
+        )
+        return
+
+    lines = [
+        "🛠️ ВЕРСТАК УБЕЖИЩА",
+        "",
+        "• Крафт — рецепты предметов и улучшения снаряжения.",
+        "• Улучшение оружия — прокачка ATK материалами опыта и прорывы материалами Склад 17.",
+        "",
+        "Выбери раздел.",
+    ]
+    vk.messages.send(
+        user_id=user_id,
+        message="\n".join(lines),
+        keyboard=create_workbench_keyboard().get_keyboard(),
+        random_id=0,
+    )
+
+
+def show_weapon_upgrade_menu(player, vk, user_id: int):
+    """Экран прокачки оружия на верстаке."""
+    if player.current_location_id != "убежище":
+        vk.messages.send(
+            user_id=user_id,
+            message="Улучшение оружия доступно только через верстак в убежище.",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0,
+        )
+        return
+
+    player.inventory.reload()
+    materials = database.get_user_weapon_materials(user_id)
+    weapons = list(player.inventory.weapons)
+
+    lines = [
+        "🔧 УЛУЧШЕНИЕ ОРУЖИЯ",
+        "",
+        "ATK растёт от уровней. Доп. стат ивент-оружия растёт после прорывов.",
+        "",
+        "Материалы опыта:",
+    ]
+    for name, xp_value in sorted(WEAPON_XP_MATERIALS.items(), key=lambda row: row[1]):
+        lines.append(f"• {name}: x{materials.get(name, 0)} ({xp_value} XP)")
+
+    lines.append("")
+    lines.append("Материалы прорыва:")
+    for name in sorted(ASCENSION_MATERIALS):
+        lines.append(f"• {name}: x{materials.get(name, 0)}")
+
+    lines.append("")
+    lines.append("Оружие:")
+    if weapons:
+        for idx, weapon in enumerate(weapons, 1):
+            equipped = " [НАДЕТО]" if weapon.get("name") == player.equipped_weapon else ""
+            name = weapon.get("name", "Оружие")
+            level = int(weapon.get("item_level", 1) or 1)
+            cap = int(weapon.get("weapon_cap", weapon.get("required_level", 1)) or 1)
+            ascension = int(weapon.get("weapon_ascension", 0) or 0)
+            attack = int(weapon.get("attack", 0) or 0)
+            rank = weapon.get("item_rank", "common")
+            lines.append(f"{idx}. {name}{equipped}")
+            lines.append(f"   ATK {attack} | L{level}/{cap} | Прорыв {ascension}/10 | Ранг {rank}")
+            if weapon.get("event_bonus_text"):
+                lines.append(f"   Доп. стат: {weapon.get('event_bonus_name')}: {weapon.get('event_bonus_text')}")
+    else:
+        lines.append("Оружия в инвентаре нет.")
+
+    lines.append("")
+    lines.append("Команды:")
+    lines.append("• улучшить оружие <название> — поднять уровни до текущего капа")
+    lines.append("• прорыв оружия <название> — открыть следующий диапазон")
+    lines.append("Если оружие надето, можно нажать кнопку без названия.")
+
+    vk.messages.send(
+        user_id=user_id,
+        message="\n".join(lines),
+        keyboard=create_weapon_upgrade_keyboard().get_keyboard(),
         random_id=0,
     )
 

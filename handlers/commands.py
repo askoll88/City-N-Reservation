@@ -116,7 +116,13 @@ def handle_navigation(player, vk, user_id: int, text: str):
         text in ['военная часть', 'в военную часть', 'часть'] or 'внутрь части' in text
     ):
         requested = 'военная_часть'
+    elif current == 'дорога_военная_часть' and (
+        text in ['склад 17', 'склад-17', 'в склад 17', 'оружейный бункер', 'бункер']
+    ):
+        requested = 'склад_17'
     elif current == 'военная_часть' and ('дорога' in text or text in ['к дороге', 'на дорогу']):
+        requested = 'дорога_военная_часть'
+    elif current == 'склад_17' and ('дорога' in text or text in ['к дороге', 'на дорогу']):
         requested = 'дорога_военная_часть'
     elif current == 'дорога_нии' and (
         'главный корпус' in text or 'корпус нии' in text or text == 'корпус'
@@ -150,8 +156,9 @@ def handle_navigation(player, vk, user_id: int, text: str):
         'убежище': {'город'},
         'больница': {'город'},
         'черный рынок': {'город'},
-        'дорога_военная_часть': {'кпп', 'военная_часть'},
+        'дорога_военная_часть': {'кпп', 'военная_часть', 'склад_17'},
         'военная_часть': {'дорога_военная_часть'},
+        'склад_17': {'дорога_военная_часть'},
         'дорога_нии': {'кпп', 'главный_корпус_нии'},
         'главный_корпус_нии': {'дорога_нии'},
         'дорога_зараженный_лес': {'кпп', 'зараженный_лес'},
@@ -185,7 +192,7 @@ def handle_navigation(player, vk, user_id: int, text: str):
 def handle_location_actions(player, vk, user_id: int, text: str):
     """Обработка действий в локации"""
     from handlers.location import handle_sleep, handle_confirm_heal, handle_cancel_heal
-    from handlers.crafting import show_crafting_menu, craft_recipe
+    from handlers.crafting import show_crafting_menu, show_weapon_upgrade_menu, show_workbench_menu, craft_recipe
     from handlers.storage import show_storage, put_to_storage, take_from_storage
     from game.gacha.ui import handle_resonance_command
 
@@ -200,6 +207,34 @@ def handle_location_actions(player, vk, user_id: int, text: str):
     if handle_resonance_command(player, vk, user_id, text):
         return True
 
+    if player.current_location_id == "склад_17" and text in {
+        "зачистить", "зачистить склад", "зачистить склад 17", "рейд", "рейд склад 17", "выбор угрозы"
+    }:
+        from game.weapon_dungeons import format_warehouse17_menu
+        from handlers.keyboards import create_warehouse17_threat_keyboard
+
+        vk.messages.send(
+            user_id=user_id,
+            message=format_warehouse17_menu(player),
+            keyboard=create_warehouse17_threat_keyboard(player).get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    if player.current_location_id == "склад_17":
+        from game.weapon_dungeons import is_warehouse17_threat_command, start_warehouse17_run
+
+        if is_warehouse17_threat_command(text):
+            result = start_warehouse17_run(player, vk, user_id, text)
+            if not result.get("success"):
+                vk.messages.send(
+                    user_id=user_id,
+                    message=result.get("message", "Не удалось войти в Склад 17."),
+                    keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+                    random_id=0,
+                )
+            return True
+
     # Лечение
     if text in ['лечиться', 'лечение'] or 'лечиться' in text or 'лечение' in text:
         handle_heal(player, vk, user_id)
@@ -210,8 +245,16 @@ def handle_location_actions(player, vk, user_id: int, text: str):
         handle_sleep(player, vk, user_id)
         return True
 
-    # Крафт в убежище
-    if text in ['крафт', 'верстак', 'рецепты', 'рецепт']:
+    # Верстак в убежище
+    if text == 'верстак':
+        show_workbench_menu(player, vk, user_id)
+        return True
+
+    if text in ['улучшение оружия', 'прокачка оружия', 'оружейный верстак']:
+        show_weapon_upgrade_menu(player, vk, user_id)
+        return True
+
+    if text in ['крафт', 'рецепты', 'рецепт']:
         show_crafting_menu(player, vk, user_id)
         return True
 

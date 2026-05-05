@@ -786,6 +786,62 @@ def _scale_enemy_for_player(player, base_enemy: dict, location_id: str, allow_el
     }
 
 
+def _scale_enemy_for_fixed_level(
+    player,
+    base_enemy: dict,
+    enemy_level: int,
+    *,
+    reward_mult: float = 1.0,
+    allow_elite: bool = False,
+) -> dict:
+    """Собрать профиль врага для домена с выбранным уровнем угрозы."""
+    rank_tier = _get_player_rank_tier(player)
+    fixed_level = max(1, int(enemy_level or 1))
+    hp_mult = 1.0 + 0.040 * max(0, fixed_level - 1)
+    dmg_mult = 1.0 + 0.032 * max(0, fixed_level - 1)
+    hp_mult *= 1.0 + min(0.50, max(0, rank_tier - 1) * 0.015)
+    dmg_mult *= 1.0 + min(0.35, max(0, rank_tier - 1) * 0.010)
+
+    role_key = random.choices(
+        population=list(ENEMY_ROLE_PROFILES.keys()),
+        weights=[35, 35, 30],
+        k=1,
+    )[0]
+    role = ENEMY_ROLE_PROFILES[role_key]
+    hp_mult *= role.get("hp_mult", 1.0)
+    dmg_mult *= role.get("dmg_mult", 1.0)
+
+    is_elite = bool(allow_elite and fixed_level >= 30 and random.random() < 0.10)
+    if is_elite:
+        hp_mult *= 1.18
+        dmg_mult *= 1.12
+
+    scaled_hp = max(35, int(base_enemy["hp"] * hp_mult))
+    scaled_dmg = max(6, int(base_enemy["damage"] * dmg_mult))
+    enemy_speed = max(3, int(10 + fixed_level // 5 + role.get("speed_mod", 0)))
+    enemy_name = base_enemy["name"]
+    if is_elite:
+        enemy_name = f"⭐ Элитный {enemy_name}"
+
+    return {
+        "enemy_name": enemy_name,
+        "enemy_description": base_enemy["description"],
+        "enemy_hp": scaled_hp,
+        "enemy_max_hp": scaled_hp,
+        "enemy_damage": scaled_dmg,
+        "enemy_level": fixed_level,
+        "enemy_role": role_key,
+        "enemy_role_label": role["label"],
+        "enemy_speed": enemy_speed,
+        "enemy_evade_chance": int(role.get("evade_chance", 0)),
+        "enemy_drain_chance": int(role.get("drain_chance", 0)),
+        "enemy_drain_min": int(role.get("drain_min", 0)),
+        "enemy_drain_max": int(role.get("drain_max", 0)),
+        "enemy_is_elite": is_elite,
+        "reward_mult": round(max(1.0, float(reward_mult or 1.0)), 2),
+    }
+
+
 def _roll_initiative(player, enemy_speed: int) -> dict:
     """Бросок инициативы d20 + модификаторы."""
     player_perception = int(getattr(player, "effective_perception", getattr(player, "perception", 0)) or 0)
@@ -2865,6 +2921,100 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
     _send_combat_screen(vk, user_id, message, keyboard=keyboard.get_keyboard())
 
 
+def _build_dungeon_wave(player, user_id: int, dungeon_run: dict) -> tuple[dict | None, str | None]:
+    """Создать боевое состояние и стартовый текст волны оружейного данжа."""
+    dungeon_id = str(dungeon_run.get("id") or "")
+    base_enemy = enemies.get_enemy_for_location(dungeon_id)
+    if not base_enemy:
+        return None, None
+
+    wave = max(1, int(dungeon_run.get("wave", 1) or 1))
+    waves_total = max(wave, int(dungeon_run.get("waves_total", 3) or 3))
+    enemy_level = max(1, int(dungeon_run.get("enemy_level", 1) or 1))
+    scaled_enemy = _scale_enemy_for_fixed_level(
+        player,
+        base_enemy,
+        enemy_level + max(0, wave - 1) * 2,
+        reward_mult=float(dungeon_run.get("reward_mult", 1.0) or 1.0),
+        allow_elite=wave >= waves_total,
+    )
+    initiative = _roll_initiative(player, scaled_enemy["enemy_speed"])
+    combat = {
+        "combat_id": f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}",
+        "enemy_name": scaled_enemy["enemy_name"],
+        "enemy_hp": scaled_enemy["enemy_hp"],
+        "enemy_max_hp": scaled_enemy["enemy_max_hp"],
+        "enemy_damage": scaled_enemy["enemy_damage"],
+        "enemy_description": scaled_enemy["enemy_description"],
+        "enemy_level": scaled_enemy["enemy_level"],
+        "enemy_role": scaled_enemy["enemy_role"],
+        "enemy_role_label": scaled_enemy["enemy_role_label"],
+        "enemy_speed": scaled_enemy["enemy_speed"],
+        "enemy_evade_chance": scaled_enemy["enemy_evade_chance"],
+        "enemy_drain_chance": scaled_enemy["enemy_drain_chance"],
+        "enemy_drain_min": scaled_enemy["enemy_drain_min"],
+        "enemy_drain_max": scaled_enemy["enemy_drain_max"],
+        "enemy_is_elite": scaled_enemy["enemy_is_elite"],
+        "reward_mult": scaled_enemy["reward_mult"],
+        "initiative_player": initiative["player_total"],
+        "initiative_enemy": initiative["enemy_total"],
+        "turn": "player",
+        "location_id": dungeon_id,
+        "dungeon_run": dict(dungeon_run),
+        "suppress_standard_reward": True,
+    }
+
+    message = (
+        f"{ui.title(dungeon_run.get('name', 'Оружейный данж'))}\n\n"
+        f"{dungeon_run.get('threat_label', 'Угроза')} | Волна {wave}/{waves_total}\n"
+        f"В коридоре появляется {scaled_enemy['enemy_name']}.\n\n"
+        f"{scaled_enemy['enemy_description']}\n\n"
+        f"{ui.section('Угроза')}\n"
+        f"Опасность: L{scaled_enemy['enemy_level']} | Поведение: {scaled_enemy['enemy_role_label']}\n"
+        f"HP: {scaled_enemy['enemy_hp']} | Урон: {scaled_enemy['enemy_damage']}\n\n"
+        f"{ui.section('Инициатива')}\n"
+        f"Ты: d20({initiative['player_roll']}) → {initiative['player_total']}\n"
+        f"Враг: d20({initiative['enemy_roll']}) → {initiative['enemy_total']}\n"
+    )
+
+    if not initiative["player_first"]:
+        enemy_damage = combat["enemy_damage"]
+        total_defense = int(getattr(player, "total_defense", 0) or 0)
+        dodge_chance = int(getattr(player, "dodge_chance", 0) or 0)
+        current_hp = int(getattr(player, "health", 100) or 100)
+        max_hp = int(getattr(player, "max_health", max(current_hp, 1)) or max(current_hp, 1))
+        if random.randint(1, 100) <= dodge_chance:
+            message += "\n⚡ Враг начал первым, но ты ушёл с линии атаки.\n"
+        else:
+            final_damage, hit_cap = _calculate_incoming_damage(player, enemy_damage, total_defense)
+            player.health = max(1, current_hp - final_damage)
+            database.update_user_stats(user_id, health=player.health)
+            message += (
+                "\n⚡ Враг сорвался первым.\n"
+                f"Получен урон: {final_damage} (защита: {total_defense})\n"
+                f"HP: {player.health}/{max_hp}\n"
+            )
+            if hit_cap:
+                message += "Осторожный темп вылазки смягчил первый удар.\n"
+    else:
+        message += "\n✅ Ты перехватил инициативу.\n"
+
+    message += "\nТвой ход."
+    return combat, message
+
+
+def start_dungeon_combat(player, vk, user_id: int, dungeon_run: dict) -> bool:
+    """Запустить первую или следующую волну оружейного данжа."""
+    combat, message = _build_dungeon_wave(player, user_id, dungeon_run)
+    if not combat or not message:
+        return False
+    _hide_lower_keyboard_for_combat(vk, user_id)
+    _combat_state[user_id] = combat
+    _combat_log("dungeon_wave_spawn", user_id, player, combat, dungeon_run=dungeon_run)
+    _send_combat_screen(vk, user_id, message, keyboard=create_combat_keyboard(player, user_id).get_keyboard())
+    return True
+
+
 def _spawn_item(player, vk, user_id: int):
     """Спавн предмета (с учётом локации)"""
     _combat_state, create_location_keyboard, _, _ = _get_main_imports()
@@ -3522,7 +3672,9 @@ def use_skill(player, vk, user_id: int, skill_name: str):
             victory_message = _handle_victory(player, combat, user_id, vk=vk)
             from handlers.keyboards import create_resume_keyboard
             victory_keyboard = None
-            if not _will_continue_mutant_hunt(combat):
+            if _combat_state.get(user_id) and _combat_state.get(user_id).get("dungeon_run"):
+                victory_keyboard = create_combat_keyboard(player, user_id).get_keyboard()
+            elif not _will_continue_mutant_hunt(combat):
                 victory_keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard()
             vk.messages.send(
                 user_id=user_id,
@@ -3572,7 +3724,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
     if "double_shot" in effect:
         second_mult = effect.get("second_damage_mult", 0.7)
 
-        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
+        weapon_damage, _, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         first_damage = weapon_damage + melee
         first_damage, _ = _apply_weapon_damage_bonus(player, first_damage)
@@ -3606,7 +3758,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         burst_count = effect.get("burst_count", 3)
         burst_damage = effect.get("burst_damage", 0.4)
 
-        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
+        weapon_damage, _, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         base_damage = weapon_damage + melee
         base_damage, _ = _apply_weapon_damage_bonus(player, base_damage)
@@ -3637,7 +3789,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         mult = effect.get("damage_mult", 2.5)
         cannot_dodge = effect.get("cannot_dodge", False)
 
-        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
+        weapon_damage, _, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         base_damage = weapon_damage + melee
         base_damage, _ = _apply_weapon_damage_bonus(player, base_damage)
@@ -3668,7 +3820,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
         burst_count = effect.get("burst_count", 5)
         burst_damage = effect.get("burst_damage", 0.3)
 
-        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
+        weapon_damage, _, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         base_damage = weapon_damage + melee
         base_damage, _ = _apply_weapon_damage_bonus(player, base_damage)
@@ -3699,7 +3851,7 @@ def _apply_skill_effect(player, vk, user_id: int, skill: dict, combat: dict, eff
     elif "ignore_defense" in effect:
         ignore_def = effect.get("ignore_defense", 20)
 
-        weapon_damage, _, _ = _resolve_player_weapon(player, user_id=user_id)
+        weapon_damage, _, _, _ = _resolve_player_weapon(player, user_id=user_id)
         melee = player.melee_damage
         base_damage = weapon_damage + melee
         base_damage, _ = _apply_weapon_damage_bonus(player, base_damage)
@@ -3782,15 +3934,16 @@ def get_active_effects(user_id: int) -> dict:
     return _active_skill_effects.get(user_id, {})
 
 
-def _resolve_player_weapon(player, user_id: int | None = None) -> tuple[int, str | None, bool]:
+def _resolve_player_weapon(player, user_id: int | None = None) -> tuple[int, str | None, bool, dict | None]:
     """Вернуть урон экипированного оружия; если предмета уже нет — снять экипировку."""
     weapon_damage = 0
     weapon_name = None
     weapon_is_knife = False
+    event_bonus = None
 
     equipped_name = getattr(player, "equipped_weapon", None)
     if not equipped_name:
-        return weapon_damage, weapon_name, weapon_is_knife
+        return weapon_damage, weapon_name, weapon_is_knife, event_bonus
 
     player.inventory.reload()
     inv_weapon = next((w for w in player.inventory.weapons if w.get("name") == equipped_name), None)
@@ -3798,17 +3951,27 @@ def _resolve_player_weapon(player, user_id: int | None = None) -> tuple[int, str
         player.equipped_weapon = None
         if user_id is not None:
             database.update_user_stats(user_id, equipped_weapon=None)
-        return weapon_damage, weapon_name, weapon_is_knife
+        return weapon_damage, weapon_name, weapon_is_knife, event_bonus
 
     weapon_name = equipped_name
     weapon_damage = int(inv_weapon.get('attack', 0) or 0)
+    try:
+        from game.weapon_progression import get_event_weapon_bonus
+
+        event_bonus = get_event_weapon_bonus(
+            inv_weapon,
+            int(inv_weapon.get("item_level", 1) or 1),
+            int(inv_weapon.get("weapon_ascension", 0) or 0),
+        )
+    except Exception:
+        event_bonus = None
     weapon_lower = weapon_name.lower()
     weapon_is_knife = (
         "knife" in weapon_lower or "machete" in weapon_lower or
         "bayonet" in weapon_lower or "dagger" in weapon_lower or
         "нож" in weapon_lower or "мачете" in weapon_lower
     )
-    return weapon_damage, weapon_name, weapon_is_knife
+    return weapon_damage, weapon_name, weapon_is_knife, event_bonus
 
 
 def _apply_weapon_damage_bonus(player, damage: int, *, weapon_is_knife: bool = False) -> tuple[int, int]:
@@ -3827,9 +3990,9 @@ def _apply_weapon_damage_bonus(player, damage: int, *, weapon_is_knife: bool = F
     return max(1, int(damage * multiplier)), bonus_pct
 
 
-def _apply_crit_damage_bonus(player, damage: int) -> tuple[int, int]:
+def _apply_crit_damage_bonus(player, damage: int, extra_crit_damage_pct: int = 0) -> tuple[int, int]:
     """Применить крит-множитель с учётом бонуса крит-урона класса."""
-    crit_bonus_pct = int(getattr(player, "crit_damage", 0) or 0)
+    crit_bonus_pct = int(getattr(player, "crit_damage", 0) or 0) + int(extra_crit_damage_pct or 0)
     crit_mult = 1.5 + (crit_bonus_pct / 100.0)
     return int(damage * crit_mult), crit_bonus_pct
 
@@ -3859,7 +4022,8 @@ def handle_combat_attack(player, vk, user_id: int):
     # === Проверяем активные эффекты ===
     active_effects = get_active_effects(user_id)
 
-    weapon_damage, weapon_name, weapon_is_knife = _resolve_player_weapon(player, user_id=user_id)
+    weapon_damage, weapon_name, weapon_is_knife, event_weapon_bonus = _resolve_player_weapon(player, user_id=user_id)
+    event_weapon_stats = (event_weapon_bonus or {}).get("stats") or {}
 
     melee = player.melee_damage
     total_damage = weapon_damage + melee
@@ -3877,9 +4041,12 @@ def handle_combat_attack(player, vk, user_id: int):
         del _active_skill_effects[user_id]["damage_boost"]
         _active_skill_effects[user_id].pop("damage_boost_mult", None)
 
-    is_crit = random.randint(1, 100) <= player.crit_chance
+    event_crit_chance = int(event_weapon_stats.get("crit_chance", 0) or 0)
+    event_crit_damage = int(event_weapon_stats.get("crit_damage", 0) or 0)
+    effective_crit_chance = max(0, min(95, int(player.crit_chance) + event_crit_chance))
+    is_crit = random.randint(1, 100) <= effective_crit_chance
     if is_crit:
-        total_damage, crit_bonus_pct = _apply_crit_damage_bonus(player, total_damage)
+        total_damage, crit_bonus_pct = _apply_crit_damage_bonus(player, total_damage, event_crit_damage)
     else:
         crit_bonus_pct = 0
 
@@ -3897,7 +4064,7 @@ def handle_combat_attack(player, vk, user_id: int):
     bleed_applied = False
     if weapon_is_knife:
         effective_luck = int(getattr(player, "effective_luck", player.luck) or player.luck)
-        bleed_chance = 30 + luck_bleed_chance_bonus(effective_luck)
+        bleed_chance = 30 + luck_bleed_chance_bonus(effective_luck) + int(event_weapon_stats.get("bleed_chance", 0) or 0)
         if random.randint(1, 100) <= bleed_chance:
             combat['bleed_turns'] = combat.get('bleed_turns', 0) + 3  # 3 хода кровотечения
             bleed_applied = True
@@ -3906,7 +4073,7 @@ def handle_combat_attack(player, vk, user_id: int):
     bleed_damage = 0
     if combat.get('bleed_turns', 0) > 0:
         effective_luck = int(getattr(player, "effective_luck", player.luck) or player.luck)
-        bleed_damage = 5 + luck_bleed_damage_bonus(effective_luck)
+        bleed_damage = 5 + luck_bleed_damage_bonus(effective_luck) + int(event_weapon_stats.get("bleed_damage", 0) or 0)
         combat['enemy_hp'] -= bleed_damage
         combat['bleed_turns'] -= 1
 
@@ -3914,6 +4081,12 @@ def handle_combat_attack(player, vk, user_id: int):
     damage_details = []
     if weapon_damage > 0:
         damage_details.append(f"Оружие {weapon_name}: {weapon_damage}")
+        if event_weapon_bonus:
+            try:
+                from game.weapon_progression import format_event_weapon_stats
+                damage_details.append(f"{event_weapon_bonus['name']}: {format_event_weapon_stats(event_weapon_stats)}")
+            except Exception:
+                pass
     damage_details.append(f"Рукопашный: {melee}")
     strength_per_level = max(0, int(getattr(config, "STRENGTH_DAMAGE_PER_LEVEL", 2) or 2))
     if strength_per_level > 0:
@@ -3926,7 +4099,7 @@ def handle_combat_attack(player, vk, user_id: int):
         damage_details.append(f"Контроль оружия до L{EARLY_WEAPON_MASTERY_CAP_LEVEL}: потолок {mastery_cap}")
 
     # Добавляем информацию о характеристиках
-    crit_chance = player.crit_chance
+    crit_chance = effective_crit_chance
     dodge_chance = player.dodge_chance
     total_defense = player.total_defense
 
@@ -3991,7 +4164,9 @@ def handle_combat_attack(player, vk, user_id: int):
         victory_message = _handle_victory(player, combat, user_id, vk=vk)
         from handlers.keyboards import create_resume_keyboard
         keyboard = None
-        if not _will_continue_mutant_hunt(combat):
+        if _combat_state.get(user_id) and _combat_state.get(user_id).get("dungeon_run"):
+            keyboard = create_combat_keyboard(player, user_id).get_keyboard()
+        elif not _will_continue_mutant_hunt(combat):
             keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard()
         vk.messages.send(
             user_id=user_id,
@@ -4315,6 +4490,9 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
 
     del _combat_state[user_id]
 
+    if combat.get("dungeon_run"):
+        return _handle_dungeon_wave_victory(player, combat, user_id)
+
     reward_mult = max(1.0, float(combat.get("reward_mult", 1.0)))
     if is_emission_aftermath_active():
         reward_mult *= max(1.0, float(getattr(config, "EMISSION_BONUS_COMBAT_REWARD_MULT", 1.0) or 1.0))
@@ -4376,6 +4554,16 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     active_limited = get_active_limited_event()
     if active_limited and abs(event_reward_mult - 1.0) > 0.01:
         message += f"🌐 Ивент «{active_limited.get('name')}»: награда x{event_reward_mult:.2f}\n"
+    from game.gacha.service import grant_combat_shards
+
+    shard_reward = grant_combat_shards(
+        user_id,
+        int(combat.get("enemy_level", 1) or 1),
+        reward_mult,
+        int(getattr(player, "level", 1) or 1),
+    )
+    if shard_reward.get("granted", 0) > 0:
+        message += f"💠 Осколки сигнала: +{shard_reward['granted']}\n"
 
     if added_shells < shells_drop:
         message += f"⚠️ Гильзы не влезли полностью: {msg}\n"
@@ -4413,6 +4601,64 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     )
 
     return message
+
+
+def _handle_dungeon_wave_victory(player, combat: dict, user_id: int) -> str:
+    """Победа в волне оружейного данжа: следующая волна или финальная награда."""
+    dungeon_run = dict(combat.get("dungeon_run") or {})
+    wave = max(1, int(dungeon_run.get("wave", 1) or 1))
+    waves_total = max(wave, int(dungeon_run.get("waves_total", 3) or 3))
+    player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
+
+    if wave < waves_total:
+        next_run = {**dungeon_run, "wave": wave + 1}
+        next_combat, next_message = _build_dungeon_wave(player, user_id, next_run)
+        if next_combat and next_message:
+            _combat_state[user_id] = next_combat
+            _combat_log("dungeon_wave_continue", user_id, player, next_combat, dungeon_run=next_run)
+            return (
+                f"{ui.title('Волна пройдена')}\n"
+                f"{dungeon_run.get('threat_label', 'Угроза')} | Волна {wave}/{waves_total} закрыта.\n\n"
+                f"{ui.section('Состояние')}\n"
+                f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)\n"
+                f"Энергия {ui.bar(player.energy, _max_energy(player), width=14)} {player.energy}/{_max_energy(player)}\n\n"
+                f"{next_message}"
+            )
+
+    from game.weapon_dungeons import grant_warehouse17_rewards
+    from game.gacha.service import grant_dungeon_shards
+
+    rewards = grant_warehouse17_rewards(user_id, str(dungeon_run.get("threat_id") or "i"))
+    shard_reward = grant_dungeon_shards(user_id, str(dungeon_run.get("threat_id") or "i"))
+    try:
+        player.inventory.reload()
+    except Exception:
+        pass
+
+    reward_lines = [f"{item_name} x{qty}" for item_name, qty in rewards]
+    _combat_log(
+        "dungeon_completed",
+        user_id,
+        player,
+        combat,
+        dungeon_run=dungeon_run,
+        rewards=rewards,
+    )
+    return (
+        f"{ui.title('Склад 17 зачищен')}\n"
+        f"{dungeon_run.get('threat_label', 'Угроза')} | Волны: {waves_total}/{waves_total}\n\n"
+        "Последний противник падает между ящиками снабжения. "
+        "Резонанс в металле стихает, и можно разобрать контейнеры.\n\n"
+        f"{ui.section('Материалы оружия')}\n"
+        + "\n".join(reward_lines)
+        + (f"\n💠 Осколки сигнала: +{shard_reward['granted']}" if shard_reward.get("granted", 0) > 0 else "")
+        + "\n\n"
+        "Прокачка доступна на верстаке в убежище:\n"
+        "улучшить оружие <название> / прорыв оружия <название>\n\n"
+        f"{ui.section('Состояние')}\n"
+        f"HP      {player_hp_bar} {player.health}/{player.max_health} ({ui.pct(player.health, player.max_health)}%)\n"
+        f"Энергия {ui.bar(player.energy, _max_energy(player), width=14)} {player.energy}/{_max_energy(player)}\n"
+    )
 
 
 def _maybe_continue_mutant_hunt(player, combat: dict, user_id: int, vk):

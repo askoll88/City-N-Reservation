@@ -1327,11 +1327,8 @@ def handle_cancel_heal(player, vk, user_id: int):
 
 def get_status(player, vk, user_id: int):
     """Показать статус персонажа"""
-    from infra.state_manager import try_edit_or_send
-    try_edit_or_send(
-        vk, user_id,
-        message=player.get_status(),
-    )
+    from handlers.status import show_status_page
+    show_status_page(player, vk, user_id, page=0)
 
 
 def show_welcome(vk, user_id: int):

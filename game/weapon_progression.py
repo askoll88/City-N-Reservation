@@ -1,12 +1,13 @@
 """
 Уровневый конвейер оружия.
 
-Шаблон предмета задаёт тип оружия, а конкретный экземпляр в инвентаре
-получает уровень и ранг. Урон считается от уровня + ранга, а не от старого
-плоского attack из справочника.
+Шаблон предмета задаёт базовый ATK, а конкретный экземпляр в инвентаре
+получает уровень, ранг и стадию прорыва. Прокачка масштабирует ATK
+процентно от базы, поэтому новое оружие падает L1, но не теряет свою основу.
 """
 from __future__ import annotations
 
+from game.gacha.event_items import get_event_weapon_stat_profile
 from models.enemies import get_weapon_type
 
 WEAPON_RANKS = {
@@ -24,6 +25,68 @@ TYPE_MULT = {
     "дробовик": 1.12,
     "пулемет": 1.05,
     "снайперка": 1.25,
+}
+
+DEFAULT_BASE_ATTACK_BY_TYPE = {
+    "нож": 18,
+    "пистолет": 24,
+    "автомат": 44,
+    "дробовик": 50,
+    "пулемет": 56,
+    "снайперка": 62,
+}
+
+EVENT_WEAPON_STAT_LABELS = {
+    "crit_chance": "Крит. шанс",
+    "crit_damage": "Крит. урон",
+    "bleed_chance": "Шанс кровотечения",
+    "bleed_damage": "Урон кровотечения",
+}
+
+MAX_WEAPON_LEVEL = 297
+ASCENSION_CAPS = [10, 20, 40, 60, 90, 120, 150, 180, 210, 250, 297]
+
+# 24 ранга игрока растягивают 10 прорывов оружия. Высокий ранг позволяет
+# прокачать даже новое L1-оружие сразу до своего текущего доступного диапазона.
+RANK_ASCENSION_LIMITS = [
+    (1, 0),
+    (2, 1),
+    (4, 2),
+    (6, 3),
+    (8, 4),
+    (10, 5),
+    (12, 6),
+    (14, 7),
+    (16, 8),
+    (19, 9),
+    (24, 10),
+]
+
+WEAPON_XP_MATERIALS = {
+    "Оружейный конденсат": 120,
+    "Полевой оружейный журнал": 420,
+    "Армейский калибратор": 1200,
+}
+
+ASCENSION_MATERIALS = {
+    "Резонансная пластина",
+    "Армейский калибровочный набор",
+    "Закалённый ствол",
+    "Ядро оружейного резонанса",
+}
+WEAPON_MATERIALS = frozenset({*WEAPON_XP_MATERIALS.keys(), *ASCENSION_MATERIALS})
+
+ASCENSION_COSTS = {
+    1: {"Резонансная пластина": 2},
+    2: {"Резонансная пластина": 4},
+    3: {"Резонансная пластина": 6, "Армейский калибровочный набор": 1},
+    4: {"Армейский калибровочный набор": 3},
+    5: {"Армейский калибровочный набор": 5, "Закалённый ствол": 1},
+    6: {"Закалённый ствол": 3},
+    7: {"Закалённый ствол": 5},
+    8: {"Закалённый ствол": 7, "Ядро оружейного резонанса": 1},
+    9: {"Ядро оружейного резонанса": 2},
+    10: {"Ядро оружейного резонанса": 4},
 }
 
 
@@ -81,22 +144,137 @@ def get_weapon_required_level(item: dict | None) -> int:
 
 
 def clamp_weapon_level(level: int | None, player_level: int, item: dict | None = None) -> int:
-    player_level = max(1, int(player_level or 1))
-    required = get_weapon_required_level(item)
-    raw = int(level or min(player_level, required))
-    return max(1, min(player_level, raw))
+    raw = int(level or 1)
+    return max(1, min(MAX_WEAPON_LEVEL, raw))
 
 
-def calc_weapon_attack(item: dict | None, weapon_level: int | None, weapon_rank: str | None) -> int:
+def normalize_weapon_ascension(value: int | None) -> int:
+    return max(0, min(10, int(value or 0)))
+
+
+def get_weapon_cap(ascension: int | None) -> int:
+    return ASCENSION_CAPS[normalize_weapon_ascension(ascension)]
+
+
+def get_rank_ascension_limit(rank_tier: int | None) -> int:
+    tier = max(1, int(rank_tier or 1))
+    result = 0
+    for required_tier, ascension in RANK_ASCENSION_LIMITS:
+        if tier >= required_tier:
+            result = ascension
+    return result
+
+
+def get_rank_weapon_level_cap(rank_tier: int | None) -> int:
+    return get_weapon_cap(get_rank_ascension_limit(rank_tier))
+
+
+def weapon_xp_to_next_level(level: int) -> int:
+    lvl = max(1, min(MAX_WEAPON_LEVEL - 1, int(level or 1)))
+    return int(80 + lvl * 22 + (lvl // 20) * 90)
+
+
+def weapon_total_xp_for_level(level: int) -> int:
+    lvl = max(1, min(MAX_WEAPON_LEVEL, int(level or 1)))
+    return sum(weapon_xp_to_next_level(i) for i in range(1, lvl))
+
+
+def weapon_level_from_total_xp(total_xp: int, cap: int) -> tuple[int, int]:
+    cap = max(1, min(MAX_WEAPON_LEVEL, int(cap or 1)))
+    remaining = max(0, int(total_xp or 0))
+    level = 1
+    while level < cap:
+        need = weapon_xp_to_next_level(level)
+        if remaining < need:
+            break
+        remaining -= need
+        level += 1
+    return level, remaining if level < cap else 0
+
+
+def get_weapon_base_attack(item: dict | None) -> int:
     if not is_weapon(item):
         return int((item or {}).get("attack", 0) or 0)
-    level = max(1, int(weapon_level or get_weapon_required_level(item)))
-    rank = normalize_weapon_rank(weapon_rank, item)
+    raw = int((item or {}).get("base_attack") or (item or {}).get("attack") or 0)
+    if raw > 0:
+        return raw
     weapon_type = get_weapon_type((item or {}).get("name"))
-    type_mult = TYPE_MULT.get(weapon_type, 1.0)
+    return DEFAULT_BASE_ATTACK_BY_TYPE.get(weapon_type, 30)
+
+
+def _weapon_progress_multiplier(weapon_level: int | None) -> float:
+    """ATK растёт от каждого уровня оружия; прорыв только открывает следующий кап."""
+    level = max(1, min(MAX_WEAPON_LEVEL, int(weapon_level or 1)))
+    level_ratio = (level - 1) / max(1, MAX_WEAPON_LEVEL - 1)
+    return 0.50 + level_ratio * 3.05
+
+
+def calc_weapon_attack(
+    item: dict | None,
+    weapon_level: int | None,
+    weapon_rank: str | None,
+    weapon_ascension: int | None = 0,
+) -> int:
+    if not is_weapon(item):
+        return int((item or {}).get("attack", 0) or 0)
+    level = max(1, int(weapon_level or 1))
+    rank = normalize_weapon_rank(weapon_rank, item)
     rank_mult = WEAPON_RANKS[rank]["mult"]
-    base = 10 + level * 3.2
-    return max(1, int(base * type_mult * rank_mult))
+    base_attack = get_weapon_base_attack(item)
+    return max(1, int(base_attack * _weapon_progress_multiplier(level) * rank_mult))
+
+
+def _event_weapon_stat_ratio(weapon_level: int | None, weapon_ascension: int | None = 0) -> float:
+    """Ивент-доп. стат растёт только после прорывов оружия."""
+    ascension = normalize_weapon_ascension(weapon_ascension)
+    return ascension / 10
+
+
+def calc_event_weapon_bonus_stats(
+    item: dict | None,
+    weapon_level: int | None,
+    weapon_ascension: int | None = 0,
+) -> dict[str, int]:
+    name = str((item or {}).get("name") or "").strip()
+    profile = get_event_weapon_stat_profile(name)
+    if not profile or not is_weapon(item):
+        return {}
+    ratio = _event_weapon_stat_ratio(weapon_level, weapon_ascension)
+    result: dict[str, int] = {}
+    for stat_name, bounds in (profile.get("stats") or {}).items():
+        start, finish = bounds
+        value = int(round(float(start) + (float(finish) - float(start)) * ratio))
+        if value:
+            result[str(stat_name)] = value
+    return result
+
+
+def get_event_weapon_bonus(
+    item: dict | None,
+    weapon_level: int | None,
+    weapon_ascension: int | None = 0,
+) -> dict | None:
+    name = str((item or {}).get("name") or "").strip()
+    profile = get_event_weapon_stat_profile(name)
+    if not profile or not is_weapon(item):
+        return None
+    stats = calc_event_weapon_bonus_stats(item, weapon_level, weapon_ascension)
+    if not stats:
+        return None
+    return {
+        "name": profile["name"],
+        "description": profile["description"],
+        "stats": stats,
+    }
+
+
+def format_event_weapon_stats(stats: dict | None) -> str:
+    parts = []
+    for stat_name, value in (stats or {}).items():
+        label = EVENT_WEAPON_STAT_LABELS.get(stat_name, stat_name)
+        suffix = "" if stat_name == "bleed_damage" else "%"
+        parts.append(f"{label} +{int(value)}{suffix}")
+    return ", ".join(parts)
 
 
 def roll_weapon_rank(player_level: int, item: dict | None = None) -> str:

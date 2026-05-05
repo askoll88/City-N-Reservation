@@ -210,6 +210,7 @@ def _artifact_effect_lines(item_name: str) -> list[str]:
 def build_item_details(item: dict) -> str:
     """Красивый блок с подробностями по предмету."""
     from game.gacha.event_items import is_ssr_event_item
+    from game.weapon_progression import format_event_weapon_stats, get_event_weapon_bonus
 
     name = item.get("name", "Неизвестный предмет")
     category = item.get("category", "other")
@@ -237,6 +238,21 @@ def build_item_details(item: dict) -> str:
     backpack_bonus = int(item.get("backpack_bonus", 0) or 0)
     if attack:
         lines.append(f"🔫 Урон: {attack}")
+        if item.get("item_level"):
+            lines.append(f"📈 Уровень оружия: L{item.get('item_level')}/{item.get('weapon_cap', item.get('required_level', 1))}")
+            lines.append(f"⏫ Прорыв: {item.get('weapon_ascension', 0)}/10")
+            if item.get("weapon_xp") is not None:
+                lines.append(f"🧩 Опыт уровня: {int(item.get('weapon_xp') or 0)}")
+        event_bonus = get_event_weapon_bonus(
+            item,
+            int(item.get("item_level", 1) or 1),
+            int(item.get("weapon_ascension", 0) or 0),
+        )
+        if event_bonus:
+            lines.append("")
+            lines.append(ui.section("Доп. стат оружия"))
+            lines.append(f"{event_bonus['name']}: {format_event_weapon_stats(event_bonus['stats'])}")
+            lines.append(event_bonus["description"])
     if defense:
         lines.append(f"🛡️ Защита: {defense}")
     if backpack_bonus:
@@ -296,7 +312,7 @@ def _get_inventory_item_by_target(player, target: str) -> tuple[dict | None, str
     if not item:
         return None, f"Предмет '{target}' не найден в инвентаре."
     full = database.get_item_by_name(item["name"])
-    return (full or item), None
+    return ({**full, **item} if full else item), None
 
 
 def handle_inventory_digit(player, text: str, vk, user_id: int) -> bool:
@@ -539,7 +555,12 @@ def show_weapons(player, vk, user_id: int):
                 "🔫",
                 [
                     f"Урон {item.get('attack', 0)}",
-                    f"L{item.get('item_level', 1)}/{item.get('required_level', 1)}",
+                    *(
+                        [f"{item.get('event_bonus_name')}: {item.get('event_bonus_text')}"]
+                        if item.get("event_bonus_text") else []
+                    ),
+                    f"L{item.get('item_level', 1)}/{item.get('weapon_cap', item.get('required_level', 1))}",
+                    f"Прорыв {item.get('weapon_ascension', 0)}/10",
                     f"Ранг {item.get('item_rank', 'common')}",
                 ],
                 equipped=item['name'] == player.equipped_weapon,
@@ -1826,8 +1847,12 @@ def show_trader_shop_all(player, vk, user_id: int):
             stat_parts = []
             if attack > 0:
                 stat_parts.append(f"Урон {attack}")
+            if item.get("event_bonus_text"):
+                stat_parts.append(f"{item.get('event_bonus_name')}: {item.get('event_bonus_text')}")
             if item.get("item_level"):
-                stat_parts.append(f"L{item.get('item_level')}/{item.get('required_level', 1)}")
+                stat_parts.append(f"L{item.get('item_level')}/{item.get('weapon_cap', item.get('required_level', 1))}")
+            if item.get("weapon_ascension"):
+                stat_parts.append(f"Прорыв {item.get('weapon_ascension')}/10")
             if item.get("item_rank"):
                 stat_parts.append(f"Ранг {item.get('item_rank')}")
             if defense > 0:

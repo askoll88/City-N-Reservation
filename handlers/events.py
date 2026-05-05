@@ -148,7 +148,13 @@ def _process_event_choice(player, vk, user_id: int, event: dict, choice_index: i
         return True
 
     # Событие завершено — очищаем pending
-    _finish_event(player, vk, user_id, result["message"])
+    message = result["message"]
+    from game.gacha.service import grant_event_shards
+
+    shard_reward = grant_event_shards(user_id, event, result)
+    if shard_reward.get("granted", 0) > 0:
+        message += f"\n💠 Осколки сигнала: +{shard_reward['granted']}"
+    _finish_event(player, vk, user_id, message)
     return True
 
 

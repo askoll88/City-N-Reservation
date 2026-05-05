@@ -16,6 +16,7 @@ class LocationType(Enum):
     NII_ROAD = "дорога_нии"
     INFECTED_FOREST = "дорога_зараженный_лес"
     MILITARY_BASE = "военная_часть"
+    WAREHOUSE_17 = "склад_17"
     NII_MAIN_BUILDING = "главный_корпус_нии"
     INFECTED_FOREST_DEEP = "зараженный_лес"
 
@@ -63,6 +64,8 @@ COMMANDS = {
     'дорога на нии': 'location:дорога_нии',
     'дорога на зараженный лес': 'location:дорога_зараженный_лес',
     'военная часть': 'location:военная_часть',
+    'склад 17': 'location:склад_17',
+    'оружейный бункер': 'location:склад_17',
     'главный корпус нии': 'location:главный_корпус_нии',
     'зараженный лес': 'location:зараженный_лес',
     
@@ -105,7 +108,9 @@ COMMANDS = {
     'говорить': 'talk',
     'диалог': 'talk',
     'крафт': 'craft_menu',
-    'верстак': 'craft_menu',
+    'верстак': 'workbench_menu',
+    'улучшение оружия': 'weapon_upgrade_menu',
+    'прокачка оружия': 'weapon_upgrade_menu',
     'рецепты': 'craft_menu',
     'скрафтить': 'craft_build',
     'шкаф': 'storage_menu',
@@ -140,6 +145,7 @@ COMMANDS = {
 # === Исследовательские локации ===
 RESEARCH_LOCATIONS = [
     LocationType.MILITARY_ROAD.value,
+    LocationType.WAREHOUSE_17.value,
     LocationType.MILITARY_BASE.value,
     LocationType.NII_ROAD.value,
     LocationType.NII_MAIN_BUILDING.value,
@@ -163,6 +169,19 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "rare_weapons": 4,
         "rare_armor": 3,
         "resources": 4,
+    },
+    LocationType.WAREHOUSE_17.value: {
+        "weapons": 6,
+        "armor": 4,
+        "meds": 6,
+        "food": 4,
+        "consumables": 10,
+        "other": 8,
+        "trash": 38,
+        "artifacts": 0,
+        "rare_weapons": 2,
+        "rare_armor": 1,
+        "resources": 24,
     },
     LocationType.NII_ROAD.value: {
         "weapons": 10,
@@ -235,6 +254,7 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
 # Если локации нет в таблице — используем fallback: min=1, max=100.
 LOCATION_LEVEL_THRESHOLDS = {
     LocationType.MILITARY_ROAD.value: {"min": 1, "max": 7},
+    LocationType.WAREHOUSE_17.value: {"min": 3, "max": 12},
     LocationType.NII_ROAD.value: {"min": 4, "max": 10},
     LocationType.INFECTED_FOREST.value: {"min": 8, "max": 14},
     LocationType.MILITARY_BASE.value: {"min": 10, "max": 17},
@@ -247,6 +267,10 @@ LOCATION_LEVEL_THRESHOLDS = {
 # Не влияет на доступность входа игрока в локацию.
 LOCATION_DROP_BALANCE_RULES = {
     LocationType.MILITARY_ROAD.value: {
+        "max_price": 5_000,
+        "max_rarity": "rare",
+    },
+    LocationType.WAREHOUSE_17.value: {
         "max_price": 5_000,
         "max_rarity": "rare",
     },

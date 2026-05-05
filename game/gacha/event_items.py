@@ -56,6 +56,39 @@ SSR_ITEM_IMAGES = {
 
 SSR_EVENT_ITEM_NAMES = set(SSR_ITEM_LORE)
 
+EVENT_WEAPON_STAT_PROFILES = {
+    "АК-74 «Резонанс»": {
+        "name": "Стабилизатор резонанса",
+        "description": "короткие очереди лучше ловят слабые места цели",
+        "stats": {"crit_chance": (4, 12)},
+    },
+    "Винторез «Тихий Сигнал»": {
+        "name": "Тихий сигнал",
+        "description": "попадание в уязвимую точку сильнее раскачивает поле вокруг цели",
+        "stats": {"crit_damage": (12, 32)},
+    },
+    "Нож «Осколок Разлома»": {
+        "name": "Осколочный разрез",
+        "description": "клинок легче оставляет кровоточащий разлом после удара",
+        "stats": {"bleed_chance": (8, 20), "bleed_damage": (2, 12)},
+    },
+    "ПМ «Сбой»": {
+        "name": "Срыв синхронизации",
+        "description": "нестабильный импульс слегка повышает шанс критического попадания",
+        "stats": {"crit_chance": (2, 7)},
+    },
+    "ИЖ-27 «Глухой Отклик»": {
+        "name": "Глухой отклик",
+        "description": "критическое попадание отдаёт коротким резонансным толчком",
+        "stats": {"crit_damage": (6, 18)},
+    },
+}
+
+
+def get_event_weapon_stat_profile(item_name: str | None) -> dict | None:
+    """Профиль наследуемого доп. стата для ивентового оружия."""
+    return EVENT_WEAPON_STAT_PROFILES.get(str(item_name or "").strip())
+
 
 GACHA_EVENT_ITEMS = [
     (

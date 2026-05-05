@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from infra import database
 
@@ -23,7 +24,18 @@ from .banners import (
     RewardEntry,
     get_banner,
 )
-from .event_items import AWAKENING_SHARD, is_gacha_event_item
+from .event_items import is_gacha_event_item
+
+
+DUPLICATE_SSR_PULLS = 5
+DUPLICATE_SSR_SHARDS = SINGLE_PULL_COST * DUPLICATE_SSR_PULLS
+SIGNAL_SHARDS_REWARD_NAME = "Осколки сигнала"
+EVENT_SHARDS_DAILY_CAP = 80
+COMBAT_SHARDS_DAILY_CAP = 120
+
+
+def _today_ordinal() -> int:
+    return datetime.now(timezone.utc).toordinal()
 
 
 @dataclass(frozen=True)
@@ -33,6 +45,7 @@ class PullReward:
     quantity: int = 1
     kind: str = "item"
     duplicate: bool = False
+    source_name: str | None = None
 
 
 def is_resonance_enabled() -> bool:
@@ -58,6 +71,103 @@ def add_signal_shards(vk_id: int, amount: int) -> int:
     updated = max(0, current + safe_amount)
     database.set_user_flag(vk_id, SIGNAL_SHARDS_FLAG, updated)
     return updated
+
+
+def add_signal_shards_capped(vk_id: int, amount: int, source: str, daily_cap: int) -> dict:
+    """Начислить осколки с дневным лимитом по источнику."""
+    safe_amount = max(0, int(amount or 0))
+    safe_cap = max(0, int(daily_cap or 0))
+    if safe_amount <= 0:
+        return {"granted": 0, "balance": get_signal_shards(vk_id), "cap": safe_cap, "used": 0}
+
+    key = str(source or "misc").strip().lower() or "misc"
+    day_flag = f"resonance_{key}_shards_day"
+    used_flag = f"resonance_{key}_shards_used"
+    today = _today_ordinal()
+    stored_day = int(database.get_user_flag(vk_id, day_flag, 0) or 0)
+    used = int(database.get_user_flag(vk_id, used_flag, 0) or 0) if stored_day == today else 0
+
+    grant = safe_amount
+    if safe_cap > 0:
+        grant = min(safe_amount, max(0, safe_cap - used))
+    if grant <= 0:
+        return {"granted": 0, "balance": get_signal_shards(vk_id), "cap": safe_cap, "used": used}
+
+    balance = add_signal_shards(vk_id, grant)
+    database.set_user_flag(vk_id, day_flag, today)
+    database.set_user_flag(vk_id, used_flag, used + grant)
+    return {"granted": grant, "balance": balance, "cap": safe_cap, "used": used + grant}
+
+
+def grant_daily_quest_shards(vk_id: int, streak: int) -> dict:
+    """Награда за полный комплект ежедневных заданий."""
+    safe_streak = max(1, int(streak or 1))
+    amount = 50 + min(30, safe_streak * 2)
+    if safe_streak >= 7:
+        amount += 20
+    if safe_streak >= 14:
+        amount += 20
+    if safe_streak >= 30:
+        amount += 30
+    return {"granted": amount, "balance": add_signal_shards(vk_id, amount), "cap": 0, "used": 0}
+
+
+def grant_event_shards(vk_id: int, event: dict, result: dict) -> dict:
+    """Малые осколки за полезный исход случайного/сюжетного события."""
+    if not result or result.get("invalid") or result.get("next_stage") is not None:
+        return {"granted": 0, "balance": get_signal_shards(vk_id), "cap": EVENT_SHARDS_DAILY_CAP, "used": 0}
+
+    message = str(result.get("message") or "").lower()
+    positive_markers = (
+        "+", "xp", "руб", "артефакт", "тайник", "схрон", "припас",
+        "координат", "цепочка завершена", "квест завершён", "квест завершен",
+    )
+    if not any(marker in message for marker in positive_markers):
+        return {"granted": 0, "balance": get_signal_shards(vk_id), "cap": EVENT_SHARDS_DAILY_CAP, "used": 0}
+
+    event_type = str((event or {}).get("type") or "").lower()
+    amount_by_type = {
+        "reward": 8,
+        "neutral": 5,
+        "danger": 10,
+        "story": 12,
+        "multi_stage": 22,
+    }
+    amount = amount_by_type.get(event_type, 6)
+    if "артефакт" in message:
+        amount += 8
+    if "тайник" in message or "схрон" in message:
+        amount += 4
+    if "цепочка завершена" in message or "квест заверш" in message:
+        amount = max(amount, 40)
+
+    return add_signal_shards_capped(vk_id, amount, "event", EVENT_SHARDS_DAILY_CAP)
+
+
+def grant_combat_shards(vk_id: int, enemy_level: int, reward_mult: float, player_level: int = 1) -> dict:
+    """Осколки за действительно сложные победы, с дневным лимитом."""
+    safe_enemy_level = max(1, int(enemy_level or 1))
+    safe_player_level = max(1, int(player_level or 1))
+    safe_mult = max(1.0, float(reward_mult or 1.0))
+    level_gap = safe_enemy_level - safe_player_level
+    if safe_mult < 1.45 and safe_enemy_level < 25 and level_gap < 5:
+        return {"granted": 0, "balance": get_signal_shards(vk_id), "cap": COMBAT_SHARDS_DAILY_CAP, "used": 0}
+
+    amount = 4 + max(0, int((safe_mult - 1.0) * 12)) + max(0, level_gap // 3) + safe_enemy_level // 30
+    amount = max(4, min(24, amount))
+    return add_signal_shards_capped(vk_id, amount, "combat", COMBAT_SHARDS_DAILY_CAP)
+
+
+def grant_dungeon_shards(vk_id: int, threat_id: str) -> dict:
+    amount_by_threat = {
+        "i": 8,
+        "ii": 12,
+        "iii": 18,
+        "iv": 26,
+        "v": 36,
+    }
+    amount = amount_by_threat.get(str(threat_id or "").strip().lower(), 8)
+    return add_signal_shards_capped(vk_id, amount, "combat", COMBAT_SHARDS_DAILY_CAP)
 
 
 def _flag_name(banner_id: str, suffix: str) -> str:
@@ -93,7 +203,13 @@ def _has_item(vk_id: int, item_name: str) -> bool:
     try:
         inventory_has = any(row.get("name") == item_name for row in database.get_user_inventory(vk_id))
         storage_has = any(row.get("name") == item_name for row in database.get_user_storage(vk_id))
-        return inventory_has or storage_has
+        user = database.get_user_by_vk(vk_id) or {}
+        equipped_has = any(
+            value == item_name
+            for key, value in user.items()
+            if str(key).startswith("equipped_")
+        )
+        return inventory_has or storage_has or equipped_has
     except Exception:
         return False
 
@@ -112,8 +228,15 @@ def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
         return fallback
 
     if reward.rarity == "SSR" and is_gacha_event_item(reward.name) and _has_item(vk_id, reward.name):
-        _grant_item_to_storage(vk_id, AWAKENING_SHARD, 1)
-        return PullReward(reward.rarity, AWAKENING_SHARD, 1, kind="item", duplicate=True)
+        add_signal_shards(vk_id, DUPLICATE_SSR_SHARDS)
+        return PullReward(
+            reward.rarity,
+            SIGNAL_SHARDS_REWARD_NAME,
+            DUPLICATE_SSR_SHARDS,
+            kind="currency",
+            duplicate=True,
+            source_name=reward.name,
+        )
 
     _grant_item_to_storage(vk_id, reward.name, reward.quantity)
     return reward
@@ -194,13 +317,14 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
     state = _get_banner_state(vk_id, banner.id)
     rewards = [_grant_reward(vk_id, _roll_one(banner, state)) for _ in range(count)]
     _save_banner_state(vk_id, banner.id, state)
+    shards_left = get_signal_shards(vk_id)
 
     return {
         "success": True,
         "banner": banner,
         "count": count,
         "cost": cost,
-        "shards_left": current_shards - cost,
+        "shards_left": shards_left,
         "rewards": rewards,
         "state": state,
     }
