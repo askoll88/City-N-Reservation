@@ -40,6 +40,10 @@ _research_timers = {}  # {user_id: {"start_time": timestamp, "time_sec": int, "p
 _skill_cooldowns = {}  # {user_id: {"skill_name": turns_remaining}}
 _active_skill_effects = {}  # {user_id: {"effect_name": turns_remaining, ...}}
 COMBAT_LOG_PATH = Path(__file__).resolve().parent.parent / "logs" / "combat.log"
+PRECISE_ANOMALY_SHELL_COST = 3
+PRECISE_ANOMALY_CHANCE_MULT = 1.35
+COMBAT_DECOY_SHELL_COST = 2
+COMBAT_DECOY_DAMAGE_MULT = 0.5
 
 
 def _send_combat_screen(vk, user_id: int, message: str, keyboard=None):
@@ -69,6 +73,15 @@ def show_current_combat_screen(player, vk, user_id: int, prefix: str | None = No
 def _send_anomaly_screen(vk, user_id: int, message: str, keyboard=None):
     """Обновить активный экран аномалии."""
     try_edit_or_send_ui(vk, user_id, "anomaly", message, keyboard=keyboard)
+
+
+def _format_anomaly_shell_throw_text(anomaly_name: str, shell_cost: int, precise_throw: bool) -> str:
+    if precise_throw:
+        return (
+            f"Ты бросил {shell_cost} гильзы в аномалию '{anomaly_name}'...\n"
+            "Точный разброс подсветил край безопасного окна."
+        )
+    return f"Ты бросил гильзу в аномалию '{anomaly_name}'..."
 
 
 def _hide_lower_keyboard_for_combat(vk, user_id: int):
@@ -1849,17 +1862,24 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 random_id=0
             )
 
-    elif action in {"бросить гильзу", "добыть", "извлечь"}:
+    elif action in {"бросить гильзу", "добыть", "извлечь", "точный бросок", "бросить 3 гильзы"}:
         # === НОВАЯ МЕХАНИКА: бросок гильзы ===
         shells = database.get_user_shells(user_id)
+        precise_throw = action in {"точный бросок", "бросить 3 гильзы"}
+        shell_cost = PRECISE_ANOMALY_SHELL_COST if precise_throw else 1
 
-        if shells <= 0:
+        if shells < shell_cost:
             # Нет гильз - показываем сообщение и возвращаем в меню аномалии
+            shortage_text = (
+                "У тебя нет гильз для добычи артефакта."
+                if shell_cost == 1
+                else f"Для точного броска нужно {shell_cost} гильзы."
+            )
             vk.messages.send(
                 user_id=user_id,
                 message=(
                     f"{anomaly_icon} НЕТ ГИЛЬЗ!\n\n"
-                    f"У тебя нет гильз для добычи артефакта.\n\n"
+                    f"{shortage_text}\n\n"
                     f"Сначала найди гильзы (выпадают с врагов или покупаются)."
                 ),
                 keyboard=create_location_keyboard(location_id).get_keyboard(),
@@ -1867,9 +1887,8 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
             )
             return
 
-        # Тратим одну гильзу
-        database.remove_shells(user_id, 1)
-        shells_after = shells - 1
+        database.remove_shells(user_id, shell_cost)
+        shells_after = shells - shell_cost
 
         # Получаем бонус детектора
         detector = anomalies_module.get_equipped_detector(player)
@@ -1879,6 +1898,8 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
         luck = int(getattr(player, "effective_luck", user.get('luck', 5)) or 5)
         from game.emission import get_emission_artifact_bonus
         artifact_bonus_mult = get_emission_artifact_bonus()
+        if precise_throw:
+            artifact_bonus_mult *= PRECISE_ANOMALY_CHANCE_MULT
         result = database.roll_artifact_from_anomaly(
             anomaly_type,
             luck,
@@ -1924,7 +1945,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 user_id=user_id,
                 message=(
                     f"{anomaly_icon} ✨ АРТЕФАКТ ПОЛУЧЕН! ✨\n\n"
-                    f"Ты бросил гильзу в аномалию '{anomaly_name}'...\n\n"
+                    f"{_format_anomaly_shell_throw_text(anomaly_name, shell_cost, precise_throw)}\n\n"
                     f"{rarity_emoji}{artifact_name}\n"
                     f"Редкость: {rarity}\n\n"
                     f"Гильз осталось: {shells_after}\n\n"
@@ -1943,6 +1964,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 action=action,
                 artifact=artifact_name,
                 rarity=rarity,
+                shell_cost=shell_cost,
                 shells_after=shells_after,
                 location_id=location_id,
             )
@@ -1955,6 +1977,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 anomaly=anomaly_name,
                 anomaly_type=anomaly_type,
                 action=action,
+                shell_cost=shell_cost,
                 shells_after=shells_after,
                 location_id=location_id,
             )
@@ -1962,8 +1985,8 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                 user_id=user_id,
                 message=(
                     f"{anomaly_icon} ПОПЫТКА ДОБЫЧИ\n\n"
-                    f"Ты бросил гильзу в аномалию '{anomaly_name}'...\n\n"
-                    f"Гильза сгорела в аномалии!\n"
+                    f"{_format_anomaly_shell_throw_text(anomaly_name, shell_cost, precise_throw)}\n\n"
+                    f"{'Гильзы сгорели' if shell_cost > 1 else 'Гильза сгорела'} в аномалии!\n"
                     f"Артефакт не выпал.\n\n"
                     f"Гильз осталось: {shells_after}"
                 ),
@@ -3039,7 +3062,7 @@ def create_combat_keyboard(player=None, user_id=None, *, inline: bool = True):
     )
     keyboard.add_line()
     # Кнопка навыков - показываем только если есть выбранная специализация.
-    if player and player.player_class:
+    if player and getattr(player, "player_class", None):
         keyboard.add_callback_button(
             "Навыки",
             color=VkKeyboardColor.SECONDARY,
@@ -3055,6 +3078,13 @@ def create_combat_keyboard(player=None, user_id=None, *, inline: bool = True):
             "Убежать",
             color=VkKeyboardColor.NEGATIVE,
             payload={**base_payload, "action": "flee"},
+        )
+    if user_id is not None and database.get_user_shells(user_id) >= COMBAT_DECOY_SHELL_COST:
+        keyboard.add_line()
+        keyboard.add_callback_button(
+            f"Отвлечь x{COMBAT_DECOY_SHELL_COST}",
+            color=VkKeyboardColor.SECONDARY,
+            payload={**base_payload, "action": "shell_decoy"},
         )
     return keyboard
 
@@ -3096,6 +3126,13 @@ def create_anomaly_keyboard(shells: int = 0, *, inline: bool = True):
             "Бросить гильзу",
             color=VkKeyboardColor.PRIMARY,
             payload={"command": "anomaly_action", "action": "extract"},
+        )
+    if int(shells or 0) >= PRECISE_ANOMALY_SHELL_COST:
+        keyboard.add_line()
+        keyboard.add_callback_button(
+            f"Точный бросок x{PRECISE_ANOMALY_SHELL_COST}",
+            color=VkKeyboardColor.SECONDARY,
+            payload={"command": "anomaly_action", "action": "extract_precise"},
         )
     keyboard.add_line()
     keyboard.add_callback_button(
@@ -4149,6 +4186,90 @@ def handle_combat_flee(player, vk, user_id: int):
             ),
             keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
         )
+
+def handle_combat_shell_decoy(player, vk, user_id: int):
+    """Потратить гильзы, чтобы сбить темп атаки врага."""
+    combat = _combat_state.get(user_id)
+    if not combat:
+        return
+
+    shells = database.get_user_shells(user_id)
+    if shells < COMBAT_DECOY_SHELL_COST:
+        _send_combat_screen(
+            vk,
+            user_id,
+            (
+                f"🎯 Нужно {COMBAT_DECOY_SHELL_COST} гильзы, чтобы отвлечь врага.\n"
+                f"Сейчас: {shells}.\n\n"
+                f"{_format_combat_hud(combat, player)}"
+            ),
+            keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
+        )
+        return
+
+    database.remove_shells(user_id, COMBAT_DECOY_SHELL_COST)
+    shells_after = max(0, shells - COMBAT_DECOY_SHELL_COST)
+    raw_damage = int(combat.get("enemy_damage", 1) or 1)
+    reduced_damage = max(1, int(raw_damage * COMBAT_DECOY_DAMAGE_MULT))
+    total_defense = int(getattr(player, "total_defense", 0) or 0)
+    final_damage, hit_cap = _calculate_incoming_damage(player, reduced_damage, total_defense)
+
+    player.health = max(0, int(getattr(player, "health", 0) or 0) - final_damage)
+    stamina_regen = _restore_energy_from_stamina(player)
+
+    _combat_log(
+        "combat_shell_decoy",
+        user_id,
+        player,
+        combat,
+        shell_cost=COMBAT_DECOY_SHELL_COST,
+        shells_after=shells_after,
+        raw_damage=raw_damage,
+        reduced_damage=reduced_damage,
+        final_damage=final_damage,
+        defense=total_defense,
+        stamina_regen=stamina_regen,
+        player_hp_after=player.health,
+        player_energy_after=player.energy,
+    )
+
+    if player.health <= 0:
+        database.update_user_stats(user_id, health=0, energy=player.energy)
+        if user_id in _combat_state:
+            del _combat_state[user_id]
+        _handle_death(
+            player,
+            vk,
+            user_id,
+            cause=f"Попытка отвлечь врага гильзами ({combat.get('enemy_name', 'враг')})",
+            killer_name=combat.get("enemy_name"),
+            final_damage=final_damage,
+        )
+        return
+
+    database.update_user_stats(user_id, health=player.health, energy=player.energy)
+    _decrease_cooldowns(user_id)
+    _combat_state[user_id] = combat
+
+    message = (
+        f"{ui.title('Отвлекающий бросок')}\n\n"
+        f"Ты рассыпал {COMBAT_DECOY_SHELL_COST} гильзы под ноги врагу.\n"
+        f"Атака сбита: {raw_damage} → {reduced_damage} до защиты.\n"
+        f"Получено урона: {final_damage} (защита: {total_defense})\n"
+    )
+    if hit_cap:
+        message += "Ранняя осторожность снижает тяжесть удара.\n"
+    if stamina_regen > 0:
+        message += f"🔋 Выносливость восстанавливает энергию: +{stamina_regen}⚡\n"
+    message += f"\nГильз осталось: {shells_after}\n\n{_format_combat_hud(combat, player)}"
+
+    _send_combat_screen(
+        vk,
+        user_id,
+        message,
+        keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
+    )
+
 
 def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     """Обработка победы над врагом"""

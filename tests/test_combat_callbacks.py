@@ -14,6 +14,7 @@ from handlers.combat import (
     create_combat_keyboard,
     create_combat_inventory_keyboard,
     create_skills_keyboard,
+    handle_combat_shell_decoy,
     handle_explore_time,
     RESEARCH_EVENTS,
 )
@@ -157,6 +158,76 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
 
         self.assertEqual(len(first_row), 1)
         self.assertEqual(json.loads(first_row[0]["action"]["payload"])["action"], "bypass")
+
+    def test_anomaly_precise_extract_visible_with_three_shells(self):
+        keyboard = json.loads(create_anomaly_keyboard(shells=3).get_keyboard())
+        precise = keyboard["buttons"][1][0]
+
+        self.assertEqual(precise["action"]["label"], "Точный бросок x3")
+        self.assertEqual(
+            json.loads(precise["action"]["payload"]),
+            {"command": "anomaly_action", "action": "extract_precise"},
+        )
+
+    def test_combat_shell_decoy_visible_when_shells_available(self):
+        with patch("handlers.combat.database.get_user_shells", return_value=2):
+            keyboard = json.loads(create_combat_keyboard(DummyClassPlayer(), user_id=1).get_keyboard())
+
+        decoy = keyboard["buttons"][2][0]
+        self.assertEqual(decoy["action"]["label"], "Отвлечь x2")
+        self.assertEqual(
+            json.loads(decoy["action"]["payload"]),
+            {"command": "combat_action", "action": "shell_decoy"},
+        )
+
+    def test_combat_shell_decoy_spends_shells_and_reduces_damage(self):
+        class Player:
+            health = 50
+            max_health = 100
+            energy = 40
+            max_energy = 100
+            total_defense = 3
+            level = 20
+            damage_resist = 0
+            effective_stamina = 1
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+                self.edited = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 1
+
+            def edit(self, **kwargs):
+                self.edited.append(kwargs)
+                return 1
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        player = Player()
+        vk = Vk()
+        set_combat_state(77, {
+            "combat_id": "fight-77",
+            "enemy_name": "Зомби",
+            "enemy_hp": 20,
+            "enemy_max_hp": 20,
+            "enemy_damage": 20,
+        })
+        set_ui_message(77, "combat", 55, peer_id=77)
+
+        with patch("handlers.combat.database.get_user_shells", return_value=2), \
+                patch("handlers.combat.database.remove_shells", return_value=True) as remove_shells, \
+                patch("handlers.combat.database.update_user_stats") as update_stats:
+            handle_combat_shell_decoy(player, vk, 77)
+
+        remove_shells.assert_called_once_with(77, 2)
+        update_stats.assert_called_once_with(77, health=43, energy=40)
+        self.assertEqual(player.health, 43)
+        self.assertIn("20 → 10", vk.messages.edited[0]["message"])
 
     def test_artifact_damage_boost_applies_to_full_attack_damage(self):
         class Player:

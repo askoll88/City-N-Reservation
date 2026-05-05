@@ -673,7 +673,7 @@ def show_resources_shop(player, vk, user_id: int):
     shells_bags = db.get_items_by_category('shells_bag')
 
     msg = f"{ui.title('Ресурсы')}\n\n"
-    msg += "Гильзы нужны для добычи артефактов из аномалий.\n\n"
+    msg += "Гильзы нужны для добычи артефактов из аномалий и отвлекающих бросков в бою.\n\n"
 
     msg += f"{ui.section('Гильзы')}\n"
     for idx, item in enumerate(resources, 1):

@@ -14,6 +14,7 @@ from handlers.location import (
 )
 from handlers.combat import (
     handle_explore, handle_combat_attack, handle_combat_flee,
+    handle_combat_shell_decoy,
     cancel_research as cancel_active_research,
     get_research_status as get_active_research_status,
     show_skills_in_combat, use_skill,
@@ -261,6 +262,10 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
         _show_combat_inventory(player, vk, user_id)
         return True
 
+    if text in ['гильзы', 'отвлечь', 'отвлечь гильзами', 'бросить гильзы']:
+        handle_combat_shell_decoy(player, vk, user_id)
+        return True
+
     if text.isdigit():
         if _use_combat_item_by_index(player, vk, user_id, int(text)):
             return True
@@ -309,7 +314,7 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
     if text in blocked_texts or text.startswith('дорога'):
         vk.messages.send(
             user_id=user_id,
-            message="⚔️ Пока идёт бой, нельзя менять экран или локацию.\nДоступно: Атаковать, Навыки, Инвентарь, Убежать.",
+            message="⚔️ Пока идёт бой, нельзя менять экран или локацию.\nДоступно: Атаковать, Навыки, Инвентарь, Гильзы, Убежать.",
             keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
             random_id=0
         )
@@ -318,7 +323,7 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
     # Неизвестная команда в бою
     vk.messages.send(
         user_id=user_id,
-        message="⚔️ Ты в бою.\nДоступно: Атаковать, Навыки, Инвентарь, Убежать.",
+        message="⚔️ Ты в бою.\nДоступно: Атаковать, Навыки, Инвентарь, Гильзы, Убежать.",
         keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
         random_id=0
     )
@@ -466,13 +471,13 @@ def handle_anomaly_commands(player, vk, user_id: int, text: str):
     if not is_in_anomaly(user_id):
         return False
     
-    if text in ['обойти', 'извлечь', 'бросить гильзу', 'добыть', 'отступить']:
+    if text in ['обойти', 'извлечь', 'бросить гильзу', 'добыть', 'точный бросок', 'бросить 3 гильзы', 'отступить']:
         handle_anomaly_action(player, vk, user_id, text)
         return True
     
     vk.messages.send(
         user_id=user_id,
-        message="⚠️ Ты в аномалии! Выбери действие:\n\n• Обойти — попробовать обойти\n• Извлечь — попробовать добыть артефакт\n• Отступить — уйти с уроном",
+        message="⚠️ Ты в аномалии! Выбери действие:\n\n• Обойти — попробовать обойти\n• Извлечь — добыть за 1 гильзу\n• Точный бросок — добыть за 3 гильзы с повышенным шансом\n• Отступить — уйти с уроном",
         random_id=0
     )
     return True

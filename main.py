@@ -1091,6 +1091,7 @@ def _do_callback_processing(event, vk):
             "flee": "убежать",
             "skills": "навыки",
             "inventory": "инвентарь",
+            "shell_decoy": "отвлечь гильзами",
             "back": "назад",
         }.get(action)
         if not action_text:
@@ -1125,12 +1126,13 @@ def _do_callback_processing(event, vk):
         action_text = {
             "bypass": "обойти",
             "extract": "бросить гильзу",
+            "extract_precise": "точный бросок",
             "retreat": "отступить",
         }.get(payload.get("action"))
         if not action_text:
             _answer_callback(event, vk, "Действие устарело")
             return
-        _answer_callback(event, vk, "Аномалия обновлена")
+        _answer_callback(event, vk, None, show_snackbar=False)
         player = get_player(user_id)
         from handlers.combat import handle_anomaly_action
         handle_anomaly_action(player, vk, user_id, action_text)
