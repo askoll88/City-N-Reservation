@@ -73,19 +73,59 @@ def _shop_card(
 
 
 def _artifact_bonus_text(item: dict) -> str:
+    def fmt(label: str, value: object, suffix: str = "") -> str | None:
+        if isinstance(value, bool):
+            return f"{label}" if value else None
+        amount = int(value or 0)
+        if amount == 0:
+            return None
+        sign = "+" if amount > 0 else ""
+        return f"{label} {sign}{amount}{suffix}"
+
     bonuses = []
-    if item.get('crit_bonus'):
-        bonuses.append(f"крит +{item['crit_bonus']}%")
-    if item.get('find_bonus'):
-        bonuses.append(f"находка +{item['find_bonus']}%")
-    if item.get('radiation'):
-        bonuses.append(f"рад {item['radiation']}")
-    if item.get('energy_bonus'):
-        bonuses.append(f"энергия +{item['energy_bonus']}")
-    if item.get('defense_bonus'):
-        bonuses.append(f"защита +{item['defense_bonus']}%")
-    if item.get('dodge_bonus'):
-        bonuses.append(f"уклон +{item['dodge_bonus']}%")
+    effects = database.ARTIFACT_BONUSES.get(str(item.get("name") or ""), {})
+    labels = {
+        "max_health_bonus": ("HP", ""),
+        "health": ("HP", ""),
+        "defense": ("защита", ""),
+        "defense_fire": ("огнезащита", ""),
+        "energy": ("энергия", ""),
+        "max_energy": ("макс. энергия", ""),
+        "radiation": ("рад", ""),
+        "crit": ("крит", "%"),
+        "find_chance": ("находка", "%"),
+        "dodge": ("уклон", "%"),
+        "rare_find_chance": ("редкое", "%"),
+        "damage_resist": ("сопротивление", "%"),
+        "damage_boost": ("урон", "%"),
+        "strength": ("сила", ""),
+        "stamina": ("выносливость", ""),
+        "perception": ("восприятие", ""),
+        "luck": ("удача", ""),
+        "max_weight": ("вес", "кг"),
+        "all_stats": ("все статы", ""),
+        "fire_immune": ("иммунитет к огню", ""),
+    }
+    for key, value in effects.items():
+        label = labels.get(key)
+        if label:
+            line = fmt(label[0], value, label[1])
+            if line:
+                bonuses.append(line)
+
+    legacy_fields = [
+        ("crit_bonus", "крит", "%"),
+        ("find_bonus", "находка", "%"),
+        ("radiation", "рад", ""),
+        ("energy_bonus", "энергия", ""),
+        ("defense_bonus", "защита", "%"),
+        ("dodge_bonus", "уклон", "%"),
+    ]
+    for key, label, suffix in legacy_fields:
+        line = fmt(label, item.get(key), suffix)
+        if line and line not in bonuses:
+            bonuses.append(line)
+
     return ", ".join(bonuses) if bonuses else "без бонусов"
 
 

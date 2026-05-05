@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from handlers.combat import (
+    _apply_weapon_damage_bonus,
     _hide_lower_keyboard_for_combat,
     _select_research_event_by_chance,
     _spawn_item,
@@ -156,6 +157,18 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
 
         self.assertEqual(len(first_row), 1)
         self.assertEqual(json.loads(first_row[0]["action"]["payload"])["action"], "bypass")
+
+    def test_artifact_damage_boost_applies_to_full_attack_damage(self):
+        class Player:
+            _artifact_bonuses = {"damage_boost": 12}
+
+            def _get_passive_bonuses(self):
+                return {}
+
+        damage, bonus_pct = _apply_weapon_damage_bonus(Player(), 100)
+
+        self.assertEqual(damage, 112)
+        self.assertEqual(bonus_pct, 12)
 
     def test_inline_combat_keyboard_has_no_back_button(self):
         keyboard = json.loads(create_combat_keyboard(DummyClassPlayer(), user_id=1).get_keyboard())

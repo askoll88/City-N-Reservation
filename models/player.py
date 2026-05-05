@@ -536,14 +536,10 @@ class Player:
     @property
     def melee_damage(self) -> int:
         """Урон в ближнем бою"""
-        artifact_damage_boost = int(self._artifact_bonuses.get('damage_boost', 0) or 0)
         # Базовый рукопашный урон + явный скейл от силы.
         strength_per_level = max(0, int(getattr(game_config, "STRENGTH_DAMAGE_PER_LEVEL", 2) or 2))
         strength_bonus = self.effective_strength * strength_per_level
-        base_damage = 5 + self.effective_strength + strength_bonus
-        if artifact_damage_boost > 0:
-            base_damage = int(base_damage * (1 + artifact_damage_boost / 100))
-        return base_damage
+        return 5 + self.effective_strength + strength_bonus
 
     @property
     def sell_bonus(self) -> int:

@@ -103,6 +103,14 @@ class InventorySectionsTest(unittest.TestCase):
         self.assertEqual(self.player.inventory_section, "artifacts")
         self.fake_db.update_user_stats.assert_not_called()
 
+    def test_artifact_bonus_text_uses_shared_bonus_table(self):
+        text = self.inventory_module._artifact_bonus_text({"name": "Кристальная колючка"})
+
+        self.assertIn("крит +10%", text)
+        self.assertIn("защита +25", text)
+        self.assertIn("уклон +15%", text)
+        self.assertNotIn("без бонусов", text)
+
     def test_show_other_sets_section_in_memory_only(self):
         self.inventory_module.show_other(self.player, self.vk, user_id=1)
         self.assertEqual(self.player.inventory_section, "other")

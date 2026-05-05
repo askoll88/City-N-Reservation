@@ -3740,9 +3740,13 @@ def _resolve_player_weapon(player, user_id: int | None = None) -> tuple[int, str
 
 
 def _apply_weapon_damage_bonus(player, damage: int) -> tuple[int, int]:
-    """Применить пассивный модификатор урона оружия класса."""
+    """Применить процентные модификаторы общего урона атаки."""
     passive = player._get_passive_bonuses()
-    bonus_pct = int(passive.get('weapon_damage', 0) or 0)
+    artifact_bonuses = getattr(player, "_artifact_bonuses", {}) or {}
+    bonus_pct = (
+        int(passive.get('weapon_damage', 0) or 0)
+        + int(artifact_bonuses.get('damage_boost', 0) or 0)
+    )
     if bonus_pct == 0:
         return damage, 0
     multiplier = max(0.1, 1 + bonus_pct / 100)
