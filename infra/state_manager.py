@@ -341,6 +341,28 @@ def cleanup_inactive_states(max_idle_seconds: int = 300):
             del _pending_emission_risk_exit_state[user_id]
             removed += 1
 
+    # Очистка случайных событий (если игрок оставил выбор висеть)
+    for user_id in list(_pending_event_state.keys()):
+        data = _pending_event_state.get(user_id)
+        created_at = data.get('created_at') if isinstance(data, dict) else None
+        if created_at is None:
+            created_at = _pending_event_created_at.get(user_id, current_time)
+        if data and (current_time - created_at) > max_idle_seconds:
+            del _pending_event_state[user_id]
+            _pending_event_created_at.pop(user_id, None)
+            removed += 1
+
+    # Очистка legacy pending-состояний выброса
+    for user_id in list(_emission_pending_state.keys()):
+        data = _emission_pending_state.get(user_id)
+        created_at = data.get('created_at') if isinstance(data, dict) else None
+        if created_at is None:
+            created_at = _emission_pending_created_at.get(user_id, current_time)
+        if data and (current_time - created_at) > max_idle_seconds:
+            del _emission_pending_state[user_id]
+            _emission_pending_created_at.pop(user_id, None)
+            removed += 1
+
     return removed
 
 
@@ -623,6 +645,7 @@ def get_market_my_listings_page(user_id: int) -> tuple:
 
 # === Работа со случайными событиями ===
 _pending_event_state = LockedDict()  # {user_id: event_data}
+_pending_event_created_at = LockedDict()  # {user_id: timestamp}
 
 
 def has_pending_event(user_id: int) -> bool:
@@ -633,6 +656,7 @@ def has_pending_event(user_id: int) -> bool:
 def set_pending_event(user_id: int, event: dict):
     """Установить состояние случайного события"""
     _pending_event_state[user_id] = event
+    _pending_event_created_at[user_id] = time.time()
 
 
 def get_pending_event(user_id: int) -> dict | None:
@@ -643,10 +667,12 @@ def get_pending_event(user_id: int) -> dict | None:
 def clear_pending_event(user_id: int):
     """Очистить состояние случайного события"""
     _pending_event_state.pop(user_id, None)
+    _pending_event_created_at.pop(user_id, None)
 
 
 # === Работа с состоянием выброса (Emission) ===
 _emission_pending_state = LockedDict()  # {user_id: emission_event_data}
+_emission_pending_created_at = LockedDict()  # {user_id: timestamp}
 
 
 def has_emission_pending(user_id: int) -> bool:
@@ -657,6 +683,7 @@ def has_emission_pending(user_id: int) -> bool:
 def set_emission_pending(user_id: int, data: dict):
     """Установить ожидающее событие выброса"""
     _emission_pending_state[user_id] = data
+    _emission_pending_created_at[user_id] = time.time()
 
 
 def get_emission_pending(user_id: int) -> dict | None:
@@ -667,6 +694,7 @@ def get_emission_pending(user_id: int) -> dict | None:
 def clear_emission_pending(user_id: int):
     """Очистить ожидающее событие выброса"""
     _emission_pending_state.pop(user_id, None)
+    _emission_pending_created_at.pop(user_id, None)
 
 
 # === Редактирование последнего сообщения ===

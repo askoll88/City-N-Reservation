@@ -8,8 +8,11 @@ from __future__ import annotations
 import copy
 import random
 from game.stat_balance import clamp, luck_artifact_bonus, luck_outcome_bonus
+from infra import database
 
 from game.constants import RESEARCH_LOCATIONS
+
+DEFAULT_EVENT_REPUTATION_FACTION = "сталкеры"
 
 
 # === Пул случайных событий ===
@@ -2578,6 +2581,62 @@ def _apply_hp_delta(player, delta: int) -> int:
     return int(player.health)
 
 
+def _apply_shell_gain(player_id: int | None, amount: int) -> int:
+    """Начислить гильзы в счётчик мешочка и вернуть реально вошедшее количество."""
+    shell_gain = int(amount or 0)
+    if shell_gain <= 0 or player_id is None:
+        return 0
+    before_shells = int(database.get_user_shells(player_id) or 0)
+    database.add_shells(player_id, shell_gain)
+    after_shells = int(database.get_user_shells(player_id) or 0)
+    actual_shell_gain = max(0, after_shells - before_shells)
+    if actual_shell_gain > 0:
+        from handlers.quests import track_quest_shells
+        track_quest_shells(player_id, count=actual_shell_gain)
+    return actual_shell_gain
+
+
+def _apply_reputation_gain(player, player_id: int | None, amount: int, faction: str | None = None) -> int:
+    rep_gain = int(amount or 0)
+    if rep_gain == 0:
+        return 0
+    faction_name = str(faction or DEFAULT_EVENT_REPUTATION_FACTION).strip() or DEFAULT_EVENT_REPUTATION_FACTION
+
+    reputation = getattr(player, "reputation", None)
+    if isinstance(reputation, dict):
+        reputation[faction_name] = int(reputation.get(faction_name, 0) or 0) + rep_gain
+
+    if player_id is not None:
+        database.increment_user_flag(player_id, f"reputation:{faction_name}", rep_gain)
+    return rep_gain
+
+
+def _apply_direct_effects(player, effect: dict, player_id: int | None = None) -> dict:
+    """Применить простые награды/штрафы, которые встречаются в разных типах событий."""
+    applied = {}
+    if "xp" in effect:
+        applied["xp"] = _add_player_xp(player, effect["xp"])
+    if "money" in effect:
+        player.money += int(effect.get("money", 0) or 0)
+        applied["money"] = int(effect.get("money", 0) or 0)
+    if "energy" in effect:
+        _apply_energy_delta(player, effect["energy"])
+        applied["energy"] = int(effect.get("energy", 0) or 0)
+    if "hp" in effect:
+        _apply_hp_delta(player, int(effect["hp"]))
+        applied["hp"] = int(effect.get("hp", 0) or 0)
+    if "shells" in effect:
+        applied["shells"] = _apply_shell_gain(player_id, int(effect.get("shells", 0) or 0))
+    if "reputation" in effect:
+        applied["reputation"] = _apply_reputation_gain(
+            player,
+            player_id,
+            int(effect.get("reputation", 0) or 0),
+            effect.get("faction"),
+        )
+    return applied
+
+
 def apply_event_choice(event: dict, choice_index: int, player, user_id: int = None, stage_index: int = 0) -> dict:
     """
     Применить выбор игрока к событию.
@@ -2589,6 +2648,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
     """
     if choice_index < 0:
         return {"message": "Ты не успел принять решение. Дорога не любит пустых жестов.", "next_stage": None, "invalid": True}
+    player_id = user_id if user_id is not None else _resolve_player_id(player)
 
     # Многоэтапное событие
     if event.get("type") == "multi_stage":
@@ -2607,14 +2667,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         # Применяем немедленные эффекты выбора
         if "effect" in choice:
             eff = choice["effect"]
-            if "xp" in eff:
-                _add_player_xp(player, eff["xp"])
-            if "money" in eff:
-                player.money += eff.get("money", 0)
-            if "energy" in eff:
-                _apply_energy_delta(player, eff["energy"])
-            if "hp" in eff:
-                _apply_hp_delta(player, int(eff["hp"]))
+            _apply_direct_effects(player, eff, player_id)
             if eff.get("random_loot"):
                 _apply_random_loot(player)
             if eff.get("random_artifact"):
@@ -2630,14 +2683,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         if choice.get("is_final") or stage_index == len(stages) - 1:
             # Применяем финальные эффекты
             final_effect = stage.get("final_effect", {})
-            if "xp" in final_effect:
-                _add_player_xp(player, final_effect["xp"])
-            if "money" in final_effect:
-                player.money += final_effect.get("money", 0)
-            if "energy" in final_effect:
-                _apply_energy_delta(player, final_effect["energy"])
-            if "hp" in final_effect:
-                _apply_hp_delta(player, int(final_effect["hp"]))
+            _apply_direct_effects(player, final_effect, player_id)
 
             # Квестовая цепочка
             _check_quest_progression(event, user_id)
@@ -2653,30 +2699,13 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
     choice = event["choices"][choice_index]
     effect = choice.get("effect", {})
-    player_id = _resolve_player_id(player)
 
     # Квестовая цепочка
     _check_quest_progression(event, user_id)
 
     # Простое сообщение
     if "message" in effect and not any(k in effect for k in ["risk_damage", "risk_combat", "random_loot", "artifact_chance", "random_artifact", "random_dialog", "need_item", "shop_discount", "money_loss"]):
-        if "xp" in effect:
-            _add_player_xp(player, effect["xp"])
-        if "money" in effect:
-            player.money += effect["money"]
-        if "energy" in effect:
-            _apply_energy_delta(player, effect["energy"])
-        if "shells" in effect:
-            shell_gain = int(effect["shells"] or 0)
-            if shell_gain > 0 and player_id is not None:
-                from infra import database
-                before_shells = int(database.get_user_shells(player_id) or 0)
-                database.add_shells(player_id, shell_gain)
-                after_shells = int(database.get_user_shells(player_id) or 0)
-                actual_shell_gain = max(0, after_shells - before_shells)
-                from handlers.quests import track_quest_shells
-                if actual_shell_gain > 0:
-                    track_quest_shells(player_id, count=actual_shell_gain)
+        _apply_direct_effects(player, effect, player_id)
         return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # Риск - получение урона
@@ -2730,7 +2759,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
 
     # Скидка
     if effect.get("shop_discount"):
-        _add_player_xp(player, effect.get("xp", 0))
+        _apply_direct_effects(player, effect, player_id)
         return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # Потеря денег
@@ -2740,12 +2769,7 @@ def apply_event_choice(event: dict, choice_index: int, player, user_id: int = No
         return {"message": effect["message"], "next_stage": None, "is_final": True}
 
     # XP + money
-    if "xp" in effect:
-        _add_player_xp(player, effect["xp"])
-    if "money" in effect:
-        player.money += effect["money"]
-    if "energy" in effect:
-        _apply_energy_delta(player, effect["energy"])
+    _apply_direct_effects(player, effect, player_id)
 
     return {"message": effect.get("message", "Дорога проглотила событие без следа. Ты идёшь дальше."), "next_stage": None, "is_final": True}
 
@@ -2777,7 +2801,6 @@ def _apply_energy_delta(player, delta: int):
 
 
 def _apply_random_loot(player):
-    from infra import database
     player_id = _resolve_player_id(player)
     luck_bonus = luck_outcome_bonus(_effective_luck(player))
     money_reward = random.randint(50 + luck_bonus * 2, 300 + luck_bonus * 4)
@@ -2787,7 +2810,10 @@ def _apply_random_loot(player):
         common_items = [("Бинт", 2), ("Аптечка", 1), ("Гильзы", 10), ("Хлеб", 1), ("Вода", 1)]
         item_name, qty = random.choice(common_items)
         if player_id is not None:
-            database.add_item_to_inventory(player_id, item_name, qty)
+            if item_name in {"Гильза", "Гильзы"}:
+                _apply_shell_gain(player_id, qty)
+            else:
+                database.add_item_to_inventory(player_id, item_name, qty)
             item_text = f"{item_name} x{qty}"
     return {
         "money_reward": money_reward,
@@ -2799,7 +2825,6 @@ def _apply_random_loot(player):
 
 def _apply_random_artifact(player):
     from game.anomalies import get_artifact_from_anomaly
-    from infra import database
     player_id = _resolve_player_id(player)
     anomaly_type = random.choice(["жарка", "электра", "воронка", "туман", "магнит"])
     artifact = get_artifact_from_anomaly(anomaly_type)
@@ -2813,7 +2838,6 @@ def _apply_random_artifact(player):
 
 def _apply_artifact_chance(player, effect=None):
     from game.anomalies import get_random_anomaly, get_artifact_from_anomaly
-    from infra import database
     from game.emission import get_emission_artifact_bonus
     player_id = _resolve_player_id(player)
     anomaly = get_random_anomaly()
@@ -2887,9 +2911,8 @@ def _apply_need_item(player, effect):
         for item in cat
     )
     if has_item and player_id is not None:
-        from infra import database
         database.remove_item_from_inventory(player_id, item_name, 1)
-        _add_player_xp(player, effect.get("xp", 0))
+        _apply_direct_effects(player, effect, player_id)
         return effect.get("message", f"Ты использовал {item_name}.")
     else:
         return f"У тебя нет {item_name}. Ты не можешь помочь."

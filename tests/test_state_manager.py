@@ -29,6 +29,8 @@ class StateManagerTest(unittest.TestCase):
         state_manager.get_dialog_state().clear()
         state_manager.get_research_state().clear()
         state_manager.get_anomaly_state().clear()
+        state_manager.clear_pending_event(77)
+        state_manager.clear_emission_pending(78)
         state_manager.invalidate_player_cache()
 
     def test_combat_state_roundtrip(self):
@@ -62,6 +64,17 @@ class StateManagerTest(unittest.TestCase):
         self.assertEqual(removed, 2)
         self.assertNotIn(1, state_manager.get_research_state())
         self.assertNotIn(2, state_manager.get_combat_state())
+
+    def test_cleanup_inactive_pending_events(self):
+        now = time.time()
+        state_manager.set_pending_event(77, {"id": "old", "created_at": now - 1000})
+        state_manager.set_emission_pending(78, {"phase": "warning", "created_at": now - 1000})
+
+        removed = state_manager.cleanup_inactive_states(max_idle_seconds=300)
+
+        self.assertEqual(removed, 2)
+        self.assertFalse(state_manager.has_pending_event(77))
+        self.assertFalse(state_manager.has_emission_pending(78))
 
     def test_try_edit_or_send_ui_is_scoped_by_screen_key(self):
         vk = DummyVK()
