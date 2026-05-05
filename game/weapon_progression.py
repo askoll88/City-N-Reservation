@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from game.gacha.event_items import get_event_weapon_stat_profile
+from game.gacha.event_items import get_event_weapon_max_attack_target, get_event_weapon_stat_profile
 from models.enemies import get_weapon_type
 
 WEAPON_RANKS = {
@@ -221,7 +221,16 @@ def calc_weapon_attack(
     rank = normalize_weapon_rank(weapon_rank, item)
     rank_mult = WEAPON_RANKS[rank]["mult"]
     base_attack = get_weapon_base_attack(item)
-    return max(1, int(base_attack * _weapon_progress_multiplier(level) * rank_mult))
+    attack = max(1, int(base_attack * _weapon_progress_multiplier(level) * rank_mult))
+    target_max = get_event_weapon_max_attack_target((item or {}).get("name"))
+    if (
+        target_max
+        and level >= MAX_WEAPON_LEVEL
+        and normalize_weapon_ascension(weapon_ascension) >= 10
+        and rank == "legendary"
+    ):
+        return target_max
+    return attack
 
 
 def _event_weapon_stat_ratio(weapon_level: int | None, weapon_ascension: int | None = 0) -> float:

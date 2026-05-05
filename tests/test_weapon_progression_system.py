@@ -77,7 +77,12 @@ class WeaponProgressionSystemTest(unittest.TestCase):
         self.assertEqual(early["name"], "Стабилизатор резонанса")
         self.assertEqual(early["stats"]["crit_chance"], 4)
         self.assertEqual(leveled_without_ascension["stats"]["crit_chance"], 4)
-        self.assertEqual(late["stats"]["crit_chance"], 12)
+        self.assertEqual(late["stats"]["crit_chance"], 18)
+
+    def test_ak74_resonance_has_exact_max_attack_target(self):
+        weapon = {"name": "АК-74 «Резонанс»", "category": "weapons", "attack": 205, "rarity": "legendary"}
+
+        self.assertEqual(calc_weapon_attack(weapon, 297, "legendary", 10), 1347)
 
 
 if __name__ == "__main__":

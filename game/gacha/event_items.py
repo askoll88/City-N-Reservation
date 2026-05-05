@@ -60,7 +60,7 @@ EVENT_WEAPON_STAT_PROFILES = {
     "АК-74 «Резонанс»": {
         "name": "Стабилизатор резонанса",
         "description": "короткие очереди лучше ловят слабые места цели",
-        "stats": {"crit_chance": (4, 12)},
+        "stats": {"crit_chance": (4, 18)},
     },
     "Винторез «Тихий Сигнал»": {
         "name": "Тихий сигнал",
@@ -88,6 +88,17 @@ EVENT_WEAPON_STAT_PROFILES = {
 def get_event_weapon_stat_profile(item_name: str | None) -> dict | None:
     """Профиль наследуемого доп. стата для ивентового оружия."""
     return EVENT_WEAPON_STAT_PROFILES.get(str(item_name or "").strip())
+
+
+EVENT_WEAPON_MAX_ATTACK_TARGETS = {
+    "АК-74 «Резонанс»": 1347,
+}
+
+
+def get_event_weapon_max_attack_target(item_name: str | None) -> int | None:
+    """Точный целевой ATK для отдельных SSR на L297/прорыв 10."""
+    value = EVENT_WEAPON_MAX_ATTACK_TARGETS.get(str(item_name or "").strip())
+    return int(value) if value else None
 
 
 EVENT_OUTFIT_PASSIVES = {
@@ -169,7 +180,7 @@ GACHA_EVENT_ITEMS = [
         "weapons",
         SSR_ITEM_LORE["АК-74 «Резонанс»"],
         0,
-        145,
+        205,
         0,
         3.2,
         0,

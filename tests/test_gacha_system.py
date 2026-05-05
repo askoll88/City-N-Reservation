@@ -6,6 +6,7 @@ from game.gacha import banners, service
 from game.gacha.assets import get_item_image_path
 from game.gacha.event_items import (
     EVENT_ITEM_NAMES,
+    GACHA_EVENT_ITEMS,
     format_event_outfit_passive_stats,
     get_event_item_lore,
     get_event_outfit_passive_profile,
@@ -24,6 +25,7 @@ from game.gacha.ui import (
 from handlers.inventory import build_item_details
 from handlers.keyboards import create_location_keyboard
 from infra import database
+from game.weapon_progression import calc_weapon_attack, normalize_weapon_rank
 
 
 class GachaSystemTest(unittest.TestCase):
@@ -246,13 +248,32 @@ class GachaSystemTest(unittest.TestCase):
             "rarity": "legendary",
             "description": get_event_item_lore("АК-74 «Резонанс»"),
             "weight": 3.2,
-            "attack": 145,
+            "attack": 205,
         })
         self.assertIn("Эксклюзив", details)
         self.assertIn("SSR Резонанса Зоны", details)
         self.assertIn("ДОП. СТАТ ОРУЖИЯ", details)
         self.assertIn("Стабилизатор резонанса", details)
         self.assertIn("Крит. шанс", details)
+
+    def test_weapon_rateup_is_not_weaker_than_offrate_by_max_atk(self):
+        by_name = {row[0]: row for row in GACHA_EVENT_ITEMS}
+
+        def max_atk(item_name: str) -> int:
+            row = by_name[item_name]
+            item = {
+                "name": row[0],
+                "category": row[1],
+                "attack": row[4],
+                "base_attack": row[4],
+                "rarity": row[8],
+            }
+            return calc_weapon_attack(item, 297, normalize_weapon_rank(None, item), 10)
+
+        rateup_atk = max_atk("АК-74 «Резонанс»")
+        offrate_atks = [max_atk(name) for name in banners.WEAPON_BANNER.off_ssr]
+
+        self.assertGreaterEqual(rateup_atk, max(offrate_atks))
 
     def test_resonance_outfit_has_fixed_passives(self):
         cloak = get_event_outfit_passive_profile("Плащ «Проводник Сигнала»")
