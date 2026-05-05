@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from infra import database
 
 from .banners import (
     BANNERS,
+    BANNER_CYCLE_START_SETTING,
+    BANNER_DURATION_DAYS,
     GACHA_ENABLED_SETTING,
     SIGNAL_SHARDS_FLAG,
     SINGLE_PULL_COST,
@@ -46,6 +49,10 @@ class PullReward:
     kind: str = "item"
     duplicate: bool = False
     source_name: str | None = None
+    featured: bool = False
+    guaranteed: bool = False
+    fifty_fifty_lost: bool = False
+    pity_count: int = 0
 
 
 def is_resonance_enabled() -> bool:
@@ -55,6 +62,8 @@ def is_resonance_enabled() -> bool:
 
 def set_resonance_enabled(enabled: bool) -> None:
     database.set_game_setting(GACHA_ENABLED_SETTING, "1" if enabled else "0")
+    if enabled:
+        ensure_banner_cycle()
 
 
 def is_resonance_available(vk_id: int) -> bool:
@@ -71,6 +80,44 @@ def add_signal_shards(vk_id: int, amount: int) -> int:
     updated = max(0, current + safe_amount)
     database.set_user_flag(vk_id, SIGNAL_SHARDS_FLAG, updated)
     return updated
+
+
+def _now_ts() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
+
+
+def ensure_banner_cycle(now_ts: int | None = None) -> dict:
+    """Получить текущий 20-дневный цикл баннеров и создать его при необходимости."""
+    now = int(now_ts if now_ts is not None else _now_ts())
+    duration = max(1, int(BANNER_DURATION_DAYS) * 24 * 60 * 60)
+    stored = int(database.get_game_setting(BANNER_CYCLE_START_SETTING, default="0") or 0)
+    if stored <= 0:
+        stored = now
+        database.set_game_setting(BANNER_CYCLE_START_SETTING, str(stored))
+    if now >= stored + duration:
+        passed = (now - stored) // duration
+        stored = stored + passed * duration
+        database.set_game_setting(BANNER_CYCLE_START_SETTING, str(stored))
+    end_ts = stored + duration
+    return {
+        "start_ts": stored,
+        "end_ts": end_ts,
+        "remaining_seconds": max(0, end_ts - now),
+        "duration_seconds": duration,
+    }
+
+
+def format_seconds_left(seconds: int) -> str:
+    remaining = max(0, int(seconds or 0))
+    days, rem = divmod(remaining, 24 * 60 * 60)
+    hours, rem = divmod(rem, 60 * 60)
+    minutes, secs = divmod(rem, 60)
+    return f"{days}д {hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def get_banner_time_left() -> dict:
+    cycle = ensure_banner_cycle()
+    return {**cycle, "formatted": format_seconds_left(cycle["remaining_seconds"])}
 
 
 def add_signal_shards_capped(vk_id: int, amount: int, source: str, daily_cap: int) -> dict:
@@ -229,10 +276,10 @@ def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
 
     if reward.rarity == "SSR" and is_gacha_event_item(reward.name) and _has_item(vk_id, reward.name):
         add_signal_shards(vk_id, DUPLICATE_SSR_SHARDS)
-        return PullReward(
-            reward.rarity,
-            SIGNAL_SHARDS_REWARD_NAME,
-            DUPLICATE_SSR_SHARDS,
+        return replace(
+            reward,
+            name=SIGNAL_SHARDS_REWARD_NAME,
+            quantity=DUPLICATE_SSR_SHARDS,
             kind="currency",
             duplicate=True,
             source_name=reward.name,
@@ -253,17 +300,34 @@ def _roll_entry(entry: RewardEntry, rarity: str) -> PullReward:
 
 
 def _roll_ssr(banner: Banner, state: dict) -> PullReward:
+    pity_count = max(1, int(state.get("pity_ssr", 1) or 1))
     if state.get("featured_guaranteed"):
         item_name = random.choice(banner.featured_ssr)
+        featured = True
+        guaranteed = True
+        fifty_fifty_lost = False
         state["featured_guaranteed"] = False
     elif random.random() < 0.5:
         item_name = random.choice(banner.featured_ssr)
+        featured = True
+        guaranteed = False
+        fifty_fifty_lost = False
     else:
         item_name = random.choice(banner.off_ssr or banner.featured_ssr)
+        featured = item_name in banner.featured_ssr
+        guaranteed = False
+        fifty_fifty_lost = True
         state["featured_guaranteed"] = True
     state["pity_ssr"] = 0
     state["pity_sr"] = 0
-    return PullReward("SSR", item_name)
+    return PullReward(
+        "SSR",
+        item_name,
+        featured=featured,
+        guaranteed=guaranteed,
+        fifty_fifty_lost=fifty_fifty_lost,
+        pity_count=pity_count,
+    )
 
 
 def _roll_sr(banner: Banner, state: dict) -> PullReward:
@@ -315,7 +379,9 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
 
     database.set_user_flag(vk_id, SIGNAL_SHARDS_FLAG, current_shards - cost)
     state = _get_banner_state(vk_id, banner.id)
-    rewards = [_grant_reward(vk_id, _roll_one(banner, state)) for _ in range(count)]
+    raw_rewards = [_roll_one(banner, state) for _ in range(count)]
+    rewards = [_grant_reward(vk_id, reward) for reward in raw_rewards]
+    _record_banner_stats(banner, raw_rewards)
     _save_banner_state(vk_id, banner.id, state)
     shards_left = get_signal_shards(vk_id)
 
@@ -332,3 +398,73 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
 
 def get_banners() -> tuple[Banner, ...]:
     return tuple(BANNERS.values())
+
+
+def _stats_key(cycle_start_ts: int, banner_id: str) -> str:
+    return f"resonance_banner_stats_{cycle_start_ts}_{banner_id}"
+
+
+def _load_stats(cycle_start_ts: int, banner_id: str) -> dict:
+    raw = database.get_game_setting(_stats_key(cycle_start_ts, banner_id), default="{}") or "{}"
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = {}
+    defaults = {
+        "pulls": 0,
+        "ssr_total": 0,
+        "rateup_ssr": 0,
+        "fifty_fifty_losses": 0,
+        "guaranteed_rateup": 0,
+        "pity_sum": 0,
+        "pity_count": 0,
+    }
+    defaults.update({key: int(value or 0) for key, value in data.items() if key in defaults})
+    return defaults
+
+
+def _save_stats(cycle_start_ts: int, banner_id: str, stats: dict) -> None:
+    database.set_game_setting(_stats_key(cycle_start_ts, banner_id), json.dumps(stats, ensure_ascii=False, sort_keys=True))
+
+
+def _record_banner_stats(banner: Banner, rewards: list[PullReward]) -> None:
+    cycle = ensure_banner_cycle()
+    stats = _load_stats(cycle["start_ts"], banner.id)
+    stats["pulls"] += len(rewards)
+    for reward in rewards:
+        if reward.rarity != "SSR":
+            continue
+        stats["ssr_total"] += 1
+        if reward.featured:
+            stats["rateup_ssr"] += 1
+        if reward.guaranteed:
+            stats["guaranteed_rateup"] += 1
+        if reward.fifty_fifty_lost:
+            stats["fifty_fifty_losses"] += 1
+        if reward.pity_count > 0:
+            stats["pity_sum"] += int(reward.pity_count)
+            stats["pity_count"] += 1
+    _save_stats(cycle["start_ts"], banner.id, stats)
+
+
+def get_current_banner_stats() -> dict:
+    """Обезличенная агрегированная статистика текущего цикла баннеров."""
+    cycle = get_banner_time_left()
+    banners = []
+    total = {
+        "pulls": 0,
+        "ssr_total": 0,
+        "rateup_ssr": 0,
+        "fifty_fifty_losses": 0,
+        "guaranteed_rateup": 0,
+        "pity_sum": 0,
+        "pity_count": 0,
+    }
+    for banner in get_banners():
+        stats = _load_stats(cycle["start_ts"], banner.id)
+        average_pity = stats["pity_sum"] / stats["pity_count"] if stats["pity_count"] else 0.0
+        banners.append({"banner": banner, "stats": stats, "average_pity": average_pity})
+        for key in total:
+            total[key] += stats.get(key, 0)
+    total_average = total["pity_sum"] / total["pity_count"] if total["pity_count"] else 0.0
+    return {"cycle": cycle, "banners": banners, "total": total, "total_average_pity": total_average}

@@ -16,6 +16,7 @@ from .banners import (
     SSR_HARD_PITY,
 )
 from .service import get_banners, get_banner_state, get_signal_shards, is_resonance_available, perform_pulls
+from .service import get_banner_time_left
 
 
 RARITY_VIEW = {
@@ -66,6 +67,7 @@ def _featured_line(items: tuple[str, ...]) -> str:
 
 
 def format_resonance_menu(vk_id: int) -> str:
+    time_left = get_banner_time_left()
     lines = [
         "▰ РЕЗОНАНС ЗОНЫ",
         "Приёмник ловит обрывки сигнала. Выбери, куда направить отклик.",
@@ -74,6 +76,7 @@ def format_resonance_menu(vk_id: int) -> str:
         f"💠 Осколки сигнала: {get_signal_shards(vk_id)}",
         f"Отклик x1: {SINGLE_PULL_COST} | Отклик x10: {TEN_PULL_COST}",
         f"Цикл баннера: {BANNER_DURATION_DAYS} дней",
+        f"До конца баннера: {time_left['formatted']}",
         "",
         "• БАННЕРЫ",
     ]
@@ -83,6 +86,7 @@ def format_resonance_menu(vk_id: int) -> str:
         lines.extend([
             "",
             f"◆ {banner.name.upper()}",
+            f"До конца: {time_left['formatted']}",
             f"Rate-up SSR: {_featured_line(banner.featured_ssr)}",
             f"SSR {_bar(state['pity_ssr'], SSR_HARD_PITY)} {state['pity_ssr']}/{SSR_HARD_PITY}",
             f"SR  {_bar(state['pity_sr'], SR_HARD_PITY)} {state['pity_sr']}/{SR_HARD_PITY}",
@@ -136,6 +140,7 @@ def _format_pull_result(result: dict) -> str:
         qty = f" x{reward.quantity}" if reward.quantity != 1 else ""
         lines.append(f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} — {reward.name}{qty}{suffix}")
     state = result["state"]
+    time_left = get_banner_time_left()
     guarantee = "следующий SSR гарантированно rate-up" if state.get("featured_guaranteed") else "50/50 активен"
     lines.extend([
         "",
@@ -143,6 +148,7 @@ def _format_pull_result(result: dict) -> str:
         f"SSR {_bar(state['pity_ssr'], SSR_HARD_PITY)} {state['pity_ssr']}/{SSR_HARD_PITY}",
         f"SR  {_bar(state['pity_sr'], SR_HARD_PITY)} {state['pity_sr']}/{SR_HARD_PITY}",
         f"Гарант: {guarantee}",
+        f"До конца баннера: {time_left['formatted']}",
     ])
     return "\n".join(lines)
 

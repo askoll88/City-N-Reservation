@@ -11,6 +11,7 @@ BANNER_DURATION_DAYS = 20
 
 GACHA_ENABLED_SETTING = "resonance_zone_enabled"
 SIGNAL_SHARDS_FLAG = "resonance_signal_shards"
+BANNER_CYCLE_START_SETTING = "resonance_banner_cycle_start_ts"
 
 SSR_BASE_RATE = 1.6
 SR_BASE_RATE = 12.0

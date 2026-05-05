@@ -407,6 +407,127 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         self.assertIn("Атаковать", edited["keyboard"])
         self.assertIn("Инвентарь", edited["keyboard"])
 
+    def test_combat_item_use_accepts_quantity_after_index(self):
+        from handlers.commands import handle_combat_commands
+
+        class Inventory:
+            other = [{"name": "Аптечка", "quantity": 3}]
+
+            def reload(self):
+                pass
+
+        class Player:
+            inventory = Inventory()
+            player_class = None
+            health = 10
+            max_health = 100
+            energy = 80
+            total_defense = 5
+            used = 0
+
+            def use_item(self, item_name):
+                self.used += 1
+                self.health = min(self.max_health, self.health + 10)
+                return True, f"Использована {item_name} #{self.used}."
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+                self.edited = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 101
+
+            def edit(self, **kwargs):
+                self.edited.append(kwargs)
+                return 1
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        player = Player()
+        vk = Vk()
+        set_combat_state(77, {"combat_id": "fight-77", "enemy_name": "Слепой пёс", "enemy_hp": 12, "enemy_max_hp": 20})
+        set_ui_message(77, "combat", 55, peer_id=77)
+
+        handled = handle_combat_commands(player, vk, 77, "использовать 1 3", "использовать 1 3")
+
+        self.assertTrue(handled)
+        self.assertEqual(player.used, 3)
+        self.assertEqual(vk.messages.sent, [])
+        self.assertEqual(len(vk.messages.edited), 1)
+        self.assertIn("Аптечка x3", vk.messages.edited[0]["message"])
+
+    def test_combat_item_use_accepts_quantity_after_name(self):
+        from handlers.commands import handle_combat_commands
+
+        class Inventory:
+            other = [{"name": "Аптечка", "quantity": 2}]
+
+            def reload(self):
+                pass
+
+        class Player:
+            inventory = Inventory()
+            player_class = None
+            health = 10
+            max_health = 100
+            energy = 80
+            total_defense = 5
+            used = 0
+
+            def use_item(self, item_name):
+                self.used += 1
+                return True, f"Использована {item_name} #{self.used}."
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+                self.edited = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 101
+
+            def edit(self, **kwargs):
+                self.edited.append(kwargs)
+                return 1
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        player = Player()
+        vk = Vk()
+        set_combat_state(77, {"combat_id": "fight-77", "enemy_name": "Слепой пёс", "enemy_hp": 12, "enemy_max_hp": 20})
+        set_ui_message(77, "combat", 55, peer_id=77)
+
+        handled = handle_combat_commands(player, vk, 77, "использовать аптечка 2", "использовать аптечка 2")
+
+        self.assertTrue(handled)
+        self.assertEqual(player.used, 2)
+        self.assertEqual(vk.messages.sent, [])
+        self.assertEqual(len(vk.messages.edited), 1)
+        self.assertIn("Аптечка x2", vk.messages.edited[0]["message"])
+
+    def test_text_message_does_not_reset_combat_edit_target(self):
+        import main
+
+        class Obj:
+            message = {"from_id": 77}
+
+        class Event:
+            obj = Obj()
+
+        with patch("main.is_in_combat", return_value=True), \
+             patch("main.invalidate_edit_targets") as invalidate, \
+             patch("main.handle_message"):
+            main._process_message_event(Event(), object())
+
+        invalidate.assert_not_called()
+
     def test_research_start_replaces_lower_keyboard_with_research_controls(self):
         class Inventory:
             total_weight = 0

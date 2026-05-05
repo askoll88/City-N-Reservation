@@ -50,6 +50,18 @@ from infra.state_manager import (
 )
 
 
+def _split_combat_use_target(raw: str) -> tuple[str, int]:
+    """Разобрать 'использовать аптечка 3' / 'использовать 2 3'."""
+    target = (raw or "").strip()
+    if not target:
+        return "", 1
+    parts = target.rsplit(maxsplit=1)
+    if len(parts) == 2 and parts[1].isdigit():
+        qty = max(1, int(parts[1]))
+        return parts[0].strip(), qty
+    return target, 1
+
+
 # === Текстовые сообщения ===
 
 def get_welcome_message():
@@ -314,7 +326,7 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
         return True
 
     if text.isdigit():
-        if _use_combat_item_by_index(player, vk, user_id, int(text)):
+        if _use_combat_item_by_index(player, vk, user_id, int(text), quantity=1):
             return True
 
     if text.startswith(('использовать ', 'выпить ', 'съесть ')):
@@ -324,7 +336,8 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
             target = text.replace('выпить ', '', 1).strip()
         else:
             target = text.replace('съесть ', '', 1).strip()
-        if _use_combat_item(player, vk, user_id, target):
+        target, quantity = _split_combat_use_target(target)
+        if _use_combat_item(player, vk, user_id, target, quantity=quantity):
             return True
 
     # Использование навыка по имени/кнопке
@@ -359,20 +372,20 @@ def handle_combat_commands(player, vk, user_id: int, text: str, original_text: s
         'поговорить', 'торговля', 'магазин', 'выйти',
     }
     if text in blocked_texts or text.startswith('дорога'):
-        vk.messages.send(
-            user_id=user_id,
-            message="⚔️ Пока идёт бой, нельзя менять экран или локацию.\nДоступно: Атаковать, Навыки, Инвентарь, Гильзы, Убежать.",
-            keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-            random_id=0
+        show_current_combat_screen(
+            player,
+            vk,
+            user_id,
+            prefix="⚔️ Пока идёт бой, нельзя менять экран или локацию.\nДоступно: Атаковать, Навыки, Инвентарь, Гильзы, Убежать.",
         )
         return True
 
     # Неизвестная команда в бою
-    vk.messages.send(
-        user_id=user_id,
-        message="⚔️ Ты в бою.\nДоступно: Атаковать, Навыки, Инвентарь, Гильзы, Убежать.",
-        keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
-        random_id=0
+    show_current_combat_screen(
+        player,
+        vk,
+        user_id,
+        prefix="⚔️ Ты в бою.\nДоступно: Атаковать, Навыки, Инвентарь, Гильзы, Убежать.",
     )
     return True
 
@@ -398,7 +411,7 @@ def _show_combat_inventory(player, vk, user_id: int):
     msg = "🎒 БОЕВОЙ ИНВЕНТАРЬ\n\n"
     for idx, item in enumerate(items, 1):
         msg += f"{idx}. {item['name']} x{item.get('quantity', 1)}\n"
-    msg += "\nИспользуй текстом: использовать <номер> или использовать <название>."
+    msg += "\nИспользуй текстом: использовать <номер> [кол-во] или использовать <название> [кол-во]."
 
     try_edit_or_send_ui(
         vk,
@@ -409,7 +422,7 @@ def _show_combat_inventory(player, vk, user_id: int):
     )
 
 
-def _use_combat_item_by_index(player, vk, user_id: int, idx: int) -> bool:
+def _use_combat_item_by_index(player, vk, user_id: int, idx: int, quantity: int = 1) -> bool:
     """Использовать расходник по номеру во время боя."""
     from infra.state_manager import try_edit_or_send_ui
 
@@ -426,10 +439,10 @@ def _use_combat_item_by_index(player, vk, user_id: int, idx: int) -> bool:
             keyboard=create_combat_inventory_keyboard(user_id).get_keyboard(),
         )
         return True
-    return _use_combat_item(player, vk, user_id, items[idx - 1]["name"])
+    return _use_combat_item(player, vk, user_id, items[idx - 1]["name"], quantity=quantity)
 
 
-def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
+def _use_combat_item(player, vk, user_id: int, target: str, quantity: int = 1) -> bool:
     """Использовать предмет в бою только из секции other."""
     from infra.state_manager import try_edit_or_send_ui
 
@@ -439,6 +452,7 @@ def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
     player.inventory.reload()
     item = None
 
+    quantity = max(1, int(quantity or 1))
     if target.isdigit():
         idx = int(target)
         if idx <= 0 or idx > len(player.inventory.other):
@@ -464,13 +478,37 @@ def _use_combat_item(player, vk, user_id: int, target: str) -> bool:
         )
         return True
 
-    success, msg = player.use_item(item["name"])
-    if not show_current_combat_screen(player, vk, user_id, prefix=msg):
+    available = max(0, int(item.get("quantity", 1) or 1))
+    if quantity > available:
         try_edit_or_send_ui(
             vk,
             user_id,
             "combat",
-            msg,
+            f"В боевом инвентаре только {available} шт. предмета '{item['name']}'.",
+            keyboard=create_combat_inventory_keyboard(user_id).get_keyboard(),
+        )
+        return True
+
+    messages = []
+    used_count = 0
+    for _ in range(quantity):
+        success, msg = player.use_item(item["name"])
+        messages.append(msg)
+        if not success:
+            break
+        used_count += 1
+
+    if used_count > 1:
+        prefix = f"Использовано предметов: {item['name']} x{used_count}\n" + "\n\n".join(messages)
+    else:
+        prefix = "\n\n".join(messages)
+
+    if not show_current_combat_screen(player, vk, user_id, prefix=prefix):
+        try_edit_or_send_ui(
+            vk,
+            user_id,
+            "combat",
+            prefix,
             keyboard=create_dynamic_combat_keyboard(player, user_id).get_keyboard(),
         )
     return True

@@ -363,6 +363,39 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         from game.gacha.service import is_resonance_enabled
         status = "включён" if is_resonance_enabled() else "отключён"
         _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: только админы.", create_admin_gacha_keyboard()); return True
+    if text == "📈 гача статистика":
+        from game.gacha.service import get_current_banner_stats
+        data = get_current_banner_stats()
+        cycle = data["cycle"]
+        lines = [
+            "📈 СТАТИСТИКА РЕЗОНАНСА",
+            "Обезличенный общий пулл текущего цикла.",
+            f"До конца баннеров: {cycle['formatted']}",
+            "",
+            "Итого:",
+            f"• Откликов: {data['total']['pulls']}",
+            f"• SSR: {data['total']['ssr_total']}",
+            f"• Rate-up SSR: {data['total']['rateup_ssr']}",
+            f"• Проигрышей 50/50: {data['total']['fifty_fifty_losses']}",
+            f"• Средний выкрут до SSR: {data['total_average_pity']:.1f}" if data["total"]["pity_count"] else "• Средний выкрут до SSR: -",
+            "",
+            "По баннерам:",
+        ]
+        for row in data["banners"]:
+            banner = row["banner"]
+            stats = row["stats"]
+            avg = f"{row['average_pity']:.1f}" if stats["pity_count"] else "-"
+            lines.extend([
+                "",
+                f"◆ {banner.name}",
+                f"• Откликов: {stats['pulls']}",
+                f"• SSR: {stats['ssr_total']}",
+                f"• Rate-up SSR: {stats['rateup_ssr']}",
+                f"• Гарантированных rate-up: {stats['guaranteed_rateup']}",
+                f"• Проигрышей 50/50: {stats['fifty_fifty_losses']}",
+                f"• Средний выкрут до SSR: {avg}",
+            ])
+        _send(vk, user_id, "\n".join(lines), create_admin_gacha_keyboard()); return True
     if text == "💠 выдать осколки":
         _send(vk, user_id, "Введи:\nадмин гача осколки <vk_id> <кол-во>", create_admin_gacha_keyboard()); return True
 
@@ -380,6 +413,41 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         from game.gacha.service import is_resonance_enabled
         status = "включён" if is_resonance_enabled() else "отключён"
         _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: только админы.", create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ:?\s+гача\s+(статистика|стата|stats)$", text)
+    if m:
+        from game.gacha.service import get_current_banner_stats
+        data = get_current_banner_stats()
+        cycle = data["cycle"]
+        lines = [
+            "📈 СТАТИСТИКА РЕЗОНАНСА",
+            "Обезличенный общий пулл текущего цикла.",
+            f"До конца баннеров: {cycle['formatted']}",
+            "",
+            "Итого:",
+            f"• Откликов: {data['total']['pulls']}",
+            f"• SSR: {data['total']['ssr_total']}",
+            f"• Rate-up SSR: {data['total']['rateup_ssr']}",
+            f"• Проигрышей 50/50: {data['total']['fifty_fifty_losses']}",
+            f"• Средний выкрут до SSR: {data['total_average_pity']:.1f}" if data["total"]["pity_count"] else "• Средний выкрут до SSR: -",
+            "",
+            "По баннерам:",
+        ]
+        for row in data["banners"]:
+            banner = row["banner"]
+            stats = row["stats"]
+            avg = f"{row['average_pity']:.1f}" if stats["pity_count"] else "-"
+            lines.extend([
+                "",
+                f"◆ {banner.name}",
+                f"• Откликов: {stats['pulls']}",
+                f"• SSR: {stats['ssr_total']}",
+                f"• Rate-up SSR: {stats['rateup_ssr']}",
+                f"• Гарантированных rate-up: {stats['guaranteed_rateup']}",
+                f"• Проигрышей 50/50: {stats['fifty_fifty_losses']}",
+                f"• Средний выкрут до SSR: {avg}",
+            ])
+        _send(vk, user_id, "\n".join(lines), create_admin_gacha_keyboard()); return True
 
     m = re.match(r"^админ\s+гача\s+осколки\s+(\d+)\s+(-?\d+)$", text)
     if m:

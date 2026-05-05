@@ -3429,10 +3429,11 @@ def show_skills_in_combat(player, vk, user_id):
 
     class_id = player.player_class
     if not class_id:
-        vk.messages.send(
-            user_id=user_id,
-            message="⚡ У тебя нет класса!\n\nСначала получи класс у Наставника в Убежище.",
-            random_id=0
+        _send_combat_screen(
+            vk,
+            user_id,
+            "⚡ У тебя нет класса!\n\nСначала получи класс у Наставника в Убежище.",
+            keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
         )
         return
 
@@ -3492,19 +3493,15 @@ def use_skill(player, vk, user_id: int, skill_name: str):
 
     combat = _combat_state.get(user_id)
     if not combat:
-        vk.messages.send(
-            user_id=user_id,
-            message="⚠️ Ты не в бою!",
-            random_id=0
-        )
         return
 
     class_id = player.player_class
     if not class_id:
-        vk.messages.send(
-            user_id=user_id,
-            message="⚡ У тебя нет класса!",
-            random_id=0
+        _send_combat_screen(
+            vk,
+            user_id,
+            f"⚡ У тебя нет класса!\n\n{_format_combat_hud(combat, player)}",
+            keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
         )
         return
 
@@ -3522,29 +3519,32 @@ def use_skill(player, vk, user_id: int, skill_name: str):
             break
 
     if not skill:
-        vk.messages.send(
-            user_id=user_id,
-            message=f"⚡ Навык '{skill_name}' не найден!",
-            random_id=0
+        _send_combat_screen(
+            vk,
+            user_id,
+            f"⚡ Навык '{skill_name}' не найден!\n\n{_format_combat_hud(combat, player)}",
+            keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
         )
         return
 
     # Проверяем кулдаун
     cooldowns = _skill_cooldowns.get(user_id, {})
     if cooldowns.get(skill["name"], 0) > 0:
-        vk.messages.send(
-            user_id=user_id,
-            message=f"⚡ Навык '{skill['name']}' на перезарядке! Осталось {cooldowns[skill['name']]} ходов.",
-            random_id=0
+        _send_combat_screen(
+            vk,
+            user_id,
+            f"⚡ Навык '{skill['name']}' на перезарядке! Осталось {cooldowns[skill['name']]} ходов.\n\n{_format_combat_hud(combat, player)}",
+            keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
         )
         return
 
     # Проверяем энергию
     if player.energy < skill["energy_cost"]:
-        vk.messages.send(
-            user_id=user_id,
-            message=f"⚡ Не хватает энергии! Нужно {skill['energy_cost']}, есть {player.energy}.",
-            random_id=0
+        _send_combat_screen(
+            vk,
+            user_id,
+            f"⚡ Не хватает энергии! Нужно {skill['energy_cost']}, есть {player.energy}.\n\n{_format_combat_hud(combat, player)}",
+            keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
         )
         return
 
@@ -3664,11 +3664,6 @@ def use_skill(player, vk, user_id: int, skill_name: str):
         # Проверяем победу
         if combat['enemy_hp'] <= 0:
             database.update_user_stats(user_id, energy=player.energy)
-            vk.messages.send(
-                user_id=user_id,
-                message=result_msg,
-                random_id=0
-            )
             victory_message = _handle_victory(player, combat, user_id, vk=vk)
             from handlers.keyboards import create_resume_keyboard
             victory_keyboard = None
@@ -3676,13 +3671,26 @@ def use_skill(player, vk, user_id: int, skill_name: str):
                 victory_keyboard = create_combat_keyboard(player, user_id).get_keyboard()
             elif not _will_continue_mutant_hunt(combat):
                 victory_keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard()
-            vk.messages.send(
-                user_id=user_id,
-                message=victory_message,
-                keyboard=victory_keyboard,
-                random_id=0
-            )
-            _maybe_continue_mutant_hunt(player, combat, user_id, vk)
+            if combat.get("dungeon_run"):
+                _send_combat_screen(
+                    vk,
+                    user_id,
+                    f"{result_msg}\n\n{victory_message}",
+                    keyboard=victory_keyboard,
+                )
+            else:
+                vk.messages.send(
+                    user_id=user_id,
+                    message=result_msg,
+                    random_id=0
+                )
+                vk.messages.send(
+                    user_id=user_id,
+                    message=victory_message,
+                    keyboard=victory_keyboard,
+                    random_id=0
+                )
+                _maybe_continue_mutant_hunt(player, combat, user_id, vk)
             return
 
         # Обновляем HP в БД
@@ -4156,11 +4164,6 @@ def handle_combat_attack(player, vk, user_id: int):
 
     if combat['enemy_hp'] <= 0:
         database.update_user_stats(user_id, energy=player.energy)
-        vk.messages.send(
-            user_id=user_id,
-            message=message,
-            random_id=0
-        )
         victory_message = _handle_victory(player, combat, user_id, vk=vk)
         from handlers.keyboards import create_resume_keyboard
         keyboard = None
@@ -4168,13 +4171,26 @@ def handle_combat_attack(player, vk, user_id: int):
             keyboard = create_combat_keyboard(player, user_id).get_keyboard()
         elif not _will_continue_mutant_hunt(combat):
             keyboard = create_resume_keyboard(player.current_location_id, player.level, user_id).get_keyboard()
-        vk.messages.send(
-            user_id=user_id,
-            message=victory_message,
-            keyboard=keyboard,
-            random_id=0
-        )
-        _maybe_continue_mutant_hunt(player, combat, user_id, vk)
+        if combat.get("dungeon_run"):
+            _send_combat_screen(
+                vk,
+                user_id,
+                f"{message}\n\n{victory_message}",
+                keyboard=keyboard,
+            )
+        else:
+            vk.messages.send(
+                user_id=user_id,
+                message=message,
+                random_id=0
+            )
+            vk.messages.send(
+                user_id=user_id,
+                message=victory_message,
+                keyboard=keyboard,
+                random_id=0
+            )
+            _maybe_continue_mutant_hunt(player, combat, user_id, vk)
         return
     else:
         enemy_damage = combat['enemy_damage']

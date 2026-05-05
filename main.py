@@ -916,7 +916,8 @@ def _process_message_event(event, vk):
     lock = _get_user_lock(user_id)
     with lock:
         try:
-            invalidate_edit_targets(user_id)
+            if not is_in_combat(user_id):
+                invalidate_edit_targets(user_id)
             handle_message(event, vk)
         except Exception as e:
             _handle_message_error(event, vk, e)

@@ -4,6 +4,7 @@ from unittest.mock import patch
 from game.gacha import banners, service
 from game.gacha.assets import get_item_image_path
 from game.gacha.event_items import EVENT_ITEM_NAMES, get_event_item_lore, is_gacha_event_item, is_ssr_event_item
+from game.gacha.ui import format_resonance_menu
 from handlers.inventory import build_item_details
 from handlers.keyboards import create_location_keyboard
 from infra import database
@@ -15,10 +16,52 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(banners.TEN_PULL_COST, 1600)
         self.assertEqual(banners.BANNER_DURATION_DAYS, 20)
 
+    def test_banner_time_left_is_formatted_to_seconds(self):
+        self.assertEqual(service.format_seconds_left(2 * 86400 + 3 * 3600 + 4 * 60 + 5), "2д 03:04:05")
+
+    def test_resonance_menu_shows_exact_banner_time_left(self):
+        with patch("game.gacha.ui.get_signal_shards", return_value=160), \
+             patch("game.gacha.ui.get_banner_time_left", return_value={"formatted": "19д 23:59:58"}), \
+             patch("game.gacha.ui.get_banner_state", return_value={
+                 "pity_ssr": 0,
+                 "pity_sr": 0,
+                 "featured_guaranteed": False,
+             }):
+            menu = format_resonance_menu(777)
+
+        self.assertIn("До конца баннера: 19д 23:59:58", menu)
+
     def test_event_items_are_event_only(self):
         self.assertIn("АК-74 «Резонанс»", EVENT_ITEM_NAMES)
         self.assertTrue(is_gacha_event_item("Плащ «Проводник Сигнала»"))
         self.assertFalse(is_gacha_event_item("АК-74"))
+
+    def test_current_banner_stats_are_anonymous_aggregates(self):
+        settings = {}
+
+        def get_setting(key, default=None):
+            return settings.get(key, default)
+
+        def set_setting(key, value):
+            settings[key] = value
+
+        rewards = [
+            service.PullReward("SSR", "АК-74 «Резонанс»", featured=True, pity_count=20),
+            service.PullReward("SSR", "Винторез «Тихий Сигнал»", fifty_fifty_lost=True, pity_count=70),
+            service.PullReward("R", "Бинт"),
+        ]
+
+        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+             patch("game.gacha.service.database.set_game_setting", side_effect=set_setting), \
+             patch("game.gacha.service._now_ts", return_value=1000):
+            service._record_banner_stats(banners.WEAPON_BANNER, rewards)
+            stats = service.get_current_banner_stats()
+
+        weapon_stats = next(row for row in stats["banners"] if row["banner"].id == "weapon")
+        self.assertEqual(weapon_stats["stats"]["pulls"], 3)
+        self.assertEqual(weapon_stats["stats"]["rateup_ssr"], 1)
+        self.assertEqual(weapon_stats["stats"]["fifty_fifty_losses"], 1)
+        self.assertEqual(weapon_stats["average_pity"], 45.0)
 
     def test_gacha_banners_do_not_drop_shells(self):
         for banner in banners.BANNERS.values():
