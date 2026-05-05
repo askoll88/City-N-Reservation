@@ -1047,6 +1047,38 @@ def get_user_storage_load(vk_id: int) -> dict:
         return {"current": current, "capacity": int(config.SHELTER_STORAGE_CAPACITY)}
 
 
+def add_item_to_storage(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+    """Системно добавить предмет в шкаф, минуя рюкзак игрока."""
+    try:
+        safe_qty = int(quantity)
+    except (TypeError, ValueError):
+        return False
+    if safe_qty <= 0:
+        return False
+
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return False
+
+        cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+        item = cursor.fetchone()
+        if not item:
+            return False
+
+        cursor.execute(
+            """
+            INSERT INTO user_storage (user_id, item_id, quantity)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET quantity = user_storage.quantity + EXCLUDED.quantity
+            """,
+            (user["id"], item["id"], safe_qty),
+        )
+    return True
+
+
 def move_item_to_storage_transaction(vk_id: int, item_name: str, quantity: int = 1) -> dict:
     """Переложить предмет из инвентаря в шкаф (атомарно)."""
     safe_qty = max(1, int(quantity or 1))

@@ -120,6 +120,7 @@ def _format_pull_result(result: dict) -> str:
         f"▰ {best_title}",
         f"{result['banner'].name} | Откликов: x{result['count']}",
         f"Потрачено: {result['cost']} осколков | Осталось: {result['shards_left']}",
+        "Предметы отправлены в шкаф убежища.",
         "",
         "• РАСШИФРОВКА СИГНАЛА",
     ]

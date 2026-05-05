@@ -49,11 +49,11 @@ WEAPON_BANNER = Banner(
         RewardEntry("item", "Модуль резонанса оружия"),
     ),
     r_pool=(
-        RewardEntry("shells", "Гильзы", 6, 14),
         RewardEntry("item", "Бинт", 1, 2),
         RewardEntry("item", "Аптечка", 1, 1),
         RewardEntry("item", "Сломанный патрон", 2, 5),
         RewardEntry("item", "Ржавый болт", 1, 3),
+        RewardEntry("item", "Пустая гильза", 2, 5),
     ),
 )
 
@@ -74,11 +74,11 @@ OUTFIT_BANNER = Banner(
         RewardEntry("item", "Ткань с резонансной пропиткой"),
     ),
     r_pool=(
-        RewardEntry("shells", "Гильзы", 5, 12),
         RewardEntry("item", "Бинт", 1, 2),
         RewardEntry("item", "Аптечка", 1, 1),
         RewardEntry("item", "Грязная тряпка", 2, 5),
         RewardEntry("item", "Обрывок проволоки", 1, 3),
+        RewardEntry("item", "Ржавый болт", 1, 3),
     ),
 )
 

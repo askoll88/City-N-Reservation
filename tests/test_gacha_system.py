@@ -20,6 +20,12 @@ class GachaSystemTest(unittest.TestCase):
         self.assertTrue(is_gacha_event_item("Плащ «Проводник Сигнала»"))
         self.assertFalse(is_gacha_event_item("АК-74"))
 
+    def test_gacha_banners_do_not_drop_shells(self):
+        for banner in banners.BANNERS.values():
+            for entry in [*banner.r_pool, *banner.sr_pool]:
+                self.assertNotEqual(entry.kind, "shells")
+                self.assertNotEqual(entry.name.lower(), "гильзы")
+
     def test_ssr_event_items_have_lore_and_image_assets(self):
         self.assertTrue(is_ssr_event_item("АК-74 «Резонанс»"))
         self.assertIn("Эксклюзив Резонанса", get_event_item_lore("АК-74 «Резонанс»"))
@@ -75,7 +81,9 @@ class GachaSystemTest(unittest.TestCase):
              patch("game.gacha.service.database.get_user_flag", side_effect=get_flag), \
              patch("game.gacha.service.database.set_user_flag", side_effect=set_flag), \
              patch("game.gacha.service.database.get_user_inventory", return_value=[]), \
-             patch("game.gacha.service.database.add_item_to_inventory", return_value=True), \
+             patch("game.gacha.service.database.get_user_storage", return_value=[]), \
+             patch("game.gacha.service.database.add_item_to_storage", return_value=True) as add_storage_mock, \
+             patch("game.gacha.service.database.add_item_to_inventory", return_value=True) as add_inventory_mock, \
              patch("game.gacha.service.database.add_shells", return_value=(True, "")):
             result = service.perform_pulls(777, "weapon", 1)
 
@@ -83,6 +91,19 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(result["shards_left"], 0)
         self.assertEqual(result["rewards"][0].rarity, "SSR")
         self.assertEqual(result["state"]["pity_ssr"], 0)
+        add_storage_mock.assert_called_once()
+        add_inventory_mock.assert_not_called()
+
+    def test_duplicate_ssr_checks_storage_and_compensation_goes_to_storage(self):
+        reward = service.PullReward("SSR", "АК-74 «Резонанс»")
+        with patch("game.gacha.service.database.get_user_inventory", return_value=[]), \
+             patch("game.gacha.service.database.get_user_storage", return_value=[{"name": "АК-74 «Резонанс»"}]), \
+             patch("game.gacha.service.database.add_item_to_storage", return_value=True) as add_storage_mock:
+            granted = service._grant_reward(777, reward)
+
+        self.assertTrue(granted.duplicate)
+        self.assertEqual(granted.name, "Осколок пробуждения резонанса")
+        add_storage_mock.assert_called_once_with(777, "Осколок пробуждения резонанса", 1)
 
 
 if __name__ == "__main__":

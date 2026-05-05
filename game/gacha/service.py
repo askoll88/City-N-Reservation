@@ -91,9 +91,15 @@ def get_banner_state(vk_id: int, banner_id: str) -> dict:
 
 def _has_item(vk_id: int, item_name: str) -> bool:
     try:
-        return any(row.get("name") == item_name for row in database.get_user_inventory(vk_id))
+        inventory_has = any(row.get("name") == item_name for row in database.get_user_inventory(vk_id))
+        storage_has = any(row.get("name") == item_name for row in database.get_user_storage(vk_id))
+        return inventory_has or storage_has
     except Exception:
         return False
+
+
+def _grant_item_to_storage(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+    return bool(database.add_item_to_storage(vk_id, item_name, quantity))
 
 
 def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
@@ -102,14 +108,14 @@ def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
         if ok:
             return reward
         fallback = PullReward(reward.rarity, "Ржавый болт", max(1, reward.quantity // 3), kind="item")
-        database.add_item_to_inventory(vk_id, fallback.name, fallback.quantity)
+        _grant_item_to_storage(vk_id, fallback.name, fallback.quantity)
         return fallback
 
     if reward.rarity == "SSR" and is_gacha_event_item(reward.name) and _has_item(vk_id, reward.name):
-        database.add_item_to_inventory(vk_id, AWAKENING_SHARD, 1)
+        _grant_item_to_storage(vk_id, AWAKENING_SHARD, 1)
         return PullReward(reward.rarity, AWAKENING_SHARD, 1, kind="item", duplicate=True)
 
-    database.add_item_to_inventory(vk_id, reward.name, reward.quantity)
+    _grant_item_to_storage(vk_id, reward.name, reward.quantity)
     return reward
 
 
