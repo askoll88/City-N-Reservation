@@ -123,7 +123,7 @@ def answer_event(
         "peer_id": peer_id,
         **extra,
     }
-    if text:
+    if show_snackbar and text:
         kwargs["event_data"] = json.dumps(
             {"type": "show_snackbar", "text": text},
             ensure_ascii=False,

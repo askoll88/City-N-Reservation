@@ -4188,6 +4188,12 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     database.update_user_stats(user_id, money=player.money)
     
     level_up = getattr(player, "_last_level_up_message", None)
+    rank_xp_locked = False
+    try:
+        is_locked = getattr(player, "_is_rank_xp_locked", None)
+        rank_xp_locked = bool(is_locked()) if callable(is_locked) else False
+    except Exception:
+        rank_xp_locked = False
     
     player_hp_bar = _create_hp_bar(player.health, player.max_health, bar_length=14)
 
@@ -4199,14 +4205,18 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
         f"⭐ Опыт: +{gained_xp}\n"
         f"🎯 Гильзы: {current_shells}/{capacity}\n"
     )
+    if gained_xp <= 0 and rank_xp_locked:
+        message += "🔒 Опыт упёрся в потолок текущего ранга. Повысь ранг у Куратора рангов.\n"
+    if level_up:
+        message += f"\n{level_up}\n"
     if reward_mult > 1.0:
         message += f"⚖️ Множитель сложности: x{reward_mult:.2f}\n"
     active_limited = get_active_limited_event()
     if active_limited and abs(event_reward_mult - 1.0) > 0.01:
         message += f"🌐 Ивент «{active_limited.get('name')}»: награда x{event_reward_mult:.2f}\n"
 
-    if not success:
-        message += f"⚠️ Мешочек переполнен! {msg}\n"
+    if added_shells < shells_drop:
+        message += f"⚠️ Гильзы не влезли полностью: {msg}\n"
 
     lvl = max(1, int(getattr(player, "level", 1) or 1))
     hp_ratio = int(getattr(player, "health", 0) or 0) / max(1, int(getattr(player, "max_health", 100) or 100))

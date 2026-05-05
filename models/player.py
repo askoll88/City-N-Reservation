@@ -8,7 +8,14 @@ from infra import database
 import logging
 from models.locations import get_location, Location
 from game import ui
-from game.stat_balance import clamp, luck_crit_bonus, luck_rare_find_bonus, stamina_hp_bonus
+from game.stat_balance import (
+    clamp,
+    luck_crit_bonus,
+    luck_rare_find_bonus,
+    next_stamina_energy_regen_breakpoint,
+    stamina_energy_regen,
+    stamina_hp_bonus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -571,7 +578,22 @@ class Player:
         """Текущий тир ранга (1..N)."""
         tiers_total = len(self.RANK_TIERS)
         value = int(database.get_user_rank_tier(self.user_id, 1) or 1)
-        return max(1, min(tiers_total, value))
+        tier = max(1, min(tiers_total, value))
+
+        # Если сохранённый ранг отстал от уровня, мягко восстанавливаем его.
+        # Повышение ранга переводит игрока на min_level нового ранга, поэтому
+        # level выше диапазона текущего ранга означает повреждённое состояние.
+        inferred_tier = 1
+        level = int(getattr(self, "level", 1) or 1)
+        for idx, rank in enumerate(self.RANK_TIERS, start=1):
+            if level >= int(rank.get("min_level", 1) or 1):
+                inferred_tier = idx
+            if level <= int(rank.get("max_level", self.MAX_LEVEL) or self.MAX_LEVEL):
+                break
+        repaired_tier = max(tier, min(tiers_total, inferred_tier))
+        if repaired_tier != tier:
+            database.set_user_rank_tier(self.user_id, repaired_tier)
+        return repaired_tier
 
     def _set_rank_tier(self, tier: int):
         """Сохранить тир ранга."""
@@ -937,6 +959,7 @@ class Player:
             lines.append(f"⬆️ Свободные очки: {unspent_points}")
         strength_per_level = max(0, int(getattr(game_config, "STRENGTH_DAMAGE_PER_LEVEL", 2) or 2))
         strength_damage_bonus = self.effective_strength * strength_per_level
+        energy_regen = stamina_energy_regen(self.effective_stamina)
         lines.append(f"⚔️ Сила: {self.effective_strength} (+{strength_damage_bonus} урона)  |  🏃 Выносливость: {self.effective_stamina}")
         lines.append(f"👁️ Восприятие: {self.effective_perception}  |  🍀 Удача: {self.effective_luck}")
         base_hp = calculate_player_max_health(self.level, self.effective_stamina, 0)
@@ -944,6 +967,11 @@ class Player:
             lines.append(f"❤️ Макс. HP: {base_hp} + {self.max_health_bonus} от артефактов")
         else:
             lines.append(f"❤️ Макс. HP: {self.max_health} (уровень + выносливость)")
+        next_regen = next_stamina_energy_regen_breakpoint(self.effective_stamina)
+        if next_regen:
+            lines.append(f"🔋 Реген энергии в бою: +{energy_regen}/ход (след. +{next_regen[1]} с {next_regen[0]} выносливости)")
+        else:
+            lines.append(f"🔋 Реген энергии в бою: +{energy_regen}/ход")
         lines.append("")
         lines.append(f"📊 Урон: {self.melee_damage}  |  Броня: {self.total_defense}")
         lines.append(f"🎯 Крит: {self.crit_chance}%  |  Уклонение: {self.dodge_chance}%")
@@ -1617,14 +1645,17 @@ class Player:
         )
 
         item = next((i for i in all_items if i['name'].lower() == item_name.lower()), None)
+        shell_resource_name = None
+        if item_name.strip().lower() in {"гильза", "гильзы"}:
+            shell_resource_name = "Гильза" if item_name.strip().lower() == "гильза" else "Гильзы"
 
-        if not item:
+        if not item and not shell_resource_name:
             return False, f"У тебя нет предмета '{item_name}'."
 
         sell_bonus = self.sell_bonus
         result = db.sell_item_transaction(
             self.user_id,
-            item['name'],
+            shell_resource_name or item['name'],
             sell_bonus_pct=sell_bonus,
             merchant_id=merchant_id,
         )
@@ -1636,7 +1667,8 @@ class Player:
 
         self.inventory.reload()
 
-        return True, f"Ты продал {item_name} за {sell_price} руб.\nДенег: {self.money} руб."
+        message = result.get("message") or f"Ты продал {item_name} за {sell_price} руб."
+        return True, f"{message}\nДенег: {self.money} руб."
 
     def get_shop_items(self, category: str = None) -> list[dict]:
         """Получить список предметов в магазине"""

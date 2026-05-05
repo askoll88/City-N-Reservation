@@ -53,6 +53,17 @@ class RankXpProgressionTests(unittest.TestCase):
         self.assertEqual(player.health, calculate_player_max_health(5, 4, 0))
         update_stats.assert_called()
 
+    def test_rank_tier_repairs_from_current_level_without_downgrade(self):
+        player = self._player()
+        player.level = 14
+
+        with patch("models.player.database.get_user_rank_tier", return_value=3), \
+                patch("models.player.database.set_user_rank_tier") as set_rank:
+            tier = Player._get_rank_tier(player)
+
+        self.assertEqual(tier, 4)
+        set_rank.assert_called_once_with(player.user_id, 4)
+
     def test_old_absolute_xp_is_normalized_to_current_level_progress(self):
         self.assertEqual(normalize_level_experience(5, 10, Player.LEVELS, Player.MAX_LEVEL), 10)
         self.assertEqual(normalize_level_experience(5, Player.LEVELS[5] + 42, Player.LEVELS, Player.MAX_LEVEL), 42)

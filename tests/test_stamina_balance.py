@@ -1,6 +1,11 @@
 import unittest
 
-from game.stat_balance import stamina_energy_regen, stamina_hp_bonus, stamina_research_energy_discount
+from game.stat_balance import (
+    next_stamina_energy_regen_breakpoint,
+    stamina_energy_regen,
+    stamina_hp_bonus,
+    stamina_research_energy_discount,
+)
 from models.player import Player, calculate_player_max_health
 
 
@@ -19,6 +24,10 @@ class StaminaBalanceTests(unittest.TestCase):
         self.assertEqual(stamina_energy_regen(4), 0)
         self.assertGreater(stamina_energy_regen(100), stamina_energy_regen(20))
         self.assertLessEqual(stamina_energy_regen(300), 12)
+
+    def test_energy_regen_breakpoint_is_visible_for_mid_stamina(self):
+        self.assertEqual(stamina_energy_regen(8), 1)
+        self.assertEqual(next_stamina_energy_regen_breakpoint(8), (12, 2))
 
     def test_research_discount_is_soft_capped(self):
         self.assertEqual(stamina_research_energy_discount(4), 0)

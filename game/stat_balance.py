@@ -69,6 +69,17 @@ def stamina_energy_regen(stamina: int | float) -> int:
     return int(round(diminishing_bonus(stamina, baseline=4, cap=12, scale=50)))
 
 
+def next_stamina_energy_regen_breakpoint(stamina: int | float, *, max_stamina: int = 300) -> tuple[int, int] | None:
+    """Return (stamina, regen) for the next visible combat energy regen increase."""
+    current_stamina = max(1, int(stamina or 1))
+    current_regen = stamina_energy_regen(current_stamina)
+    for candidate in range(current_stamina + 1, max(1, int(max_stamina or 1)) + 1):
+        regen = stamina_energy_regen(candidate)
+        if regen > current_regen:
+            return candidate, regen
+    return None
+
+
 def stamina_research_energy_discount(stamina: int | float) -> int:
     """Percent discount for research energy cost from stamina."""
     return int(round(diminishing_bonus(stamina, baseline=4, cap=20, scale=80)))

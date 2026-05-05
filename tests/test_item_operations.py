@@ -38,6 +38,21 @@ class ItemOperationsTest(unittest.TestCase):
 
         self.assertEqual(inventory.total_weight, 0.2)
 
+    @patch("infra.database.update_user_stats")
+    @patch("infra.database.get_item_by_name", return_value={"name": "Маленький мешочек", "backpack_bonus": 10})
+    @patch("infra.database.get_user_by_vk")
+    def test_get_shells_info_clamps_overfilled_equipped_bag(self, get_user_mock, _item_mock, update_stats_mock):
+        get_user_mock.return_value = {
+            "shells": 35,
+            "equipped_shells_bag": "Маленький мешочек",
+        }
+
+        info = database.get_shells_info(1)
+
+        self.assertEqual(info["current"], 10)
+        self.assertEqual(info["capacity"], 10)
+        update_stats_mock.assert_called_once_with(1, shells=10)
+
     @patch("infra.database.db_cursor")
     def test_add_item_rejects_non_positive_quantity_before_db(self, db_cursor_mock):
         self.assertFalse(database.add_item_to_inventory(1, "Бинт", 0))

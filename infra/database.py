@@ -489,15 +489,20 @@ def _migrate_legacy_schema():
                 logger.info("Добавлена колонка users.%s", col)
 
         # Перенос ранга из user_flags в users.rank_tier (если ранее хранили во флагах).
+        # Важное правило: legacy-флаг не должен понижать уже сохранённый ранг.
         cursor.execute("""
             UPDATE users u
-            SET rank_tier = GREATEST(1, COALESCE(uf.value, 1))
+            SET rank_tier = GREATEST(
+                1,
+                COALESCE(u.rank_tier, 1),
+                COALESCE(uf.value, 1)
+            )
             FROM user_flags uf
             WHERE uf.user_id = u.id
               AND uf.flag_name = 'rank_tier'
               AND (
                   u.rank_tier IS NULL
-                  OR u.rank_tier <> GREATEST(1, COALESCE(uf.value, 1))
+                  OR u.rank_tier < GREATEST(1, COALESCE(uf.value, 1))
               )
         """)
 
@@ -1702,6 +1707,37 @@ def get_npc_sell_price_preview(item_name: str, merchant_id: str | None, sell_bon
 # Атомарные операции покупки / продажи
 # ---------------------------------------------------------------------------
 
+_SHELL_RESOURCE_QUANTITY = {
+    "Гильза": 1,
+    "Гильзы": 10,
+}
+
+
+def _shell_resource_quantity(item: dict) -> int:
+    """Количество гильз в resource-предмете, если это спецресурс гильз."""
+    if (item.get("category") or "").lower() != "resources":
+        return 0
+    return int(_SHELL_RESOURCE_QUANTITY.get(str(item.get("name") or ""), 0))
+
+
+def _get_shells_capacity_for_user_id(cursor, user_id: int) -> tuple[int, str | None]:
+    cursor.execute(
+        """
+        SELECT ue.item_name, i.backpack_bonus
+        FROM user_equipment ue
+        JOIN items i ON i.name = ue.item_name
+        WHERE ue.user_id = %s
+          AND ue.slot = 'shells_bag'
+          AND i.category = 'shells_bag'
+        """,
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return 0, None
+    return max(0, int(row.get("backpack_bonus", 0) or 0)), row.get("item_name")
+
+
 def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = None) -> dict:
     """
     Купить предмет. Атомарно: деньги списываются и предмет добавляется
@@ -1715,7 +1751,7 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
             return {"success": False, "message": f"Предмет '{item_name}' не найден"}
         item_data = dict(item_row)
 
-        cursor.execute("SELECT id, money, level FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, money, level, shells FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден"}
@@ -1770,6 +1806,54 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
                 "success": False,
                 "message": f"Не хватает денег. Нужно {price} руб., у тебя {have} руб.",
             }
+
+        shell_qty = _shell_resource_quantity(item_data)
+        if shell_qty > 0:
+            current_shells = max(0, int(user.get("shells") or 0))
+            capacity, equipped_bag = _get_shells_capacity_for_user_id(cursor, user["id"])
+            if capacity <= 0 or not equipped_bag:
+                return {"success": False, "message": "Сначала надень мешочек для гильз."}
+
+            free_space = capacity - current_shells
+            if free_space < shell_qty:
+                return {
+                    "success": False,
+                    "message": f"Не хватает места в мешочке: нужно {shell_qty}, свободно {max(0, free_space)}.",
+                }
+
+            cursor.execute(
+                """
+                UPDATE users
+                SET money = money - %s,
+                    shells = shells + %s
+                WHERE id = %s
+                RETURNING money, shells
+                """,
+                (price, shell_qty, user["id"]),
+            )
+            updated = cursor.fetchone()
+            new_balance = int(updated["money"])
+            new_shells = int(updated["shells"])
+
+            if merchant_id:
+                cursor.execute(
+                    """
+                    UPDATE npc_shop_stock
+                    SET stock_left = stock_left - 1, updated_at = NOW()
+                    WHERE period_key = %s AND merchant_id = %s AND item_id = %s AND stock_left > 0
+                    RETURNING stock_left
+                    """,
+                    (period_key, merchant_id, item_data["id"]),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return {"success": False, "message": "Товар только что закончился. Попробуй другой предмет."}
+                stock_left_after = int(row["stock_left"])
+
+            msg = f"Ты купил гильзы: +{shell_qty} за {price} руб.\nГильзы: {new_shells}/{capacity}."
+            if stock_left_after is not None:
+                msg += f"\nОстаток на витрине: {stock_left_after} шт."
+            return {"success": True, "message": msg, "price": price, "remaining_money": new_balance}
 
         cursor.execute(
             """
@@ -1847,7 +1931,7 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
     with db_cursor() as (cursor, _):
         cursor.execute(
             """
-            SELECT i.id, i.price, i.category
+            SELECT i.id, i.name, i.price, i.category
             FROM items i
             WHERE i.name = %s
             """,
@@ -1857,10 +1941,49 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
         if not item:
             return {"success": False, "message": f"Предмет '{item_name}' не найден"}
 
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, shells FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден"}
+
+        shell_qty = _shell_resource_quantity(dict(item))
+        if shell_qty > 0:
+            current_shells = max(0, int(user.get("shells") or 0))
+            if current_shells < shell_qty:
+                return {"success": False, "message": f"У тебя нет {shell_qty} гильз для продажи."}
+
+            base_price = int(item["price"]) // 2
+            event_bonus_pct = _get_sell_event_bonus_pct(merchant_id, (item.get("category") or "").lower())
+            total_mult = 1.0 + (sell_bonus_pct + event_bonus_pct) / 100.0
+            total_mult = _clamp(total_mult, config.SHOP_SELL_MULT_FLOOR, config.SHOP_SELL_MULT_CEIL)
+            sell_price = max(1, int(base_price * total_mult))
+
+            cursor.execute(
+                """
+                UPDATE users
+                SET shells = shells - %s,
+                    money = money + %s
+                WHERE id = %s AND shells >= %s
+                RETURNING money, shells
+                """,
+                (shell_qty, sell_price, user["id"], shell_qty),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {"success": False, "message": f"У тебя нет {shell_qty} гильз для продажи."}
+
+            bonuses = []
+            if sell_bonus_pct:
+                bonuses.append(f"+{sell_bonus_pct}% класс")
+            if event_bonus_pct:
+                bonuses.append(f"+{event_bonus_pct}% ивент")
+            bonus_msg = f" ({', '.join(bonuses)})" if bonuses else ""
+            return {
+                "success": True,
+                "message": f"Ты продал гильзы x{shell_qty} за {sell_price} руб.{bonus_msg}\nГильз осталось: {int(row['shells'])}",
+                "sell_price": sell_price,
+                "remaining_money": int(row["money"]),
+            }
 
         cursor.execute(
             """
@@ -3067,6 +3190,9 @@ def get_shells_info(vk_id: int) -> dict:
         bag_item = get_item_by_name(equipped_bag)
         if bag_item:
             capacity = bag_item.get('backpack_bonus', 0)
+        if capacity > 0 and int(shells or 0) > int(capacity):
+            shells = int(capacity)
+            update_user_stats(vk_id, shells=shells)
 
     return {
         'current': shells,
@@ -3514,12 +3640,24 @@ def get_user_rank_tier(vk_id: int, default: int = 1) -> int:
 
 
 def set_user_rank_tier(vk_id: int, value: int):
-    """Сохранить ранг пользователя в users.rank_tier."""
+    """Сохранить ранг пользователя в users.rank_tier и обновить legacy-флаг."""
     safe_value = max(1, int(value or 1))
     with db_cursor() as (cursor, _):
         cursor.execute(
-            "UPDATE users SET rank_tier = %s WHERE vk_id = %s",
+            "UPDATE users SET rank_tier = %s WHERE vk_id = %s RETURNING id",
             (safe_value, vk_id),
+        )
+        user = cursor.fetchone()
+        if not user:
+            return
+        cursor.execute(
+            """
+            INSERT INTO user_flags (user_id, flag_name, value)
+            VALUES (%s, 'rank_tier', %s)
+            ON CONFLICT (user_id, flag_name) DO UPDATE
+            SET value = GREATEST(user_flags.value, EXCLUDED.value)
+            """,
+            (user["id"], safe_value),
         )
 
 

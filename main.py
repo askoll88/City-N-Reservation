@@ -950,7 +950,7 @@ def _process_callback_event(event, vk):
             logger.exception("Не удалось ответить на callback после ошибки")
 
 
-def _answer_callback(event, vk, text: str):
+def _answer_callback(event, vk, text: str | None, show_snackbar: bool = True):
     """Быстро закрыть loading-состояние callback-кнопки."""
     return vk_messages.answer_event(
         vk,
@@ -958,7 +958,7 @@ def _answer_callback(event, vk, text: str):
         user_id=event.obj.user_id,
         peer_id=event.obj.peer_id,
         text=text,
-        show_snackbar=True,
+        show_snackbar=show_snackbar,
     )
 
 
@@ -1096,7 +1096,7 @@ def _do_callback_processing(event, vk):
         if not action_text:
             _answer_callback(event, vk, "Действие устарело")
             return
-        _answer_callback(event, vk, "Бой обновлен")
+        _answer_callback(event, vk, None, show_snackbar=False)
         player = get_player(user_id)
         handle_combat_commands(player, vk, user_id, action_text, action_text)
         return

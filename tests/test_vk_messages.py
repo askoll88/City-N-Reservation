@@ -98,6 +98,22 @@ class VkMessagesTests(unittest.TestCase):
         self.assertIn('"type": "show_snackbar"', answered["event_data"])
         self.assertIn('"text": "Готово"', answered["event_data"])
 
+    def test_answer_event_can_ack_without_snackbar_payload(self):
+        vk = _Vk()
+
+        vk_messages.answer_event(
+            vk,
+            event_id="evt",
+            user_id=7,
+            peer_id=7,
+            text="Бой обновлен",
+            show_snackbar=False,
+        )
+
+        answered = vk.messages.answered[0]
+        self.assertEqual(answered["event_id"], "evt")
+        self.assertNotIn("event_data", answered)
+
 
 if __name__ == "__main__":
     unittest.main()

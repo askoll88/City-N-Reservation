@@ -109,6 +109,26 @@ class PlayerTransactionsTest(unittest.TestCase):
         self.assertEqual(p.money, 360)
         self.assertGreaterEqual(p.inventory.reload_calls, 2)
 
+    def test_sell_shells_uses_shell_counter_even_without_inventory_item(self):
+        p = self._make_player(money=300)
+        p._get_passive_bonuses = types.MethodType(lambda self: {}, p)
+        p.inventory = DummyInventory(total_weight=3.0)
+        self.fake_db.sell_item_transaction.return_value = {
+            "success": True,
+            "message": "Ты продал гильзы x10 за 5 руб.\nГильз осталось: 0",
+            "sell_price": 5,
+            "remaining_money": 305,
+        }
+
+        success, msg = p.sell_item("гильзы")
+
+        self.assertTrue(success)
+        self.assertIn("Гильз осталось: 0", msg)
+        self.fake_db.sell_item_transaction.assert_called_once_with(
+            42, "Гильзы", merchant_id=None, sell_bonus_pct=0
+        )
+        self.assertEqual(p.money, 305)
+
 
 if __name__ == "__main__":
     unittest.main()
