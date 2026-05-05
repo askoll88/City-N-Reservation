@@ -5,7 +5,8 @@ import types
 import unittest
 from unittest.mock import Mock
 
-from handlers.keyboards import create_inventory_keyboard
+from handlers.keyboards import create_inventory_hud_keyboard, create_inventory_keyboard
+from infra.state_manager import invalidate_edit_targets
 
 
 class DummyKeyboard:
@@ -163,6 +164,40 @@ class InventorySectionsTest(unittest.TestCase):
 
         self.assertEqual(back_button["action"]["type"], "callback")
         self.assertEqual(payload, {"command": "inventory_back"})
+
+    def test_inventory_hud_keyboard_has_section_and_page_callbacks(self):
+        keyboard = json.loads(create_inventory_hud_keyboard(section="weapons", page=0, total_pages=3).get_keyboard())
+        first_button = keyboard["buttons"][0][0]
+        page_buttons = keyboard["buttons"][3]
+        exit_button = keyboard["buttons"][4][0]
+
+        self.assertTrue(keyboard["inline"])
+        self.assertEqual(json.loads(first_button["action"]["payload"]), {"command": "inventory_section", "section": "weapons"})
+        self.assertEqual(json.loads(page_buttons[0]["action"]["payload"]), {"command": "inventory_page", "section": "weapons", "page": 2})
+        self.assertEqual(json.loads(page_buttons[1]["action"]["payload"]), {"command": "inventory_page", "section": "weapons", "page": 0})
+        self.assertEqual(json.loads(page_buttons[2]["action"]["payload"]), {"command": "inventory_page", "section": "weapons", "page": 1})
+        self.assertEqual(json.loads(exit_button["action"]["payload"]), {"command": "inventory_back"})
+
+    def test_inventory_section_outputs_ten_items_per_page(self):
+        invalidate_edit_targets(8801)
+        self.player.inventory.weapons = [
+            {"name": f"ПМ-{idx:02d}", "quantity": 1, "attack": idx, "weight": 1.0}
+            for idx in range(1, 13)
+        ]
+
+        self.inventory_module.show_weapons(self.player, self.vk, user_id=8801, page=0)
+        first_page = self.vk.messages.sent[0]["message"]
+        self.inventory_module.show_weapons(self.player, self.vk, user_id=8801, page=1)
+        second_page = self.vk.messages.edited[-1]["message"]
+
+        self.assertIn("Страница: 1/2", first_page)
+        self.assertIn("1. 🔫 ПМ-01", first_page)
+        self.assertIn("10. 🔫 ПМ-10", first_page)
+        self.assertNotIn("11. 🔫 ПМ-11", first_page)
+        self.assertIn("Страница: 2/2", second_page)
+        self.assertIn("11. 🔫 ПМ-11", second_page)
+        self.assertIn("12. 🔫 ПМ-12", second_page)
+        self.assertNotIn("10. 🔫 ПМ-10", second_page)
 
 
 if __name__ == "__main__":

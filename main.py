@@ -508,8 +508,8 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
             show_all(player, vk, user_id)
             return True
 
-        # Цифры для выбора предмета (поддерживаем 1-99)
-        if text.isdigit() and 1 <= int(text) <= 99:
+        # Цифры для выбора предмета из текущего раздела.
+        if text.isdigit() and int(text) >= 1:
             if handle_inventory_digit(player, text, vk, user_id):
                 return True
 
@@ -1004,6 +1004,15 @@ def _do_callback_processing(event, vk):
             "map",
             "inventory_section",
             "inventory_back",
+            "inventory_page",
+            "storage_page",
+            "resonance_back",
+            "resonance_banner",
+            "resonance_rates",
+            "resonance_history_index",
+            "resonance_history",
+            "resonance_pull",
+            "resonance_exit",
             "market_purchase",
             "random_event",
         }
@@ -1027,6 +1036,43 @@ def _do_callback_processing(event, vk):
         handle_status_callback(player, vk, user_id, payload)
         return
 
+    if payload.get("command") == "storage_page":
+        _answer_callback(event, vk, "Шкаф обновлен")
+        player = get_player(user_id)
+        from handlers.storage import handle_storage_callback
+        handle_storage_callback(player, vk, user_id, payload)
+        return
+
+    if command.startswith("resonance_"):
+        player = get_player(user_id)
+        if payload.get("command") == "resonance_exit":
+            _answer_callback(event, vk, "Возврат")
+            go_back(player, vk, user_id)
+            return
+        if player.current_location_id != "убежище":
+            _answer_callback(event, vk, "Резонанс доступен в убежище")
+            return
+        from game.gacha.service import is_resonance_available
+        from game.gacha.ui import handle_resonance_callback, show_resonance_menu
+        if not is_resonance_available(user_id):
+            _answer_callback(event, vk, "Резонанс закрыт")
+            show_resonance_menu(player, vk, user_id)
+            return
+        _answer_callback(event, vk, "Резонанс обновлен")
+        handle_resonance_callback(player, vk, user_id, payload)
+        return
+
+    if payload.get("command") == "inventory_page":
+        player = get_player(user_id)
+        if player.current_location_id != "инвентарь":
+            _answer_callback(event, vk, "Сначала открой инвентарь")
+            return
+
+        _answer_callback(event, vk, "Инвентарь обновлен")
+        from handlers.inventory import handle_inventory_page_callback
+        handle_inventory_page_callback(player, vk, user_id, payload)
+        return
+
     if payload.get("command") == "inventory_section":
         section = payload.get("section")
         player = get_player(user_id)
@@ -1034,30 +1080,12 @@ def _do_callback_processing(event, vk):
             _answer_callback(event, vk, "Сначала открой инвентарь")
             return
 
-        from handlers.inventory import (
-            show_all,
-            show_armor,
-            show_artifacts,
-            show_backpacks,
-            show_other,
-            show_weapons,
-        )
-
-        section_handlers = {
-            "weapons": show_weapons,
-            "armor": show_armor,
-            "backpacks": show_backpacks,
-            "artifacts": show_artifacts,
-            "other": show_other,
-            "all": show_all,
-        }
-        handler = section_handlers.get(section)
-        if not handler:
+        from handlers.inventory import show_inventory_section
+        if not show_inventory_section(player, vk, user_id, str(section or "all"), page=0):
             _answer_callback(event, vk, "Раздел устарел")
             return
 
         _answer_callback(event, vk, "Инвентарь обновлен")
-        handler(player, vk, user_id)
         return
 
     if payload.get("command") == "inventory_back":

@@ -1,6 +1,9 @@
+import json
 import unittest
+from unittest.mock import patch
 
-from handlers.storage import _parse_transfer_payload
+from handlers.keyboards import create_storage_keyboard
+from handlers.storage import _parse_transfer_payload, format_storage_page, show_storage
 
 
 class StorageParsingTest(unittest.TestCase):
@@ -22,6 +25,55 @@ class StorageParsingTest(unittest.TestCase):
         res = _parse_transfer_payload("0 Бинт")
         self.assertIsNone(res[0])
         self.assertIn("Количество", res[1])
+
+    def test_storage_keyboard_uses_callback_pagination(self):
+        keyboard = create_storage_keyboard(page=0, total_pages=3).get_keyboard()
+        buttons = json.loads(keyboard)["buttons"][0]
+        payloads = [json.loads(button["action"]["payload"]) for button in buttons]
+
+        self.assertEqual(buttons[0]["action"]["type"], "callback")
+        self.assertEqual(payloads[0], {"command": "storage_page", "page": 2})
+        self.assertEqual(payloads[1], {"command": "storage_page", "page": 0})
+        self.assertEqual(payloads[2], {"command": "storage_page", "page": 1})
+
+    def test_storage_page_outputs_ten_items(self):
+        storage = [{"name": f"Item-{idx:02d}", "quantity": idx} for idx in range(1, 22)]
+        load = {"current": len(storage), "capacity": 80}
+
+        first_page, safe_page, total_pages = format_storage_page(storage, load, page=0)
+        second_page, _, _ = format_storage_page(storage, load, page=1)
+
+        self.assertEqual(safe_page, 0)
+        self.assertEqual(total_pages, 3)
+        self.assertIn("Страница: 1/3", first_page)
+        self.assertIn("1. Item-01 x1", first_page)
+        self.assertIn("10. Item-10 x10", first_page)
+        self.assertNotIn("11. Item-11 x11", first_page)
+        self.assertIn("Страница: 2/3", second_page)
+        self.assertIn("11. Item-11 x11", second_page)
+        self.assertIn("20. Item-20 x20", second_page)
+        self.assertNotIn("10. Item-10 x10", second_page)
+
+    def test_show_storage_uses_storage_hud(self):
+        class Player:
+            current_location_id = "убежище"
+            level = 1
+
+        storage = [{"name": "Бинт", "quantity": 3}]
+        load = {"current": 1, "capacity": 80}
+        with patch("handlers.storage.database.get_user_storage", return_value=storage), \
+             patch("handlers.storage.database.get_user_storage_load", return_value=load), \
+             patch("handlers.storage.get_ui_current_screen", return_value={"name": "location"}), \
+             patch("handlers.storage.set_ui_screen") as set_ui_screen, \
+             patch("handlers.storage.try_edit_or_send_ui") as send_ui:
+            show_storage(Player(), object(), 777)
+
+        set_ui_screen.assert_called_once()
+        send_ui.assert_called_once()
+        args, kwargs = send_ui.call_args
+        self.assertEqual(args[2], "storage")
+        self.assertIn("Бинт", args[3])
+        self.assertIn("keyboard", kwargs)
 
 
 if __name__ == "__main__":

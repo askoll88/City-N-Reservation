@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 from infra import database
-from handlers.keyboards import create_location_keyboard
+from infra.state_manager import get_ui_current_screen, set_ui_screen, try_edit_or_send_ui
+from handlers.keyboards import create_location_keyboard, create_storage_keyboard
+
+
+STORAGE_PAGE_SIZE = 10
 
 
 def _all_player_items(player) -> list[dict]:
@@ -62,7 +66,51 @@ def _equipped_block_reason(player, item_name: str) -> str | None:
     return None
 
 
-def show_storage(player, vk, user_id: int):
+def _storage_page_bounds(total_items: int, page: int = 0) -> tuple[int, int, int, int]:
+    total_pages = max(1, (max(0, int(total_items)) + STORAGE_PAGE_SIZE - 1) // STORAGE_PAGE_SIZE)
+    safe_page = max(0, min(total_pages - 1, int(page or 0)))
+    start = safe_page * STORAGE_PAGE_SIZE
+    end = start + STORAGE_PAGE_SIZE
+    return safe_page, total_pages, start, end
+
+
+def _current_storage_page(user_id: int) -> int:
+    current = get_ui_current_screen(user_id)
+    if current.get("name") != "storage":
+        return 0
+    return int(current.get("page", 0) or 0)
+
+
+def format_storage_page(storage: list[dict], load: dict, page: int = 0) -> tuple[str, int, int]:
+    safe_page, total_pages, start, end = _storage_page_bounds(len(storage), page)
+    current = int(load["current"])
+    capacity = int(load["capacity"])
+
+    lines = [
+        "🗄️ ШКАФ УБЕЖИЩА",
+        f"Страница: {safe_page + 1}/{total_pages}",
+        f"Заполнение: {current}/{capacity} слотов",
+        "",
+    ]
+    if not storage:
+        lines.append("Шкаф пуст.")
+    else:
+        lines.append("Содержимое:")
+        for idx, item in enumerate(storage[start:end], start + 1):
+            lines.append(f"{idx}. {item['name']} x{int(item.get('quantity', 1) or 1)}")
+
+    lines += [
+        "",
+        "Команды:",
+        "• в шкаф <предмет>",
+        "• в шкаф <кол-во> <предмет>",
+        "• из шкафа <предмет>",
+        "• из шкафа <кол-во> <предмет>",
+    ]
+    return "\n".join(lines), safe_page, total_pages
+
+
+def show_storage(player, vk, user_id: int, page: int = 0):
     if player.current_location_id != "убежище":
         vk.messages.send(
             user_id=user_id,
@@ -74,34 +122,16 @@ def show_storage(player, vk, user_id: int):
 
     storage = database.get_user_storage(user_id)
     load = database.get_user_storage_load(user_id)
-    current = int(load["current"])
-    capacity = int(load["capacity"])
-
-    lines = [
-        "🗄️ ШКАФ УБЕЖИЩА",
-        f"Заполнение: {current}/{capacity} слотов",
-        "",
-    ]
-    if not storage:
-        lines.append("Шкаф пуст.")
-    else:
-        lines.append("Содержимое:")
-        for idx, item in enumerate(storage, 1):
-            lines.append(f"{idx}. {item['name']} x{int(item.get('quantity', 1) or 1)}")
-
-    lines += [
-        "",
-        "Команды:",
-        "• в шкаф <предмет>",
-        "• в шкаф <кол-во> <предмет>",
-        "• из шкафа <предмет>",
-        "• из шкафа <кол-во> <предмет>",
-    ]
-    vk.messages.send(
-        user_id=user_id,
-        message="\n".join(lines),
-        keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
-        random_id=0,
+    message, safe_page, total_pages = format_storage_page(storage, load, page)
+    current_ui = get_ui_current_screen(user_id)
+    push_current = current_ui.get("name") != "storage"
+    set_ui_screen(user_id, {"name": "storage", "page": safe_page}, push_current=push_current)
+    try_edit_or_send_ui(
+        vk,
+        user_id,
+        "storage",
+        message,
+        keyboard=create_storage_keyboard(safe_page, total_pages).get_keyboard(),
     )
 
 
@@ -159,7 +189,7 @@ def put_to_storage(player, vk, user_id: int, payload: str):
         return
 
     player.inventory.reload()
-    show_storage(player, vk, user_id)
+    show_storage(player, vk, user_id, page=_current_storage_page(user_id))
 
 
 def take_from_storage(player, vk, user_id: int, payload: str):
@@ -221,4 +251,11 @@ def take_from_storage(player, vk, user_id: int, payload: str):
         return
 
     player.inventory.reload()
-    show_storage(player, vk, user_id)
+    show_storage(player, vk, user_id, page=_current_storage_page(user_id))
+
+
+def handle_storage_callback(player, vk, user_id: int, payload: dict) -> bool:
+    if payload.get("command") != "storage_page":
+        return False
+    show_storage(player, vk, user_id, int(payload.get("page", 0) or 0))
+    return True

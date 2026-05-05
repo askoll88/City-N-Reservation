@@ -110,7 +110,10 @@ def show_weapon_upgrade_menu(player, vk, user_id: int):
 
     player.inventory.reload()
     materials = database.get_user_weapon_materials(user_id)
-    weapons = list(player.inventory.weapons)
+    equipped_weapon = next(
+        (weapon for weapon in player.inventory.weapons if weapon.get("name") == player.equipped_weapon),
+        None,
+    )
 
     lines = [
         "🔧 УЛУЧШЕНИЕ ОРУЖИЯ",
@@ -128,28 +131,25 @@ def show_weapon_upgrade_menu(player, vk, user_id: int):
         lines.append(f"• {name}: x{materials.get(name, 0)}")
 
     lines.append("")
-    lines.append("Оружие:")
-    if weapons:
-        for idx, weapon in enumerate(weapons, 1):
-            equipped = " [НАДЕТО]" if weapon.get("name") == player.equipped_weapon else ""
-            name = weapon.get("name", "Оружие")
-            level = int(weapon.get("item_level", 1) or 1)
-            cap = int(weapon.get("weapon_cap", weapon.get("required_level", 1)) or 1)
-            ascension = int(weapon.get("weapon_ascension", 0) or 0)
-            attack = int(weapon.get("attack", 0) or 0)
-            rank = weapon.get("item_rank", "common")
-            lines.append(f"{idx}. {name}{equipped}")
-            lines.append(f"   ATK {attack} | L{level}/{cap} | Прорыв {ascension}/10 | Ранг {rank}")
-            if weapon.get("event_bonus_text"):
-                lines.append(f"   Доп. стат: {weapon.get('event_bonus_name')}: {weapon.get('event_bonus_text')}")
+    lines.append("Надетое оружие:")
+    if equipped_weapon:
+        name = equipped_weapon.get("name", "Оружие")
+        level = int(equipped_weapon.get("item_level", 1) or 1)
+        cap = int(equipped_weapon.get("weapon_cap", equipped_weapon.get("required_level", 1)) or 1)
+        ascension = int(equipped_weapon.get("weapon_ascension", 0) or 0)
+        attack = int(equipped_weapon.get("attack", 0) or 0)
+        rank = equipped_weapon.get("item_rank", "common")
+        lines.append(name)
+        lines.append(f"ATK {attack} | L{level}/{cap} | Прорыв {ascension}/10 | Ранг {rank}")
+        if equipped_weapon.get("event_bonus_text"):
+            lines.append(f"Доп. стат: {equipped_weapon.get('event_bonus_name')}: {equipped_weapon.get('event_bonus_text')}")
     else:
-        lines.append("Оружия в инвентаре нет.")
+        lines.append("Оружие не надето. Открой инвентарь и надень нужный предмет.")
 
     lines.append("")
     lines.append("Команды:")
-    lines.append("• улучшить оружие <название> — поднять уровни до текущего капа")
-    lines.append("• прорыв оружия <название> — открыть следующий диапазон")
-    lines.append("Если оружие надето, можно нажать кнопку без названия.")
+    lines.append("• улучшить оружие — поднять надетое оружие до текущего капа")
+    lines.append("• прорыв оружия — открыть следующий диапазон надетого оружия")
 
     vk.messages.send(
         user_id=user_id,

@@ -5,9 +5,14 @@ from __future__ import annotations
 import threading
 
 from infra import database
+from infra.state_manager import get_ui_current_screen, set_ui_screen
 from game import ui
 from game.anomalies import is_detector_name
 from game.constants import InventorySection
+from handlers.keyboards import create_inventory_hud_keyboard
+
+
+INVENTORY_PAGE_SIZE = 10
 
 
 def _fmt_weight(item: dict, default: float = 1.0) -> str:
@@ -151,10 +156,29 @@ def _screen_footer(action_hint: str) -> str:
     )
 
 
-def _send_inventory_screen(vk, user_id: int, message: str, keyboard=None):
+def _page_bounds(total_items: int, page: int = 0) -> tuple[int, int, int, int]:
+    total_pages = max(1, (max(0, int(total_items)) + INVENTORY_PAGE_SIZE - 1) // INVENTORY_PAGE_SIZE)
+    safe_page = max(0, min(total_pages - 1, int(page or 0)))
+    start = safe_page * INVENTORY_PAGE_SIZE
+    end = start + INVENTORY_PAGE_SIZE
+    return safe_page, total_pages, start, end
+
+
+def _page_prefix(page: int, total_pages: int) -> str:
+    return f"Страница: {page + 1}/{total_pages}\n\n"
+
+
+def _inventory_hud_keyboard(section: str, page: int, total_pages: int):
+    return create_inventory_hud_keyboard(section=section, page=page, total_pages=total_pages).get_keyboard()
+
+
+def _send_inventory_screen(vk, user_id: int, message: str, keyboard=None, *, section: str = "all", page: int = 0):
     """Обновить активный экран инвентаря без засорения чата."""
     from infra.state_manager import try_edit_or_send_ui
 
+    current_ui = get_ui_current_screen(user_id)
+    push_current = current_ui.get("name") != "inventory"
+    set_ui_screen(user_id, {"name": "inventory", "section": section, "page": int(page or 0)}, push_current=push_current)
     try_edit_or_send_ui(vk, user_id, "inventory", message, keyboard=keyboard)
 
 
@@ -319,7 +343,7 @@ def handle_inventory_digit(player, text: str, vk, user_id: int) -> bool:
     """Обработка цифр 1-99 в инвентаре. Возвращает True если обработано."""
     from main import create_inventory_keyboard
     
-    if not text.isdigit() or not (1 <= int(text) <= 99):
+    if not text.isdigit() or int(text) < 1:
         return False
     
     section = player.inventory_section
@@ -537,18 +561,18 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
 
 # === Разделы инвентаря ===
 
-def show_weapons(player, vk, user_id: int):
+def show_weapons(player, vk, user_id: int, page: int = 0):
     """Показать оружие"""
-    from main import create_inventory_keyboard
     from infra import database
 
     player.inventory_section = 'weapons'
     database.update_user_stats(user_id, inventory_section='weapons')
 
     items = player.inventory.weapons
+    safe_page, total_pages, start, end = _page_bounds(len(items), page)
     if items:
-        msg = _screen_header("Инвентарь: оружие", player) + "\n"
-        for idx, item in enumerate(items, 1):
+        msg = _screen_header("Инвентарь: оружие", player) + "\n" + _page_prefix(safe_page, total_pages)
+        for idx, item in enumerate(items[start:end], start + 1):
             msg += _inventory_card(
                 idx,
                 item,
@@ -569,21 +593,28 @@ def show_weapons(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: оружие", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
+    _send_inventory_screen(
+        vk,
+        user_id,
+        msg,
+        keyboard=_inventory_hud_keyboard("weapons", safe_page, total_pages),
+        section="weapons",
+        page=safe_page,
+    )
 
 
-def show_armor(player, vk, user_id: int):
+def show_armor(player, vk, user_id: int, page: int = 0):
     """Показать броню"""
-    from main import create_inventory_keyboard
     from infra import database
 
     player.inventory_section = 'armor'
     database.update_user_stats(user_id, inventory_section='armor')
 
     items = player.inventory.armor
+    safe_page, total_pages, start, end = _page_bounds(len(items), page)
     if items:
-        msg = _screen_header("Инвентарь: броня", player) + "\n"
-        for idx, item in enumerate(items, 1):
+        msg = _screen_header("Инвентарь: броня", player) + "\n" + _page_prefix(safe_page, total_pages)
+        for idx, item in enumerate(items[start:end], start + 1):
             item_name = item['name']
             # Проверяем, экипирована ли броня в любом слоте
             equipped = item_name in [
@@ -599,20 +630,28 @@ def show_armor(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: броня", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
+    _send_inventory_screen(
+        vk,
+        user_id,
+        msg,
+        keyboard=_inventory_hud_keyboard("armor", safe_page, total_pages),
+        section="armor",
+        page=safe_page,
+    )
 
 
-def show_backpacks(player, vk, user_id: int):
+def show_backpacks(player, vk, user_id: int, page: int = 0):
     """Показать рюкзаки"""
-    from main import create_inventory_keyboard
     from infra import database
 
     player.inventory_section = 'backpacks'
     database.update_user_stats(user_id, inventory_section='backpacks')
 
-    if player.inventory.backpacks:
-        msg = _screen_header("Инвентарь: рюкзаки", player) + "\n"
-        for idx, b in enumerate(player.inventory.backpacks, 1):
+    items = player.inventory.backpacks
+    safe_page, total_pages, start, end = _page_bounds(len(items), page)
+    if items:
+        msg = _screen_header("Инвентарь: рюкзаки", player) + "\n" + _page_prefix(safe_page, total_pages)
+        for idx, b in enumerate(items[start:end], start + 1):
             msg += _inventory_card(
                 idx,
                 b,
@@ -625,12 +664,18 @@ def show_backpacks(player, vk, user_id: int):
     else:
         msg = _screen_header("Инвентарь: рюкзаки", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
+    _send_inventory_screen(
+        vk,
+        user_id,
+        msg,
+        keyboard=_inventory_hud_keyboard("backpacks", safe_page, total_pages),
+        section="backpacks",
+        page=safe_page,
+    )
 
 
-def show_artifacts(player, vk, user_id: int):
+def show_artifacts(player, vk, user_id: int, page: int = 0):
     """Показать артефакты"""
-    from main import create_inventory_keyboard
     from infra import database
 
     player.inventory_section = 'artifacts'
@@ -639,51 +684,58 @@ def show_artifacts(player, vk, user_id: int):
     equipped = player.equipped_artifacts
     artifacts = player.inventory.artifacts
 
-    msg = _screen_header("Инвентарь: артефакты", player) + "\n"
+    rows = []
+    for idx, art_name in enumerate(equipped, 1):
+        art_info = database.get_item_by_name(art_name) or {"name": art_name, "quantity": 1, "weight": 0.5}
+        bonus_str = _artifact_bonus_text(art_info)
+        rows.append(f"{idx}. 🔮 {art_name} [ЭКИП]\n   {bonus_str}\n")
+    for idx, art in enumerate(artifacts, len(equipped) + 1):
+        rows.append(_inventory_card(idx, art, "🔸", [_artifact_bonus_text(art)], default_weight=0.5))
 
-    if equipped:
-        msg += f"{ui.section('Надето')}\n"
-        for idx, art_name in enumerate(equipped, 1):
-            art_info = database.get_item_by_name(art_name)
-            if art_info:
-                bonus_str = _artifact_bonus_text(art_info)
-                msg += f"{idx}. 🔮 {art_name} [ЭКИП]\n   {bonus_str}\n"
-
-    if artifacts:
-        msg += f"\n{ui.section('В рюкзаке')}\n"
-        for idx, art in enumerate(artifacts, len(equipped) + 1):
-            msg += _inventory_card(
-                idx,
-                art,
-                "🔸",
-                [_artifact_bonus_text(art)],
-                default_weight=0.5,
-            )
+    safe_page, total_pages, start, end = _page_bounds(len(rows), page)
+    if rows:
+        msg = _screen_header("Инвентарь: артефакты", player) + "\n" + _page_prefix(safe_page, total_pages)
+        msg += "".join(rows[start:end])
+        msg += f"\nСлоты: {len(equipped)}/{player.artifact_slots}"
         msg += _screen_footer("надеть/снять")
-    elif not equipped:
+    else:
         msg = _screen_header("Инвентарь: артефакты", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
+    _send_inventory_screen(
+        vk,
+        user_id,
+        msg,
+        keyboard=_inventory_hud_keyboard("artifacts", safe_page, total_pages),
+        section="artifacts",
+        page=safe_page,
+    )
 
 
-def show_other(player, vk, user_id: int):
+def show_other(player, vk, user_id: int, page: int = 0):
     """Показать другие предметы"""
-    from main import create_inventory_keyboard
     from infra import database
 
     player.inventory_section = 'other'
     database.update_user_stats(user_id, inventory_section='other')
 
     items = player.inventory.other
+    safe_page, total_pages, start, end = _page_bounds(len(items), page)
     if items:
-        msg = _screen_header("Инвентарь: другое", player) + "\n"
-        for idx, item in enumerate(items, 1):
+        msg = _screen_header("Инвентарь: другое", player) + "\n" + _page_prefix(safe_page, total_pages)
+        for idx, item in enumerate(items[start:end], start + 1):
             msg += _inventory_card(idx, item, "📦", [], equipped=item['name'] == player.equipped_device, default_weight=0.5)
         msg += _screen_footer("использовать/экипировать")
     else:
         msg = _screen_header("Инвентарь: другое", player) + "\nПусто."
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
+    _send_inventory_screen(
+        vk,
+        user_id,
+        msg,
+        keyboard=_inventory_hud_keyboard("other", safe_page, total_pages),
+        section="other",
+        page=safe_page,
+    )
 
 
 def show_resources_shop(player, vk, user_id: int):
@@ -739,11 +791,10 @@ def show_resources_shop(player, vk, user_id: int):
     vk.messages.send(user_id=user_id, message=msg, random_id=0)
 
 
-def show_all(player, vk, user_id: int):
+def show_all(player, vk, user_id: int, page: int = 0):
     """Показать весь инвентарь"""
-    from main import create_inventory_keyboard
-
     player.inventory.reload()
+    safe_page, total_pages, _start, _end = _page_bounds(0, page)
 
     msg = (
         _screen_header("Инвентарь: сводка", player)
@@ -759,7 +810,38 @@ def show_all(player, vk, user_id: int):
         + "\nОткрой нужную категорию кнопками ниже — так читать проще."
     )
 
-    _send_inventory_screen(vk, user_id, msg, keyboard=create_inventory_keyboard().get_keyboard())
+    _send_inventory_screen(
+        vk,
+        user_id,
+        msg,
+        keyboard=_inventory_hud_keyboard("all", safe_page, total_pages),
+        section="all",
+        page=safe_page,
+    )
+
+
+def show_inventory_section(player, vk, user_id: int, section: str, page: int = 0) -> bool:
+    section_handlers = {
+        "weapons": show_weapons,
+        "armor": show_armor,
+        "backpacks": show_backpacks,
+        "artifacts": show_artifacts,
+        "other": show_other,
+        "all": show_all,
+    }
+    handler = section_handlers.get(section)
+    if not handler:
+        return False
+    handler(player, vk, user_id, page=page)
+    return True
+
+
+def handle_inventory_page_callback(player, vk, user_id: int, payload: dict) -> bool:
+    if payload.get("command") != "inventory_page":
+        return False
+    section = str(payload.get("section") or getattr(player, "inventory_section", None) or "all")
+    page = int(payload.get("page", 0) or 0)
+    return show_inventory_section(player, vk, user_id, section, page=page)
 
 
 def show_equipped_artifacts(player, vk, user_id: int):
@@ -1231,7 +1313,8 @@ def handle_drop_item_by_index(player, index: int, vk, user_id: int):
         elif section == 'backpacks':
             items = player.inventory.backpacks
         elif section == 'artifacts':
-            items = player.inventory.artifacts
+            equipped = [{"name": name, "category": "artifacts"} for name in player.equipped_artifacts]
+            items = equipped + player.inventory.artifacts
         elif section == 'other':
             items = player.inventory.other
         else:

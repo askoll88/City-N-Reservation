@@ -35,6 +35,8 @@ DUPLICATE_SSR_SHARDS = SINGLE_PULL_COST * DUPLICATE_SSR_PULLS
 SIGNAL_SHARDS_REWARD_NAME = "Осколки сигнала"
 EVENT_SHARDS_DAILY_CAP = 80
 COMBAT_SHARDS_DAILY_CAP = 120
+RESONANCE_HISTORY_RUNTIME_KEY = "resonance_history"
+RESONANCE_HISTORY_LIMIT_PER_BANNER = 50
 
 
 def _today_ordinal() -> int:
@@ -384,6 +386,7 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
     _record_banner_stats(banner, raw_rewards)
     _save_banner_state(vk_id, banner.id, state)
     shards_left = get_signal_shards(vk_id)
+    _record_pull_history(vk_id, banner, count, cost, rewards, shards_left)
 
     return {
         "success": True,
@@ -398,6 +401,75 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
 
 def get_banners() -> tuple[Banner, ...]:
     return tuple(BANNERS.values())
+
+
+def _load_pull_history(vk_id: int) -> dict:
+    data = database.get_runtime_state(vk_id, RESONANCE_HISTORY_RUNTIME_KEY) or {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _save_pull_history(vk_id: int, data: dict) -> None:
+    database.set_runtime_state(vk_id, RESONANCE_HISTORY_RUNTIME_KEY, data or {})
+
+
+def _record_pull_history(
+    vk_id: int,
+    banner: Banner,
+    count: int,
+    cost: int,
+    rewards: list[PullReward],
+    shards_left: int,
+) -> None:
+    """Сохранить короткую историю откликов игрока отдельно по баннерам."""
+    try:
+        data = _load_pull_history(vk_id)
+        rows = list(data.get(banner.id) or [])
+        best_rarity = "SSR" if any(r.rarity == "SSR" for r in rewards) else "SR" if any(r.rarity == "SR" for r in rewards) else "R"
+        rows.insert(0, {
+            "ts": _now_ts(),
+            "banner_id": banner.id,
+            "banner_name": banner.name,
+            "count": int(count),
+            "cost": int(cost),
+            "shards_left": int(shards_left),
+            "best_rarity": best_rarity,
+            "rewards": [
+                {
+                    "rarity": reward.rarity,
+                    "name": reward.name,
+                    "quantity": int(reward.quantity),
+                    "duplicate": bool(reward.duplicate),
+                    "source_name": reward.source_name,
+                }
+                for reward in rewards
+            ],
+        })
+        data[banner.id] = rows[:RESONANCE_HISTORY_LIMIT_PER_BANNER]
+        _save_pull_history(vk_id, data)
+    except Exception:
+        # История не должна ломать выдачу награды.
+        return
+
+
+def get_pull_history(vk_id: int, banner_id: str, page: int = 0, page_size: int = 5) -> dict:
+    banner = get_banner(banner_id)
+    if not banner:
+        return {"banner": None, "items": [], "page": 0, "total_pages": 1, "total": 0}
+    data = _load_pull_history(vk_id)
+    rows = list(data.get(banner.id) or [])
+    safe_size = max(1, int(page_size or 5))
+    total_pages = max(1, (len(rows) + safe_size - 1) // safe_size)
+    safe_page = max(0, min(total_pages - 1, int(page or 0)))
+    start = safe_page * safe_size
+    return {
+        "banner": banner,
+        "items": rows[start:start + safe_size],
+        "page": safe_page,
+        "total_pages": total_pages,
+        "total": len(rows),
+    }
 
 
 def _stats_key(cycle_start_ts: int, banner_id: str) -> str:

@@ -1,10 +1,17 @@
+import json
 import unittest
 from unittest.mock import patch
 
 from game.gacha import banners, service
 from game.gacha.assets import get_item_image_path
 from game.gacha.event_items import EVENT_ITEM_NAMES, get_event_item_lore, is_gacha_event_item, is_ssr_event_item
-from game.gacha.ui import format_resonance_menu
+from game.gacha.ui import (
+    create_resonance_banner_keyboard,
+    create_resonance_history_keyboard,
+    create_resonance_keyboard,
+    format_history,
+    format_resonance_menu,
+)
 from handlers.inventory import build_item_details
 from handlers.keyboards import create_location_keyboard
 from infra import database
@@ -30,6 +37,91 @@ class GachaSystemTest(unittest.TestCase):
             menu = format_resonance_menu(777)
 
         self.assertIn("До конца баннера: 19д 23:59:58", menu)
+
+    def test_resonance_main_keyboard_is_uncluttered_hud(self):
+        keyboard = json.loads(create_resonance_keyboard().get_keyboard())
+        payload = json.dumps(keyboard, ensure_ascii=False)
+
+        self.assertTrue(keyboard["inline"])
+        self.assertIn("Резонанс оружия", payload)
+        self.assertIn("Резонанс снаряжения", payload)
+        self.assertIn("Шансы оружия", payload)
+        self.assertIn("Шансы снаряжения", payload)
+        self.assertIn("История резонанса", payload)
+        self.assertNotIn('"label": "Резонанс Зоны"', payload)
+
+    def test_resonance_banner_keyboard_moves_pull_buttons_inside_banner(self):
+        keyboard = json.loads(create_resonance_banner_keyboard("weapon").get_keyboard())
+        first_row = keyboard["buttons"][0]
+        payloads = [json.loads(button["action"]["payload"]) for button in first_row]
+
+        self.assertEqual(payloads[0], {"command": "resonance_pull", "banner": "weapon", "count": 1})
+        self.assertEqual(payloads[1], {"command": "resonance_pull", "banner": "weapon", "count": 10})
+
+    def test_resonance_history_keyboard_has_hud_pagination_and_back(self):
+        keyboard = json.loads(create_resonance_history_keyboard("weapon", page=0, total_pages=3).get_keyboard())
+        page_payloads = [json.loads(button["action"]["payload"]) for button in keyboard["buttons"][0]]
+        back_payload = json.loads(keyboard["buttons"][1][0]["action"]["payload"])
+
+        self.assertEqual(page_payloads[0], {"command": "resonance_history", "banner": "weapon", "page": 2})
+        self.assertEqual(page_payloads[1], {"command": "resonance_history", "banner": "weapon", "page": 0})
+        self.assertEqual(page_payloads[2], {"command": "resonance_history", "banner": "weapon", "page": 1})
+        self.assertEqual(back_payload, {"command": "resonance_back"})
+
+    def test_pull_history_is_separate_by_banner(self):
+        storage = {}
+
+        def get_state(_vk_id, key):
+            return storage.get(key)
+
+        def set_state(_vk_id, key, payload):
+            storage[key] = payload
+
+        with patch("game.gacha.service.database.get_runtime_state", side_effect=get_state), \
+             patch("game.gacha.service.database.set_runtime_state", side_effect=set_state), \
+             patch("game.gacha.service._now_ts", return_value=123456):
+            service._record_pull_history(
+                777,
+                banners.WEAPON_BANNER,
+                1,
+                banners.SINGLE_PULL_COST,
+                [service.PullReward("SSR", "АК-74 «Резонанс»")],
+                0,
+            )
+            service._record_pull_history(
+                777,
+                banners.OUTFIT_BANNER,
+                10,
+                banners.TEN_PULL_COST,
+                [service.PullReward("SR", "Куртка «Глухой эфир»")],
+                160,
+            )
+            history = service.get_pull_history(777, "weapon")
+
+        self.assertEqual(len(storage[service.RESONANCE_HISTORY_RUNTIME_KEY]["weapon"]), 1)
+        self.assertEqual(len(storage[service.RESONANCE_HISTORY_RUNTIME_KEY]["outfit"]), 1)
+        self.assertEqual(history["banner"].id, "weapon")
+        self.assertEqual(history["items"][0]["rewards"][0]["name"], "АК-74 «Резонанс»")
+
+    def test_format_history_uses_banner_specific_rows(self):
+        with patch("game.gacha.ui.get_pull_history", return_value={
+            "banner": banners.WEAPON_BANNER,
+            "items": [{
+                "ts": 123456,
+                "count": 1,
+                "best_rarity": "SSR",
+                "rewards": [{"rarity": "SSR", "name": "АК-74 «Резонанс»", "quantity": 1}],
+            }],
+            "page": 0,
+            "total_pages": 1,
+            "total": 1,
+        }):
+            message, page, total_pages = format_history(777, "weapon", 0)
+
+        self.assertEqual(page, 0)
+        self.assertEqual(total_pages, 1)
+        self.assertIn("ИСТОРИЯ: ОРУЖЕЙНЫЙ РЕЗОНАНС", message)
+        self.assertIn("АК-74 «Резонанс»", message)
 
     def test_event_items_are_event_only(self):
         self.assertIn("АК-74 «Резонанс»", EVENT_ITEM_NAMES)

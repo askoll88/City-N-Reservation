@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from game.constants import NEWBIE_KIT_ITEMS
 from game.crafting import (
@@ -8,6 +9,7 @@ from game.crafting import (
 )
 from game.item_pool import ITEMS_POOL
 from handlers.keyboards import create_location_keyboard, create_weapon_upgrade_keyboard, create_workbench_keyboard
+from handlers.crafting import show_weapon_upgrade_menu
 
 
 class CraftingSystemTest(unittest.TestCase):
@@ -37,6 +39,42 @@ class CraftingSystemTest(unittest.TestCase):
         weapon_keyboard = create_weapon_upgrade_keyboard().get_keyboard()
         self.assertIn("Улучшить оружие", weapon_keyboard)
         self.assertIn("Прорыв оружия", weapon_keyboard)
+
+    def test_weapon_upgrade_menu_shows_only_equipped_weapon(self):
+        class Inventory:
+            weapons = [
+                {"name": "ПМ", "attack": 10, "item_level": 1, "weapon_cap": 10, "weapon_ascension": 0, "item_rank": "common"},
+                {"name": "АК-74", "attack": 40, "item_level": 5, "weapon_cap": 10, "weapon_ascension": 0, "item_rank": "rare"},
+            ]
+
+            def reload(self):
+                return None
+
+        class Player:
+            current_location_id = "убежище"
+            level = 1
+            equipped_weapon = "ПМ"
+            inventory = Inventory()
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        vk = Vk()
+        with patch("handlers.crafting.database.get_user_weapon_materials", return_value={}):
+            show_weapon_upgrade_menu(Player(), vk, 777)
+
+        message = vk.messages.sent[0]["message"]
+        self.assertIn("Надетое оружие:", message)
+        self.assertIn("ПМ", message)
+        self.assertNotIn("АК-74", message)
 
     def test_newbie_kit_contains_basic_anomaly_detector(self):
         kit_items = {name for name, _quantity in NEWBIE_KIT_ITEMS}
