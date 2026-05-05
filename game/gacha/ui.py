@@ -35,46 +35,36 @@ def _add_callback_button(keyboard: VkKeyboard, label: str, *, command: str, colo
 
 
 def create_resonance_keyboard() -> VkKeyboard:
-    keyboard = VkKeyboard(one_time=False, inline=True)
-    _add_callback_button(keyboard, "Резонанс оружия", command="resonance_banner", banner="weapon", color=VkKeyboardColor.PRIMARY)
-    _add_callback_button(keyboard, "Резонанс снаряжения", command="resonance_banner", banner="outfit", color=VkKeyboardColor.PRIMARY)
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Резонанс оружия", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Резонанс снаряжения", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
-    _add_callback_button(keyboard, "Шансы оружия", command="resonance_rates", banner="weapon", color=VkKeyboardColor.SECONDARY)
-    _add_callback_button(keyboard, "Шансы снаряжения", command="resonance_rates", banner="outfit", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Шансы оружия", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Шансы снаряжения", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    _add_callback_button(keyboard, "История резонанса", command="resonance_history_index", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_line()
-    _add_callback_button(keyboard, "Назад", command="resonance_exit", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
 def create_resonance_banner_keyboard(banner_id: str) -> VkKeyboard:
-    keyboard = VkKeyboard(one_time=False, inline=True)
-    _add_callback_button(keyboard, "x1", command="resonance_pull", banner=banner_id, count=1, color=VkKeyboardColor.PRIMARY)
-    _add_callback_button(keyboard, "x10", command="resonance_pull", banner=banner_id, count=10, color=VkKeyboardColor.POSITIVE)
+    prefix = "Оружие" if banner_id == "weapon" else "Снаряжение"
+    history_label = "История оружия" if banner_id == "weapon" else "История снаряжения"
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button(f"{prefix} x1", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button(f"{prefix} x10", color=VkKeyboardColor.POSITIVE)
     keyboard.add_line()
-    _add_callback_button(keyboard, "Шансы", command="resonance_rates", banner=banner_id, color=VkKeyboardColor.SECONDARY)
-    _add_callback_button(keyboard, "История", command="resonance_history", banner=banner_id, page=0, color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button(history_label, color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    _add_callback_button(keyboard, "Назад к резонансу", command="resonance_back", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Назад к резонансу", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
 def create_resonance_rates_keyboard() -> VkKeyboard:
-    keyboard = VkKeyboard(one_time=False, inline=True)
-    _add_callback_button(keyboard, "Шансы оружия", command="resonance_rates", banner="weapon", color=VkKeyboardColor.SECONDARY)
-    _add_callback_button(keyboard, "Шансы снаряжения", command="resonance_rates", banner="outfit", color=VkKeyboardColor.SECONDARY)
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Шансы оружия", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Шансы снаряжения", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    _add_callback_button(keyboard, "Назад к резонансу", command="resonance_back", color=VkKeyboardColor.NEGATIVE)
-    return keyboard
-
-
-def create_resonance_history_index_keyboard() -> VkKeyboard:
-    keyboard = VkKeyboard(one_time=False, inline=True)
-    _add_callback_button(keyboard, "История оружия", command="resonance_history", banner="weapon", page=0, color=VkKeyboardColor.PRIMARY)
-    _add_callback_button(keyboard, "История снаряжения", command="resonance_history", banner="outfit", page=0, color=VkKeyboardColor.PRIMARY)
-    keyboard.add_line()
-    _add_callback_button(keyboard, "Назад к резонансу", command="resonance_back", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Назад к резонансу", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -174,7 +164,6 @@ def format_resonance_menu(vk_id: int) -> str:
         "• ДЕЙСТВИЯ",
         "Резонанс оружия — к оружейному баннеру",
         "Резонанс снаряжения — к баннеру комплекта",
-        "История резонанса — последние отклики по баннерам",
     ])
     return "\n".join(lines)
 
@@ -232,14 +221,6 @@ def format_rates(banner_id: str | None = None) -> str:
             f"R: {_featured_line(tuple(item.name for item in banner.r_pool))}",
         ])
     return "\n".join(lines)
-
-
-def format_history_index() -> str:
-    return (
-        "▰ ИСТОРИЯ РЕЗОНАНСА\n\n"
-        "История разделена по баннерам, потому что пити и гарант считаются отдельно.\n\n"
-        "Выбери, какой журнал открыть."
-    )
 
 
 def _format_history_ts(ts: int) -> str:
@@ -347,10 +328,6 @@ def show_rates(vk, user_id: int, banner_id: str | None = None) -> None:
     _show_hud(vk, user_id, format_rates(banner_id), create_resonance_rates_keyboard(), screen=f"rates:{banner_id or 'all'}")
 
 
-def show_history_index(vk, user_id: int) -> None:
-    _show_hud(vk, user_id, format_history_index(), create_resonance_history_index_keyboard(), screen="history:index")
-
-
 def show_history(vk, user_id: int, banner_id: str, page: int = 0) -> None:
     message, safe_page, total_pages = format_history(user_id, banner_id, page)
     _show_hud(
@@ -376,11 +353,6 @@ def handle_resonance_command(player, vk, user_id: int, text: str) -> bool:
         if not _can_use_resonance_text(player, vk, user_id):
             return True
         show_banner_menu(vk, user_id, "outfit")
-        return True
-    if text in {"история резонанса", "история откликов"}:
-        if not _can_use_resonance_text(player, vk, user_id):
-            return True
-        show_history_index(vk, user_id)
         return True
     if text in {"история оружия", "история оружейного резонанса"}:
         if not _can_use_resonance_text(player, vk, user_id):
@@ -453,9 +425,6 @@ def handle_resonance_callback(player, vk, user_id: int, payload: dict) -> bool:
         return True
     if command == "resonance_rates":
         show_rates(vk, user_id, str(payload.get("banner") or "") or None)
-        return True
-    if command == "resonance_history_index":
-        show_history_index(vk, user_id)
         return True
     if command == "resonance_history":
         show_history(

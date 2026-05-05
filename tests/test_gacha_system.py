@@ -42,21 +42,24 @@ class GachaSystemTest(unittest.TestCase):
         keyboard = json.loads(create_resonance_keyboard().get_keyboard())
         payload = json.dumps(keyboard, ensure_ascii=False)
 
-        self.assertTrue(keyboard["inline"])
+        self.assertFalse(keyboard["inline"])
         self.assertIn("Резонанс оружия", payload)
         self.assertIn("Резонанс снаряжения", payload)
         self.assertIn("Шансы оружия", payload)
         self.assertIn("Шансы снаряжения", payload)
-        self.assertIn("История резонанса", payload)
+        self.assertNotIn("История резонанса", payload)
         self.assertNotIn('"label": "Резонанс Зоны"', payload)
 
     def test_resonance_banner_keyboard_moves_pull_buttons_inside_banner(self):
         keyboard = json.loads(create_resonance_banner_keyboard("weapon").get_keyboard())
         first_row = keyboard["buttons"][0]
-        payloads = [json.loads(button["action"]["payload"]) for button in first_row]
+        labels = [button["action"]["label"] for button in first_row]
+        second_row_labels = [button["action"]["label"] for button in keyboard["buttons"][1]]
 
-        self.assertEqual(payloads[0], {"command": "resonance_pull", "banner": "weapon", "count": 1})
-        self.assertEqual(payloads[1], {"command": "resonance_pull", "banner": "weapon", "count": 10})
+        self.assertFalse(keyboard["inline"])
+        self.assertEqual(labels, ["Оружие x1", "Оружие x10"])
+        self.assertEqual(second_row_labels, ["История оружия"])
+        self.assertNotIn("Шансы", json.dumps(keyboard, ensure_ascii=False))
 
     def test_resonance_history_keyboard_has_hud_pagination_and_back(self):
         keyboard = json.loads(create_resonance_history_keyboard("weapon", page=0, total_pages=3).get_keyboard())
