@@ -452,3 +452,90 @@ ITEMS_POOL = [
     ("Документ",         "trash", "Документ, весь в крови.",   8, 0, 0, 0.05),
     ("Фотография",       "trash", "Старая размытая фотография.", 4, 0, 0, 0.05),
 ]
+
+
+_RARITY_ORDER = ("common", "uncommon", "rare", "epic", "legendary")
+_RARITY_INDEX = {rarity: idx for idx, rarity in enumerate(_RARITY_ORDER)}
+
+
+def _armor_slot_from_name(name: str) -> str:
+    lower = str(name or "").lower()
+    if any(k in lower for k in ("кепка", "шлем", "каска", "шапка", "берет", "маска", "бандана")):
+        return "head"
+    if any(k in lower for k in ("куртка", "броня", "жилет", "костюм", "комбинезон", "скафандр", "экзоскелет", "плащ")):
+        return "body"
+    if any(k in lower for k in ("штаны", "брюки", "джинсы", "бронештаны", "трубы")):
+        return "legs"
+    if any(k in lower for k in ("перчатки",)):
+        return "hands"
+    if any(k in lower for k in ("ботинки", "кроссовки", "кеды", "берцы", "сапоги", "тапочки")):
+        return "feet"
+    return "body"
+
+
+def _infer_weapon_rarity(name: str, attack: int, base_rarity: str) -> str:
+    lower = str(name or "").lower()
+    if any(k in lower for k in ("рпг", "рпо", "бульдог", "гаусс", "плазмен", "лазер", "пси-излучатель")):
+        inferred = "legendary"
+    elif attack >= 100:
+        inferred = "legendary"
+    elif attack >= 75:
+        inferred = "epic"
+    elif attack >= 45:
+        inferred = "rare"
+    elif attack >= 30:
+        inferred = "uncommon"
+    else:
+        inferred = "common"
+    return _max_rarity(base_rarity, inferred)
+
+
+def _infer_armor_rarity(name: str, defense: int, base_rarity: str) -> str:
+    slot = _armor_slot_from_name(name)
+    if slot == "head":
+        inferred = "legendary" if defense >= 25 else "epic" if defense >= 19 else "rare" if defense >= 9 else "common"
+    elif slot == "body":
+        inferred = "legendary" if defense >= 55 else "epic" if defense >= 31 else "rare" if defense >= 16 else "common"
+    elif slot in {"legs", "hands", "feet"}:
+        inferred = "legendary" if defense >= 27 else "epic" if defense >= 19 else "rare" if defense >= 9 else "common"
+    else:
+        inferred = "legendary" if defense >= 55 else "epic" if defense >= 31 else "rare" if defense >= 16 else "common"
+    return _max_rarity(base_rarity, inferred)
+
+
+def _max_rarity(left: str, right: str) -> str:
+    left = str(left or "common").lower()
+    right = str(right or "common").lower()
+    return left if _RARITY_INDEX.get(left, 0) >= _RARITY_INDEX.get(right, 0) else right
+
+
+def _rebalance_equipment_rarities(items: list[tuple]) -> list[tuple]:
+    """Поднимает редкость обычного снаряжения, если его статы уже не common-уровня."""
+    rebalanced = []
+    for item in items:
+        if len(item) < 7:
+            rebalanced.append(item)
+            continue
+
+        name, category, description, price, attack, defense, weight = item[:7]
+        category = str(category or "").lower()
+        if category not in {"weapons", "rare_weapons", "armor", "rare_armor"}:
+            rebalanced.append(item)
+            continue
+
+        base_rarity = item[8] if len(item) >= 12 else "rare" if category in {"rare_weapons", "rare_armor"} else "common"
+        if category in {"weapons", "rare_weapons"}:
+            rarity = _infer_weapon_rarity(name, int(attack or 0), base_rarity)
+        else:
+            rarity = _infer_armor_rarity(name, int(defense or 0), base_rarity)
+
+        if len(item) >= 12:
+            updated = list(item)
+            updated[8] = rarity
+            rebalanced.append(tuple(updated))
+        else:
+            rebalanced.append((name, category, description, price, attack, defense, weight, 0, rarity, None, None, 0))
+    return rebalanced
+
+
+ITEMS_POOL = _rebalance_equipment_rarities(ITEMS_POOL)

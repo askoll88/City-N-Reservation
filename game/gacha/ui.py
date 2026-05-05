@@ -14,11 +14,22 @@ from .banners import (
     SINGLE_PULL_COST,
     TEN_PULL_COST,
     SR_HARD_PITY,
+    SR_BASE_RATE,
     SSR_HARD_PITY,
+    SSR_BASE_RATE,
+    SSR_SOFT_PITY_START,
+    SSR_SOFT_PITY_STEP,
 )
 from .service import get_banners, get_banner_state, get_signal_shards, is_resonance_available, perform_pulls
 from .service import get_banner_time_left
 from .service import get_pull_history
+from .event_items import (
+    GACHA_EVENT_ITEMS,
+    format_event_outfit_passive_stats,
+    get_event_item_lore,
+    get_event_outfit_passive_profile,
+    get_event_weapon_stat_profile,
+)
 
 
 RARITY_VIEW = {
@@ -28,6 +39,8 @@ RARITY_VIEW = {
 }
 
 HISTORY_PAGE_SIZE = 5
+RATES_TOTAL_PAGES = 3
+_EVENT_ITEMS_BY_NAME = {row[0]: row for row in GACHA_EVENT_ITEMS}
 
 
 def _add_callback_button(keyboard: VkKeyboard, label: str, *, command: str, color=VkKeyboardColor.SECONDARY, **payload) -> None:
@@ -59,12 +72,36 @@ def create_resonance_banner_keyboard(banner_id: str) -> VkKeyboard:
     return keyboard
 
 
-def create_resonance_rates_keyboard() -> VkKeyboard:
-    keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Шансы оружия", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("Шансы снаряжения", color=VkKeyboardColor.SECONDARY)
+def create_resonance_rates_keyboard(banner_id: str, page: int = 0, total_pages: int = RATES_TOTAL_PAGES) -> VkKeyboard:
+    total = max(1, int(total_pages or 1))
+    current = max(0, min(total - 1, int(page or 0)))
+    keyboard = VkKeyboard(one_time=False, inline=True)
+    _add_callback_button(
+        keyboard,
+        "Назад",
+        command="resonance_rates",
+        banner=banner_id,
+        page=(current - 1) % total,
+        color=VkKeyboardColor.SECONDARY,
+    )
+    _add_callback_button(
+        keyboard,
+        f"{current + 1}/{total}",
+        command="resonance_rates",
+        banner=banner_id,
+        page=current,
+        color=VkKeyboardColor.PRIMARY,
+    )
+    _add_callback_button(
+        keyboard,
+        "След.",
+        command="resonance_rates",
+        banner=banner_id,
+        page=(current + 1) % total,
+        color=VkKeyboardColor.SECONDARY,
+    )
     keyboard.add_line()
-    keyboard.add_button("Назад к резонансу", color=VkKeyboardColor.NEGATIVE)
+    _add_callback_button(keyboard, "Назад к резонансу", command="resonance_back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -195,8 +232,182 @@ def format_banner_menu(vk_id: int, banner_id: str) -> str:
     return "\n".join(lines)
 
 
-def format_rates(banner_id: str | None = None) -> str:
-    banner = next((item for item in get_banners() if item.id == banner_id), None) if banner_id else None
+def _get_banner_by_id(banner_id: str | None):
+    return next((item for item in get_banners() if item.id == banner_id), None)
+
+
+def _item_template(item_name: str) -> dict:
+    row = _EVENT_ITEMS_BY_NAME.get(str(item_name or "").strip())
+    if not row:
+        return {"name": item_name or "Предмет", "category": "item", "attack": 0, "defense": 0, "weight": 0, "rarity": "-"}
+    return {
+        "name": row[0],
+        "category": row[1],
+        "description": row[2],
+        "price": row[3],
+        "attack": row[4],
+        "defense": row[5],
+        "weight": row[6],
+        "rarity": row[8] if len(row) >= 9 else "common",
+    }
+
+
+def _format_item_stats(item_name: str) -> list[str]:
+    item = _item_template(item_name)
+    lines = []
+    if int(item.get("attack", 0) or 0) > 0:
+        lines.append(f"АТК: {int(item['attack'])}")
+    if int(item.get("defense", 0) or 0) > 0:
+        lines.append(f"Защита: {int(item['defense'])}")
+    if float(item.get("weight", 0) or 0) > 0:
+        lines.append(f"Вес: {float(item['weight']):g}кг")
+
+    weapon_profile = get_event_weapon_stat_profile(item_name)
+    if weapon_profile:
+        try:
+            from game.weapon_progression import EVENT_WEAPON_STAT_LABELS
+        except Exception:
+            EVENT_WEAPON_STAT_LABELS = {}
+        stat_parts = []
+        for stat_name, bounds in (weapon_profile.get("stats") or {}).items():
+            label = EVENT_WEAPON_STAT_LABELS.get(stat_name, stat_name)
+            suffix = "" if stat_name == "bleed_damage" else "%"
+            if isinstance(bounds, tuple):
+                stat_parts.append(f"{label}: +{bounds[0]}{suffix} -> +{bounds[1]}{suffix}")
+            else:
+                stat_parts.append(f"{label}: +{bounds}{suffix}")
+        stat_text = ", ".join(stat_parts)
+        if stat_text:
+            lines.append(f"{weapon_profile['name']}: {stat_text}")
+        if weapon_profile.get("description"):
+            lines.append(weapon_profile["description"])
+
+    outfit_profile = get_event_outfit_passive_profile(item_name)
+    if outfit_profile:
+        stats = format_event_outfit_passive_stats(outfit_profile.get("stats"))
+        if stats:
+            lines.append(f"{outfit_profile['name']}: {stats}")
+        if outfit_profile.get("description"):
+            lines.append(outfit_profile["description"])
+    return lines
+
+
+def _format_item_presentation(item_name: str, *, prefix: str = "") -> list[str]:
+    item = _item_template(item_name)
+    title = f"{prefix}{item['name']}" if prefix else item["name"]
+    lines = [f"◆ {title}"]
+    stat_lines = _format_item_stats(item_name)
+    if stat_lines:
+        lines.extend([f"  {line}" for line in stat_lines])
+    lore = get_event_item_lore(item_name) or str(item.get("description") or "")
+    if lore:
+        lines.append(f"  {lore}")
+    return lines
+
+
+def _format_rate_value(percent: float) -> str:
+    return f"{percent:.3f}".rstrip("0").rstrip(".") + "%"
+
+
+def _format_rateup_rates(banner) -> list[str]:
+    featured_count = max(1, len(banner.featured_ssr or ()))
+    per_featured = (SSR_BASE_RATE * 0.5) / featured_count
+    guaranteed_per_featured = SSR_BASE_RATE / featured_count
+    return [
+        f"SSR базово: {_format_rate_value(SSR_BASE_RATE)}",
+        f"Rate-up при активном 50/50: {_format_rate_value(per_featured)} на предмет",
+        f"Rate-up после проигрыша 50/50: {_format_rate_value(guaranteed_per_featured)} на предмет SSR-проверки",
+    ]
+
+
+def _format_offrate_rates(banner) -> list[str]:
+    off_count = max(1, len(banner.off_ssr or banner.featured_ssr or ()))
+    per_off = (SSR_BASE_RATE * 0.5) / off_count
+    return [
+        f"Проигрыш 50/50: 50% от SSR-срабатывания",
+        f"Базово на каждый предмет пула: {_format_rate_value(per_off)}",
+    ]
+
+
+def _format_rates_rateup_page(banner, page: int) -> str:
+    lines = [
+        f"▰ ШАНСЫ: {banner.name.upper()}",
+        f"Страница {page + 1}/{RATES_TOTAL_PAGES}: rate-up SSR",
+        "",
+        "• ГЛАВНЫЙ СИГНАЛ БАННЕРА",
+    ]
+    for item_name in banner.featured_ssr:
+        lines.extend(_format_item_presentation(item_name, prefix="RankUP SSR: "))
+        lines.append("")
+    lines.extend(["• ШАНС ПОЛУЧЕНИЯ", *_format_rateup_rates(banner)])
+    return "\n".join(line for line in lines if line is not None).rstrip()
+
+
+def _format_rates_offrate_page(banner, page: int) -> str:
+    lines = [
+        f"▰ ШАНСЫ: {banner.name.upper()}",
+        f"Страница {page + 1}/{RATES_TOTAL_PAGES}: проигрыш 50/50",
+        "",
+        "• ПУЛ OFF-RATE SSR",
+    ]
+    if not banner.off_ssr:
+        lines.append("Off-rate пул пуст. При проигрыше используется rate-up пул.")
+    else:
+        for item_name in banner.off_ssr:
+            lines.extend(_format_item_presentation(item_name))
+            lines.append("")
+    lines.extend(["• ШАНС ПУЛА", *_format_offrate_rates(banner)])
+    return "\n".join(line for line in lines if line is not None).rstrip()
+
+
+def _format_rates_details_page(banner, page: int) -> str:
+    sr_names = tuple(item.name for item in banner.sr_pool)
+    r_names = tuple(item.name for item in banner.r_pool)
+    lines = [
+        f"▰ ШАНСЫ: {banner.name.upper()}",
+        f"Страница {page + 1}/{RATES_TOTAL_PAGES}: подробности",
+        "",
+        "• БАЗОВЫЕ ШАНСЫ",
+        f"🟨 SSR: {_format_rate_value(SSR_BASE_RATE)}. После {SSR_SOFT_PITY_START} откликов шанс растёт на {_format_rate_value(SSR_SOFT_PITY_STEP)} за отклик. На {SSR_HARD_PITY} — гарант.",
+        f"🟪 SR: {_format_rate_value(SR_BASE_RATE)}. На {SR_HARD_PITY} отклике — гарант.",
+        "⬜ R: всё остальное.",
+        "",
+        "• ГАРАНТ",
+        "Если SSR не оказался rate-up, следующий SSR на этом типе баннера будет rate-up.",
+        "Оружие и снаряжение считают пити отдельно.",
+        "",
+        "• SR ПУЛ",
+        _featured_line(sr_names),
+        "",
+        "• R ПУЛ",
+        _featured_line(r_names),
+    ]
+    return "\n".join(lines)
+
+
+def format_rates(banner_id: str | None = None, page: int = 0) -> tuple[str, int, int]:
+    banner = _get_banner_by_id(banner_id) if banner_id else None
+    if not banner:
+        banner = _get_banner_by_id("weapon")
+    if not banner:
+        return "Неизвестный баннер Резонанса.", 0, 1
+    safe_page = max(0, min(RATES_TOTAL_PAGES - 1, int(page or 0)))
+    if safe_page == 0:
+        message = _format_rates_rateup_page(banner, safe_page)
+    elif safe_page == 1:
+        message = _format_rates_offrate_page(banner, safe_page)
+    else:
+        message = _format_rates_details_page(banner, safe_page)
+    return message, safe_page, RATES_TOTAL_PAGES
+
+
+def format_rates_text(banner_id: str | None = None, page: int = 0) -> str:
+    message, _safe_page, _total_pages = format_rates(banner_id, page)
+    return message
+
+
+def _legacy_format_rates(banner_id: str | None = None) -> str:
+    banner = _get_banner_by_id(banner_id) if banner_id else None
     lines = [
         "▰ ПРАВИЛА РЕЗОНАНСА",
         "",
@@ -324,8 +535,16 @@ def show_banner_menu(vk, user_id: int, banner_id: str) -> None:
     _show_hud(vk, user_id, format_banner_menu(user_id, banner_id), create_resonance_banner_keyboard(banner_id), screen=f"banner:{banner_id}")
 
 
-def show_rates(vk, user_id: int, banner_id: str | None = None) -> None:
-    _show_hud(vk, user_id, format_rates(banner_id), create_resonance_rates_keyboard(), screen=f"rates:{banner_id or 'all'}")
+def show_rates(vk, user_id: int, banner_id: str | None = None, page: int = 0) -> None:
+    safe_banner_id = banner_id or "weapon"
+    message, safe_page, total_pages = format_rates(safe_banner_id, page)
+    _show_hud(
+        vk,
+        user_id,
+        message,
+        create_resonance_rates_keyboard(safe_banner_id, safe_page, total_pages),
+        screen=f"rates:{safe_banner_id}:{safe_page}",
+    )
 
 
 def show_history(vk, user_id: int, banner_id: str, page: int = 0) -> None:
@@ -369,7 +588,7 @@ def handle_resonance_command(player, vk, user_id: int, text: str) -> bool:
             show_resonance_menu(player, vk, user_id)
             return True
         banner_id = "weapon" if "оруж" in text else "outfit" if "снаряж" in text else None
-        show_rates(vk, user_id, banner_id)
+        show_rates(vk, user_id, banner_id, 0)
         return True
 
     mapping = {
@@ -424,7 +643,12 @@ def handle_resonance_callback(player, vk, user_id: int, payload: dict) -> bool:
         show_banner_menu(vk, user_id, str(payload.get("banner") or "weapon"))
         return True
     if command == "resonance_rates":
-        show_rates(vk, user_id, str(payload.get("banner") or "") or None)
+        show_rates(
+            vk,
+            user_id,
+            str(payload.get("banner") or "weapon"),
+            int(payload.get("page", 0) or 0),
+        )
         return True
     if command == "resonance_history":
         show_history(

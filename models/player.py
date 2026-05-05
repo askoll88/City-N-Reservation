@@ -503,6 +503,7 @@ class Player:
         """Шанс что-либо найти (%)"""
         base = self.effective_perception * 3  # 3% за каждый пункт восприятия
         artifact_bonus = self._artifact_bonuses.get('find_chance', 0)
+        passive_bonus = self._get_passive_bonuses().get('find_chance', 0)
 
         # Бонус от детектора
         detector_bonus = 0
@@ -513,7 +514,7 @@ class Player:
             except:
                 pass
 
-        return max(0, min(100, base + artifact_bonus + detector_bonus))
+        return max(0, min(100, base + artifact_bonus + detector_bonus + passive_bonus))
 
     @property
     def crit_chance(self) -> int:
@@ -563,16 +564,42 @@ class Player:
         passive_bonus = self._get_passive_bonuses().get('defense', 0)
         return max(0, self.armor_defense + artifact_def + passive_bonus)
 
+    def _get_event_outfit_bonuses(self) -> dict:
+        """Получить пассивы от надетого ивентового снаряжения Резонанса."""
+        try:
+            from game.gacha.event_items import get_event_outfit_passive_profile
+            equipped = [
+                self.equipped_armor,
+                self.equipped_armor_head,
+                self.equipped_armor_body,
+                self.equipped_armor_legs,
+                self.equipped_armor_hands,
+                self.equipped_armor_feet,
+            ]
+            bonuses: dict[str, int] = {}
+            for item_name in equipped:
+                profile = get_event_outfit_passive_profile(item_name)
+                if not profile:
+                    continue
+                for key, value in (profile.get("stats") or {}).items():
+                    bonuses[key] = int(bonuses.get(key, 0) or 0) + int(value or 0)
+            return bonuses
+        except Exception:
+            return {}
+
     def _get_passive_bonuses(self) -> dict:
-        """Получить бонусы от пассивных навыков класса"""
+        """Получить бонусы от пассивных навыков класса и снаряжения."""
+        bonuses = self._get_event_outfit_bonuses()
         try:
             from models.classes import get_passive_bonuses
             class_id = self.player_class
-            if not class_id:
-                return {}
-            return get_passive_bonuses(class_id, self.level)
+            if class_id:
+                class_bonuses = get_passive_bonuses(class_id, self.level)
+                for key, value in (class_bonuses or {}).items():
+                    bonuses[key] = int(bonuses.get(key, 0) or 0) + int(value or 0)
         except Exception:
-            return {}
+            pass
+        return bonuses
 
     def _get_rank_tier(self) -> int:
         """Текущий тир ранга (1..N)."""

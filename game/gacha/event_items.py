@@ -90,6 +90,79 @@ def get_event_weapon_stat_profile(item_name: str | None) -> dict | None:
     return EVENT_WEAPON_STAT_PROFILES.get(str(item_name or "").strip())
 
 
+EVENT_OUTFIT_PASSIVES = {
+    "Плащ «Проводник Сигнала»": {
+        "name": "Полевой проводник",
+        "description": "лучше выводит на схроны и редкие следы Зоны",
+        "stats": {"find_chance": 8, "rare_find_chance": 4},
+    },
+    "Маска «Проводник Сигнала»": {
+        "name": "Фильтр дальнего фона",
+        "description": "гасит часть радиации и помогает читать контур аномалии",
+        "stats": {"radiation_reduction_pct": 10, "anomaly_bypass_chance": 5},
+    },
+    "Перчатки «Проводник Сигнала»": {
+        "name": "Сухой контакт",
+        "description": "стабилизирует работу руками у аномального поля",
+        "stats": {"artifact_extract_bonus_pct": 8, "precise_anomaly_shell_discount": 1},
+    },
+    "Ботинки «Проводник Сигнала»": {
+        "name": "Тихий маршрут",
+        "description": "сокращает переходы и помогает уйти от неприятностей в дороге",
+        "stats": {"travel_time_reduction_pct": 7, "travel_event_avoid_chance": 5},
+    },
+    "Куртка «Глухой эфир»": {
+        "name": "Глухой экран",
+        "description": "слегка гасит прямой урон",
+        "stats": {"defense": 4, "damage_resist": 3},
+    },
+    "Маска «Пыль эфира»": {
+        "name": "Пыльный фильтр",
+        "description": "смягчает радиационный фон и риск аномального контакта",
+        "stats": {"radiation_reduction_pct": 5, "anomaly_bypass_chance": 2},
+    },
+    "Перчатки «Сухой контакт»": {
+        "name": "Изоляция ладони",
+        "description": "повышает шанс добычи из аномалий и мелких находок",
+        "stats": {"artifact_extract_bonus_pct": 4, "find_chance": 3},
+    },
+    "Ботинки «Тихий шаг»": {
+        "name": "Тихий шаг",
+        "description": "ускоряет переход и снижает шанс попасть в засаду",
+        "stats": {"travel_time_reduction_pct": 4, "travel_event_avoid_chance": 3},
+    },
+}
+
+
+OUTFIT_PASSIVE_LABELS = {
+    "find_chance": ("Шанс находок", "+", "%"),
+    "rare_find_chance": ("Редкая находка", "+", "%"),
+    "radiation_reduction_pct": ("Входящая радиация", "-", "%"),
+    "anomaly_bypass_chance": ("Безопасный обход аномалии", "+", "%"),
+    "artifact_extract_bonus_pct": ("Извлечение артефакта", "+", "%"),
+    "precise_anomaly_shell_discount": ("Точный бросок", "-", " гильза"),
+    "travel_time_reduction_pct": ("Время перехода", "-", "%"),
+    "travel_event_avoid_chance": ("Избежать события в пути", "+", "%"),
+    "defense": ("Защита", "+", ""),
+    "damage_resist": ("Сопротивление урону", "+", "%"),
+}
+
+
+def get_event_outfit_passive_profile(item_name: str | None) -> dict | None:
+    """Фиксированный пассивный эффект ивентового снаряжения."""
+    return EVENT_OUTFIT_PASSIVES.get(str(item_name or "").strip())
+
+
+def format_event_outfit_passive_stats(stats: dict | None) -> str:
+    parts = []
+    for key, value in (stats or {}).items():
+        if not value:
+            continue
+        label, sign, suffix = OUTFIT_PASSIVE_LABELS.get(key, (key, "+", ""))
+        parts.append(f"{label} {sign}{value}{suffix}")
+    return ", ".join(parts)
+
+
 GACHA_EVENT_ITEMS = [
     (
         "АК-74 «Резонанс»",

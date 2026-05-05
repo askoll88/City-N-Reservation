@@ -1878,7 +1878,9 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
     if action == "обойти":
         # Попытка обойти - зависит от восприятия
         perception = int(getattr(player, "effective_perception", user.get('perception', 1)) or 1)
-        dodge_chance = min(95, 30 + perception * 5)
+        passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+        anomaly_bypass_bonus = max(0, int(passive.get("anomaly_bypass_chance", 0) or 0))
+        dodge_chance = min(95, 30 + perception * 5 + anomaly_bypass_bonus)
 
         if random.randint(1, 100) <= dodge_chance:
             _combat_log(
@@ -1948,6 +1950,10 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
         shells = database.get_user_shells(user_id)
         precise_throw = action in {"точный бросок", "бросить 3 гильзы"}
         shell_cost = PRECISE_ANOMALY_SHELL_COST if precise_throw else 1
+        passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+        precise_discount = max(0, int(passive.get("precise_anomaly_shell_discount", 0) or 0))
+        if precise_throw and precise_discount:
+            shell_cost = max(1, shell_cost - precise_discount)
 
         if shells < shell_cost:
             # Нет гильз - показываем сообщение и возвращаем в меню аномалии
@@ -1983,6 +1989,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
                     for artifact_type in anomaly_artifact_types
                 ]
             )
+        detector_bonus += max(0, int(passive.get("artifact_extract_bonus_pct", 0) or 0))
 
         # Бросок гильзы - пытаемся получить артефакт
         luck = int(getattr(player, "effective_luck", user.get('luck', 5)) or 5)

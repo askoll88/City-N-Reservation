@@ -370,6 +370,10 @@ def _maybe_trigger_travel_event(player, vk, user_id: int, travel: dict, forced: 
     enemy_threshold = TRAVEL_ENEMY_CHANCE_FORCED if forced else TRAVEL_ENEMY_CHANCE
     combat_encounters = int(travel.get("combat_encounters", 0) or 0)
     max_combat_encounters = int(travel.get("max_combat_encounters", TRAVEL_MAX_COMBAT_ENCOUNTERS) or TRAVEL_MAX_COMBAT_ENCOUNTERS)
+    passive = player._get_passive_bonuses() if hasattr(player, "_get_passive_bonuses") else {}
+    avoid_chance = max(0, min(40, int(passive.get("travel_event_avoid_chance", 0) or 0)))
+    if avoid_chance and roll <= max(event_threshold, enemy_threshold) and random.randint(1, 100) <= avoid_chance:
+        return False
 
     # 1) Ивент
     if roll <= event_threshold and _check_event_cooldown(user_id):

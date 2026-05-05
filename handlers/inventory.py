@@ -234,6 +234,7 @@ def _artifact_effect_lines(item_name: str) -> list[str]:
 def build_item_details(item: dict) -> str:
     """Красивый блок с подробностями по предмету."""
     from game.gacha.event_items import is_ssr_event_item
+    from game.gacha.event_items import format_event_outfit_passive_stats, get_event_outfit_passive_profile
     from game.weapon_progression import format_event_weapon_stats, get_event_weapon_bonus
 
     name = item.get("name", "Неизвестный предмет")
@@ -281,6 +282,13 @@ def build_item_details(item: dict) -> str:
         lines.append(f"🛡️ Защита: {defense}")
     if backpack_bonus:
         lines.append(f"🎒 Бонус веса: +{backpack_bonus} кг")
+
+    outfit_passive = get_event_outfit_passive_profile(name)
+    if outfit_passive:
+        lines.append("")
+        lines.append(ui.section("Пассив снаряжения"))
+        lines.append(f"{outfit_passive['name']}: {format_event_outfit_passive_stats(outfit_passive.get('stats'))}")
+        lines.append(outfit_passive["description"])
 
     if is_ssr_event_item(name):
         lines.append("")

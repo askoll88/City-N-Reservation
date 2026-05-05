@@ -83,13 +83,18 @@ def _bonus_parts(passive_bonuses: dict) -> list[str]:
         "perception": "восприятие",
         "luck": "удача",
         "rare_find_chance": "редкое",
+        "find_chance": "находка",
         "crit_damage": "крит. урон",
         "travel_time_reduction_pct": "путь",
+        "travel_event_avoid_chance": "событие в пути",
         "travel_scout_cooldown_reduction": "осмотр",
         "travel_acceleration_energy_reduction": "ускорение",
         "hospital_price_discount_pct": "больница",
         "research_energy_discount_pct": "исследование",
         "radiation_reduction_pct": "радиация",
+        "anomaly_bypass_chance": "обход аномалии",
+        "artifact_extract_bonus_pct": "добыча арта",
+        "precise_anomaly_shell_discount": "точный бросок",
         "self_heal_bonus_pct": "полевое лечение",
         "flee_chance_bonus": "побег",
     }
@@ -99,12 +104,16 @@ def _bonus_parts(passive_bonuses: dict) -> list[str]:
         "sell_bonus",
         "weapon_damage",
         "knife_damage",
+        "find_chance",
         "rare_find_chance",
         "crit_damage",
         "travel_time_reduction_pct",
+        "travel_event_avoid_chance",
         "hospital_price_discount_pct",
         "research_energy_discount_pct",
         "radiation_reduction_pct",
+        "anomaly_bypass_chance",
+        "artifact_extract_bonus_pct",
         "self_heal_bonus_pct",
         "flee_chance_bonus",
     }
@@ -119,6 +128,8 @@ def _bonus_parts(passive_bonuses: dict) -> list[str]:
             result.append(f"{label} -{value}с")
         elif key == "travel_acceleration_energy_reduction":
             result.append(f"{label} -{value} энергии")
+        elif key == "precise_anomaly_shell_discount":
+            result.append(f"{label} -{value} гильза")
         elif key in percent_stats:
             result.append(f"{label} +{value}%")
         elif key == "max_weight":

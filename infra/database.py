@@ -762,6 +762,22 @@ def _resolve_drop_profile(category: str, drop_chance: Any = None, location_drop_
     return resolved_drop_chance, normalized_location
 
 
+def _resolve_item_drop_profile(
+    name: str,
+    category: str,
+    drop_chance: Any = None,
+    location_drop_chances: Any = None,
+) -> tuple[int, dict[str, int]]:
+    """Ивентовые предметы Резонанса не должны попадать в обычный лут."""
+    if is_gacha_event_item(name):
+        return 0, {}
+    return _resolve_drop_profile(
+        category,
+        drop_chance=drop_chance,
+        location_drop_chances=location_drop_chances,
+    )
+
+
 def _with_lore_description(name: str, category: str, description: str) -> str:
     """Привести описание предмета к лорному стилю Зоны."""
     base = str(description or "").strip()
@@ -814,7 +830,7 @@ def _insert_item(cursor, item: tuple):
         name, category, description, price, attack, defense, weight = item
         description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense)
-        drop_chance, location_drop_chances = _resolve_drop_profile(category)
+        drop_chance, location_drop_chances = _resolve_item_drop_profile(name, category)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
                                rarity, anomaly_type, bonus_type, bonus_value,
@@ -832,7 +848,7 @@ def _insert_item(cursor, item: tuple):
         name, category, description, price, attack, defense, weight, backpack_bonus = item
         description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense)
-        drop_chance, location_drop_chances = _resolve_drop_profile(category)
+        drop_chance, location_drop_chances = _resolve_item_drop_profile(name, category)
         cursor.execute("""
             INSERT INTO items (name, category, description, price, attack, defense, weight,
                                backpack_bonus, rarity, anomaly_type, bonus_type, bonus_value,
@@ -854,7 +870,8 @@ def _insert_item(cursor, item: tuple):
         location_drop_chances = item[13] if len(item) >= 14 else None
         description = _with_lore_description(name, category, description)
         price = _balanced_item_price(category, price, attack, defense, rarity)
-        resolved_drop_chance, resolved_location_drop_chances = _resolve_drop_profile(
+        resolved_drop_chance, resolved_location_drop_chances = _resolve_item_drop_profile(
+            name,
             category,
             drop_chance=drop_chance,
             location_drop_chances=location_drop_chances,
@@ -1187,7 +1204,7 @@ def get_user_storage(vk_id: int) -> list[dict]:
 
 
 def get_user_storage_load(vk_id: int) -> dict:
-    """Текущее заполнение шкафа (по сумме quantity)."""
+    """Текущее заполнение шкафа по слотам, а не по количеству в стаках."""
     with db_cursor() as (cursor, _):
         cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
         user = cursor.fetchone()
@@ -1195,15 +1212,23 @@ def get_user_storage_load(vk_id: int) -> dict:
             return {"current": 0, "capacity": int(config.SHELTER_STORAGE_CAPACITY)}
         cursor.execute(
             """
-            SELECT COALESCE(SUM(quantity), 0) AS qty
+            SELECT COUNT(*) AS slots
             FROM user_storage
             WHERE user_id = %s
             """,
             (user["id"],),
         )
         row = cursor.fetchone() or {}
-        current = int(row.get("qty", 0) or 0)
+        current = int(row.get("slots", 0) or 0)
         return {"current": current, "capacity": int(config.SHELTER_STORAGE_CAPACITY)}
+
+
+def _storage_slot_usage(storage_rows: list[dict], item_id: int) -> tuple[int, bool]:
+    """Вернуть занятые слоты и лежит ли уже этот item_id в шкафу."""
+    safe_item_id = int(item_id)
+    rows = list(storage_rows or [])
+    has_item = any(int(row.get("item_id", 0) or 0) == safe_item_id for row in rows)
+    return len(rows), has_item
 
 
 def add_item_to_storage(vk_id: int, item_name: str, quantity: int = 1) -> bool:
@@ -1273,19 +1298,20 @@ def move_item_to_storage_transaction(vk_id: int, item_name: str, quantity: int =
 
         cursor.execute(
             """
-            SELECT quantity
+            SELECT item_id
             FROM user_storage
             WHERE user_id = %s
             FOR UPDATE
             """,
             (user_id,),
         )
-        storage_qty = sum(int(r.get("quantity", 0) or 0) for r in cursor.fetchall())
+        storage_slots, item_already_stored = _storage_slot_usage(cursor.fetchall(), item_id)
         capacity = int(config.SHELTER_STORAGE_CAPACITY)
-        if storage_qty + safe_qty > capacity:
+        required_slots = 0 if item_already_stored else 1
+        if storage_slots + required_slots > capacity:
             return {
                 "success": False,
-                "message": f"Шкаф переполнен: {storage_qty}/{capacity}. Освободи место.",
+                "message": f"Шкаф переполнен: {storage_slots}/{capacity} слотов. Освободи место.",
             }
 
         cursor.execute(
@@ -1743,6 +1769,8 @@ def _get_shop_candidates(merchant_id: str, category: str | None = None, rarity: 
             name = row.get("name")
             if not name or name in seen_names:
                 continue
+            if is_gacha_event_item(name):
+                continue
             item_rarity = (row.get("rarity") or "common").lower()
             # Барыга пока не продаёт легендарные предметы.
             if merchant_id == NPC_MERCHANT_TRADER and item_rarity in _TRADER_BLOCKED_RARITIES:
@@ -1944,6 +1972,8 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
         if not item_row:
             return {"success": False, "message": f"Предмет '{item_name}' не найден"}
         item_data = dict(item_row)
+        if is_gacha_event_item(item_data.get("name")):
+            return {"success": False, "message": "Ивентовые предметы Резонанса нельзя купить у NPC."}
 
         cursor.execute("SELECT id, money, level, shells FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()

@@ -4,12 +4,21 @@ from unittest.mock import patch
 
 from game.gacha import banners, service
 from game.gacha.assets import get_item_image_path
-from game.gacha.event_items import EVENT_ITEM_NAMES, get_event_item_lore, is_gacha_event_item, is_ssr_event_item
+from game.gacha.event_items import (
+    EVENT_ITEM_NAMES,
+    format_event_outfit_passive_stats,
+    get_event_item_lore,
+    get_event_outfit_passive_profile,
+    is_gacha_event_item,
+    is_ssr_event_item,
+)
 from game.gacha.ui import (
     create_resonance_banner_keyboard,
     create_resonance_history_keyboard,
     create_resonance_keyboard,
+    create_resonance_rates_keyboard,
     format_history,
+    format_rates,
     format_resonance_menu,
 )
 from handlers.inventory import build_item_details
@@ -71,6 +80,31 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(page_payloads[2], {"command": "resonance_history", "banner": "weapon", "page": 1})
         self.assertEqual(back_payload, {"command": "resonance_back"})
 
+    def test_resonance_rates_keyboard_has_hud_pagination_and_back(self):
+        keyboard = json.loads(create_resonance_rates_keyboard("outfit", page=1, total_pages=3).get_keyboard())
+        page_payloads = [json.loads(button["action"]["payload"]) for button in keyboard["buttons"][0]]
+        back_payload = json.loads(keyboard["buttons"][1][0]["action"]["payload"])
+
+        self.assertTrue(keyboard["inline"])
+        self.assertEqual(page_payloads[0], {"command": "resonance_rates", "banner": "outfit", "page": 0})
+        self.assertEqual(page_payloads[1], {"command": "resonance_rates", "banner": "outfit", "page": 1})
+        self.assertEqual(page_payloads[2], {"command": "resonance_rates", "banner": "outfit", "page": 2})
+        self.assertEqual(back_payload, {"command": "resonance_back"})
+
+    def test_resonance_rates_pages_present_banner_items(self):
+        rateup, page, total = format_rates("weapon", 0)
+        offrate, off_page, _ = format_rates("weapon", 1)
+        details, details_page, _ = format_rates("weapon", 2)
+
+        self.assertEqual((page, off_page, details_page, total), (0, 1, 2, 3))
+        self.assertIn("RankUP SSR: АК-74 «Резонанс»", rateup)
+        self.assertIn("Крит. шанс", rateup)
+        self.assertIn("Rate-up при активном 50/50", rateup)
+        self.assertIn("Винторез «Тихий Сигнал»", offrate)
+        self.assertIn("Нож «Осколок Разлома»", offrate)
+        self.assertIn("SR ПУЛ", details)
+        self.assertIn("R ПУЛ", details)
+
     def test_pull_history_is_separate_by_banner(self):
         storage = {}
 
@@ -131,6 +165,40 @@ class GachaSystemTest(unittest.TestCase):
         self.assertTrue(is_gacha_event_item("Плащ «Проводник Сигнала»"))
         self.assertFalse(is_gacha_event_item("АК-74"))
 
+    def test_event_items_have_no_normal_drop_profile(self):
+        drop_chance, location_chances = database._resolve_item_drop_profile(
+            "Плащ «Проводник Сигнала»",
+            "armor",
+        )
+
+        self.assertEqual(drop_chance, 0)
+        self.assertEqual(location_chances, {})
+
+    def test_event_items_are_hidden_from_npc_shop_candidates(self):
+        normal_item = {
+            "id": 1,
+            "name": "Кожаная куртка",
+            "category": "armor",
+            "rarity": "common",
+            "price": 100,
+        }
+        event_item = {
+            "id": 2,
+            "name": "Плащ «Проводник Сигнала»",
+            "category": "armor",
+            "rarity": "legendary",
+            "price": 0,
+        }
+
+        with patch("infra.database._get_cached_items", return_value=(
+            {normal_item["name"]: normal_item, event_item["name"]: event_item},
+            {"armor": [normal_item, event_item]},
+            {},
+        )):
+            candidates = database._get_shop_candidates(database.NPC_MERCHANT_SOLDIER, category="armor")
+
+        self.assertEqual([item["name"] for item in candidates], ["Кожаная куртка"])
+
     def test_current_banner_stats_are_anonymous_aggregates(self):
         settings = {}
 
@@ -185,6 +253,30 @@ class GachaSystemTest(unittest.TestCase):
         self.assertIn("ДОП. СТАТ ОРУЖИЯ", details)
         self.assertIn("Стабилизатор резонанса", details)
         self.assertIn("Крит. шанс", details)
+
+    def test_resonance_outfit_has_fixed_passives(self):
+        cloak = get_event_outfit_passive_profile("Плащ «Проводник Сигнала»")
+        gloves = get_event_outfit_passive_profile("Перчатки «Проводник Сигнала»")
+
+        self.assertEqual(cloak["stats"]["find_chance"], 8)
+        self.assertEqual(cloak["stats"]["rare_find_chance"], 4)
+        self.assertEqual(gloves["stats"]["artifact_extract_bonus_pct"], 8)
+        self.assertEqual(gloves["stats"]["precise_anomaly_shell_discount"], 1)
+        self.assertIn("Извлечение артефакта +8%", format_event_outfit_passive_stats(gloves["stats"]))
+
+    def test_ssr_outfit_inspection_shows_passive(self):
+        details = build_item_details({
+            "name": "Плащ «Проводник Сигнала»",
+            "category": "armor",
+            "rarity": "legendary",
+            "description": get_event_item_lore("Плащ «Проводник Сигнала»"),
+            "weight": 8.4,
+            "defense": 92,
+        })
+
+        self.assertIn("ПАССИВ СНАРЯЖЕНИЯ", details)
+        self.assertIn("Полевой проводник", details)
+        self.assertIn("Шанс находок +8%", details)
 
     def test_event_items_not_tradable_on_market(self):
         item = {"name": "АК-74 «Резонанс»", "category": "weapons"}
