@@ -3,9 +3,9 @@ import json
 import sys
 import types
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from handlers.keyboards import create_inventory_hud_keyboard, create_inventory_keyboard
+from handlers.keyboards import create_inventory_hud_keyboard, create_inventory_keyboard, create_shop_hud_keyboard
 from infra.state_manager import invalidate_edit_targets
 
 
@@ -62,7 +62,12 @@ class DummyPlayer:
         self.artifact_slots = 3
         self.max_weight = 30
         self.money = 100
+        self.level = 1
         self.current_location_id = "город"
+
+    @property
+    def sell_bonus(self):
+        return 0
 
 
 class InventorySectionsTest(unittest.TestCase):
@@ -165,18 +170,29 @@ class InventorySectionsTest(unittest.TestCase):
         self.assertEqual(back_button["action"]["type"], "callback")
         self.assertEqual(payload, {"command": "inventory_back"})
 
-    def test_inventory_hud_keyboard_has_section_and_page_callbacks(self):
+    def test_inventory_hud_keyboard_has_only_page_callbacks(self):
         keyboard = json.loads(create_inventory_hud_keyboard(section="weapons", page=0, total_pages=3).get_keyboard())
-        first_button = keyboard["buttons"][0][0]
-        page_buttons = keyboard["buttons"][3]
-        exit_button = keyboard["buttons"][4][0]
+        page_buttons = keyboard["buttons"][0]
 
         self.assertTrue(keyboard["inline"])
-        self.assertEqual(json.loads(first_button["action"]["payload"]), {"command": "inventory_section", "section": "weapons"})
         self.assertEqual(json.loads(page_buttons[0]["action"]["payload"]), {"command": "inventory_page", "section": "weapons", "page": 2})
         self.assertEqual(json.loads(page_buttons[1]["action"]["payload"]), {"command": "inventory_page", "section": "weapons", "page": 0})
         self.assertEqual(json.loads(page_buttons[2]["action"]["payload"]), {"command": "inventory_page", "section": "weapons", "page": 1})
-        self.assertEqual(json.loads(exit_button["action"]["payload"]), {"command": "inventory_back"})
+        self.assertEqual(len(keyboard["buttons"]), 1)
+
+    def test_inventory_summary_uses_lower_category_keyboard_without_pages(self):
+        invalidate_edit_targets(8802)
+
+        self.inventory_module.show_all(self.player, self.vk, user_id=8802)
+        message = self.vk.messages.sent[0]["message"]
+        keyboard = json.loads(self.vk.messages.sent[0]["keyboard"])
+
+        self.assertNotIn("Страница:", message)
+        self.assertFalse(keyboard["inline"])
+        self.assertEqual(
+            json.loads(keyboard["buttons"][0][0]["action"]["payload"]),
+            {"command": "inventory_section", "section": "weapons"},
+        )
 
     def test_inventory_section_outputs_ten_items_per_page(self):
         invalidate_edit_targets(8801)
@@ -198,6 +214,110 @@ class InventorySectionsTest(unittest.TestCase):
         self.assertIn("11. 🔫 ПМ-11", second_page)
         self.assertIn("12. 🔫 ПМ-12", second_page)
         self.assertNotIn("10. 🔫 ПМ-10", second_page)
+
+    def test_shop_hud_keyboard_has_page_callbacks(self):
+        keyboard = json.loads(create_shop_hud_keyboard(view="sell", page=0, total_pages=3).get_keyboard())
+        page_buttons = keyboard["buttons"][0]
+
+        self.assertTrue(keyboard["inline"])
+        self.assertEqual(json.loads(page_buttons[0]["action"]["payload"]), {"command": "shop_page", "view": "sell", "page": 2})
+        self.assertEqual(json.loads(page_buttons[1]["action"]["payload"]), {"command": "shop_page", "view": "sell", "page": 0})
+        self.assertEqual(json.loads(page_buttons[2]["action"]["payload"]), {"command": "shop_page", "view": "sell", "page": 1})
+
+    def test_trader_shop_outputs_ten_items_per_page(self):
+        invalidate_edit_targets(8811)
+        self.inventory_module.clear_shop_cache(8811)
+        self.inventory_module.database.NPC_MERCHANT_TRADER = "trader"
+        self.inventory_module.database.get_npc_shop_assortment = Mock(return_value={
+            "items": [
+                {
+                    "name": f"Товар-{idx:02d}",
+                    "quantity": 1,
+                    "category": "meds",
+                    "price": idx,
+                    "base_price": idx,
+                    "weight": 0.1,
+                    "stock_left": 5,
+                }
+                for idx in range(1, 13)
+            ],
+            "period_key": "test",
+            "event_text": "",
+        })
+
+        self.inventory_module.show_trader_shop_all(self.player, self.vk, user_id=8811, page=0)
+        first_page = self.vk.messages.sent[0]["message"]
+        self.inventory_module.show_trader_shop_all(self.player, self.vk, user_id=8811, page=1)
+        second_page = self.vk.messages.edited[-1]["message"]
+
+        self.assertIn("Страница: 1/2", first_page)
+        self.assertIn("1. 💊 Товар-01", first_page)
+        self.assertIn("10. 💊 Товар-10", first_page)
+        self.assertNotIn("11. 💊 Товар-11", first_page)
+        self.assertIn("Страница: 2/2", second_page)
+        self.assertIn("11. 💊 Товар-11", second_page)
+        self.assertIn("12. 💊 Товар-12", second_page)
+        self.assertNotIn("10. 💊 Товар-10", second_page)
+
+    def test_buy_by_number_resolves_trader_all_cache(self):
+        self.inventory_module.clear_shop_cache(777)
+        self.inventory_module.set_shop_cache_data(777, {
+            "merchant": "trader",
+            "trader_all": [{"name": "Бинт"}, {"name": "Аптечка"}],
+        })
+
+        item_name, key = self.inventory_module._get_shop_item_by_number_any(
+            777,
+            2,
+            ("trader_all", "weapons"),
+        )
+
+        self.assertEqual(item_name, "Аптечка")
+        self.assertEqual(key, "trader_all")
+
+    def test_handle_buy_item_accepts_trader_all_and_partial_unique_name(self):
+        class Buyer(DummyPlayer):
+            def __init__(self):
+                super().__init__()
+                self.bought = []
+
+            def buy_item(self, item_name, merchant_id=None):
+                self.bought.append((item_name, merchant_id))
+                return True, f"Куплено {item_name}"
+
+        player = Buyer()
+        self.inventory_module.clear_shop_cache(778)
+        self.inventory_module.set_shop_cache_data(778, {
+            "merchant": "trader",
+            "trader_all": [{"name": "Аптечка"}, {"name": "Бинт"}],
+        })
+
+        with patch.object(self.inventory_module, "show_trader_shop_all"):
+            self.inventory_module.handle_buy_item(player, "апт", self.vk, 778)
+
+        self.assertEqual(player.bought, [("Аптечка", "trader")])
+        self.assertIn("Витрина Барыги обновлена", self.vk.messages.sent[0]["message"])
+
+    def test_trader_sell_list_hides_equipped_and_event_items(self):
+        self.player.inventory.weapons = [
+            {"name": "ПМ", "quantity": 1, "attack": 10, "weight": 1.0},
+            {"name": "АК-74 «Резонанс»", "quantity": 1, "attack": 145, "weight": 3.2},
+            {"name": "ТТ", "quantity": 1, "attack": 20, "weight": 1.0},
+        ]
+        self.player.inventory.armor = [{"name": "Куртка", "quantity": 1, "defense": 5, "weight": 2.0}]
+        self.player.inventory.artifacts = [{"name": "Медуза", "quantity": 1, "weight": 0.5}]
+        self.inventory_module.database.NPC_MERCHANT_TRADER = "trader"
+        self.inventory_module.database.get_shop_event_text = Mock(return_value="")
+        self.inventory_module.database.get_npc_sell_price_preview = Mock(return_value={"sell_price": 10})
+
+        self.inventory_module.show_trader_sell_all(self.player, self.vk, 779)
+        message = self.vk.messages.sent[0]["message"]
+
+        self.assertNotIn("ПМ", message)
+        self.assertNotIn("Куртка", message)
+        self.assertNotIn("АК-74 «Резонанс»", message)
+        self.assertIn("ТТ", message)
+        self.assertIn("Медуза", message)
 
 
 if __name__ == "__main__":

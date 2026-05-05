@@ -9,7 +9,7 @@ from infra.state_manager import get_ui_current_screen, set_ui_screen
 from game import ui
 from game.anomalies import is_detector_name
 from game.constants import InventorySection
-from handlers.keyboards import create_inventory_hud_keyboard
+from handlers.keyboards import create_inventory_hud_keyboard, create_inventory_keyboard, create_shop_hud_keyboard
 
 
 INVENTORY_PAGE_SIZE = 10
@@ -172,6 +172,10 @@ def _inventory_hud_keyboard(section: str, page: int, total_pages: int):
     return create_inventory_hud_keyboard(section=section, page=page, total_pages=total_pages).get_keyboard()
 
 
+def _shop_hud_keyboard(view: str, page: int, total_pages: int):
+    return create_shop_hud_keyboard(view=view, page=page, total_pages=total_pages).get_keyboard()
+
+
 def _send_inventory_screen(vk, user_id: int, message: str, keyboard=None, *, section: str = "all", page: int = 0):
     """Обновить активный экран инвентаря без засорения чата."""
     from infra.state_manager import try_edit_or_send_ui
@@ -180,6 +184,17 @@ def _send_inventory_screen(vk, user_id: int, message: str, keyboard=None, *, sec
     push_current = current_ui.get("name") != "inventory"
     set_ui_screen(user_id, {"name": "inventory", "section": section, "page": int(page or 0)}, push_current=push_current)
     try_edit_or_send_ui(vk, user_id, "inventory", message, keyboard=keyboard)
+
+
+def _send_shop_screen(vk, user_id: int, message: str, keyboard=None, *, view: str = "buy", page: int = 0):
+    """Обновить активную витрину магазина без длинной ленты сообщений."""
+    from infra.state_manager import try_edit_or_send_ui
+
+    safe_view = "sell" if view == "sell" else "buy"
+    current_ui = get_ui_current_screen(user_id)
+    push_current = current_ui.get("name") != "shop"
+    set_ui_screen(user_id, {"name": "shop", "view": safe_view, "page": int(page or 0)}, push_current=push_current)
+    try_edit_or_send_ui(vk, user_id, f"shop:{safe_view}", message, keyboard=keyboard)
 
 
 def _iter_all_inventory_items(player) -> list[dict]:
@@ -802,7 +817,6 @@ def show_resources_shop(player, vk, user_id: int):
 def show_all(player, vk, user_id: int, page: int = 0):
     """Показать весь инвентарь"""
     player.inventory.reload()
-    safe_page, total_pages, _start, _end = _page_bounds(0, page)
 
     msg = (
         _screen_header("Инвентарь: сводка", player)
@@ -822,9 +836,9 @@ def show_all(player, vk, user_id: int, page: int = 0):
         vk,
         user_id,
         msg,
-        keyboard=_inventory_hud_keyboard("all", safe_page, total_pages),
+        keyboard=create_inventory_keyboard().get_keyboard(),
         section="all",
-        page=safe_page,
+        page=0,
     )
 
 
@@ -850,6 +864,19 @@ def handle_inventory_page_callback(player, vk, user_id: int, payload: dict) -> b
     section = str(payload.get("section") or getattr(player, "inventory_section", None) or "all")
     page = int(payload.get("page", 0) or 0)
     return show_inventory_section(player, vk, user_id, section, page=page)
+
+
+def handle_shop_page_callback(player, vk, user_id: int, payload: dict) -> bool:
+    """Перелистывание HUD витрины/скупки NPC."""
+    if payload.get("command") != "shop_page":
+        return False
+    view = str(payload.get("view") or "buy").strip().lower()
+    page = int(payload.get("page", 0) or 0)
+    if view == "sell":
+        show_trader_sell_all(player, vk, user_id, page=page)
+    else:
+        show_trader_shop_all(player, vk, user_id, page=page)
+    return True
 
 
 def show_equipped_artifacts(player, vk, user_id: int):
@@ -966,22 +993,44 @@ def handle_buy_item(player, item_name: str, vk, user_id: int):
         return
 
     offered_items = []
-    for key in ("weapons", "armor", "scientist", "artifacts"):
+    for key in ("trader_all", "weapons", "armor", "scientist", "artifacts"):
         offered_items.extend(shop_data.get(key, []))
 
     if merchant_id and offered_items:
-        if not any(str(i.get("name", "")).lower() == item_name.lower() for i in offered_items):
+        requested = str(item_name or "").strip().lower()
+        matched = next((i for i in offered_items if str(i.get("name", "")).lower() == requested), None)
+        if not matched:
+            partial_matches = [i for i in offered_items if requested and requested in str(i.get("name", "")).lower()]
+            if len(partial_matches) == 1:
+                matched = partial_matches[0]
+            elif len(partial_matches) > 1:
+                variants = ", ".join(str(i.get("name", "")) for i in partial_matches[:5])
+                vk.messages.send(
+                    user_id=user_id,
+                    message=f"❌ Нашлось несколько товаров: {variants}. Укажи точнее или используй номер.",
+                    random_id=0
+                )
+                return
+        if not matched:
             vk.messages.send(
                 user_id=user_id,
                 message="❌ Этого товара нет в текущей витрине. Открой раздел магазина заново.",
                 random_id=0
             )
             return
+        item_name = str(matched.get("name") or item_name)
 
     success, msg = player.buy_item(item_name, merchant_id=merchant_id)
     if success:
         track_quest_shop_buy(user_id, vk=vk)
-    vk.messages.send(user_id=user_id, message=msg, random_id=0)
+    context = ""
+    if shop_data.get("trader_all"):
+        context = "\n\nВитрина Барыги обновлена ниже."
+    elif shop_data.get("weapons") or shop_data.get("armor") or shop_data.get("scientist"):
+        context = "\n\nОткрой текущий раздел магазина заново, если нужен свежий остаток."
+    vk.messages.send(user_id=user_id, message=f"{msg}{context}", random_id=0)
+    if success and shop_data.get("trader_all"):
+        show_trader_shop_all(player, vk, user_id, page=int(shop_data.get("page", 0) or 0))
 
 
 def handle_sell_item(player, item_name: str, vk, user_id: int):
@@ -997,7 +1046,10 @@ def handle_sell_item(player, item_name: str, vk, user_id: int):
     success, msg = player.sell_item(item_name, merchant_id=merchant_id)
     if success:
         track_quest_shop_sell(user_id, vk=vk)
-    vk.messages.send(user_id=user_id, message=msg, random_id=0)
+    context = "\n\nСкупка обновлена ниже." if success and shop_data.get("sell_all") else ""
+    vk.messages.send(user_id=user_id, message=f"{msg}{context}", random_id=0)
+    if success and shop_data.get("sell_all"):
+        show_trader_sell_all(player, vk, user_id, page=int(shop_data.get("page", 0) or 0))
 
 
 def handle_buy_artifact_slot(player, vk, user_id: int):
@@ -1462,6 +1514,48 @@ def _get_shop_items_by_number(user_id: int, category: str, number: int) -> str |
     return None
 
 
+def _get_shop_item_by_number_any(user_id: int, number: int, keys: tuple[str, ...]) -> tuple[str | None, str | None]:
+    """Найти предмет по номеру в одной из активных витрин."""
+    with _shop_cache_lock:
+        shop_data = dict(_shop_cache.get(user_id, {}))
+    for key in keys:
+        items = shop_data.get(key, []) or []
+        if 1 <= number <= len(items):
+            return str(items[number - 1].get("name") or "").strip(), key
+    return None, None
+
+
+def _equipped_item_names(player) -> set[str]:
+    equipped = {
+        getattr(player, "equipped_weapon", None),
+        getattr(player, "equipped_armor", None),
+        getattr(player, "equipped_armor_head", None),
+        getattr(player, "equipped_armor_body", None),
+        getattr(player, "equipped_armor_legs", None),
+        getattr(player, "equipped_armor_hands", None),
+        getattr(player, "equipped_armor_feet", None),
+        getattr(player, "equipped_backpack", None),
+        getattr(player, "equipped_device", None),
+    }
+    equipped.update(getattr(player, "equipped_artifacts", []) or [])
+    return {str(name).strip() for name in equipped if name}
+
+
+def _is_sellable_shop_item(player, item: dict) -> bool:
+    name = str((item or {}).get("name") or "").strip()
+    if not name or int((item or {}).get("quantity", 0) or 0) <= 0:
+        return False
+    if name in _equipped_item_names(player):
+        return False
+    try:
+        from game.gacha.event_items import is_gacha_event_item
+        if is_gacha_event_item(name):
+            return False
+    except Exception:
+        pass
+    return True
+
+
 def clear_shop_cache(user_id: int = None):
     """Очистить кэш магазина"""
     with _shop_cache_lock:
@@ -1541,6 +1635,7 @@ def show_soldier_weapons(player, vk, user_id: int):
             stats.append(f"Вес {_fmt_weight(weapon)}")
             msg += _shop_card(idx, weapon, "🔫", stats, desc_limit=42)
 
+        msg += "Номер = строка в этой витрине.\n"
         msg += "Напиши 'купить <номер>' или 'купить <название>'"
 
         vk.messages.send(
@@ -1885,7 +1980,7 @@ def show_artifact_shop(player, vk, user_id: int, rarity: str = None):
         )
 
 
-def show_trader_shop_all(player, vk, user_id: int):
+def show_trader_shop_all(player, vk, user_id: int, page: int = 0):
     """Единая витрина Барыги: все категории товаров."""
     import logging
     logger = logging.getLogger(__name__)
@@ -1895,15 +1990,18 @@ def show_trader_shop_all(player, vk, user_id: int):
         shop = database.get_npc_shop_assortment(
             database.NPC_MERCHANT_TRADER,
             category=None,
-            limit=14,
+            limit=50,
             player_level=player.level,
             viewer_vk_id=user_id,
         )
         items = shop.get("items", [])
+        safe_page, total_pages, start, end = _page_bounds(len(items), page)
         set_shop_cache_data(user_id, {
             'merchant': database.NPC_MERCHANT_TRADER,
             'trader_all': items,
             'period_key': shop.get("period_key"),
+            'view': 'buy',
+            'page': safe_page,
         })
 
         if not items:
@@ -1926,11 +2024,12 @@ def show_trader_shop_all(player, vk, user_id: int):
 
         msg = f"{ui.title('Лавка Барыги: все товары')}\n"
         msg += f"💰 Баланс: {player.money} руб.\n\n"
+        msg += _page_prefix(safe_page, total_pages)
         event_text = shop.get("event_text")
         if event_text:
             msg += f"📣 {event_text}\n\n"
 
-        for idx, item in enumerate(items, 1):
+        for idx, item in enumerate(items[start:end], start + 1):
             icon = cat_emoji.get(str(item.get("category") or "").lower(), "📦")
             attack = int(item.get('attack', 0) or 0)
             defense = int(item.get('defense', 0) or 0)
@@ -1955,11 +2054,15 @@ def show_trader_shop_all(player, vk, user_id: int):
             msg += _shop_card(idx, item, icon, stat_parts, desc_limit=44)
 
         msg += "Напиши 'купить <номер>' или 'купить <название>'"
+        msg += "\nНомер = строка во всей витрине, не только на странице."
 
-        vk.messages.send(
-            user_id=user_id,
-            message=msg,
-            random_id=0
+        _send_shop_screen(
+            vk,
+            user_id,
+            msg,
+            keyboard=_shop_hud_keyboard("buy", safe_page, total_pages),
+            view="buy",
+            page=safe_page,
         )
     except Exception as e:
         logger.error(f"[TRADER_SHOP_ALL] Ошибка: {e}")
@@ -1970,7 +2073,7 @@ def show_trader_shop_all(player, vk, user_id: int):
         )
 
 
-def show_trader_sell_all(player, vk, user_id: int):
+def show_trader_sell_all(player, vk, user_id: int, page: int = 0):
     """Единая скупка Барыги: продажа любых предметов из инвентаря."""
     import logging
     logger = logging.getLogger(__name__)
@@ -1982,9 +2085,15 @@ def show_trader_sell_all(player, vk, user_id: int):
             (player.inventory.armor or []) +
             (player.inventory.backpacks or []) +
             (player.inventory.artifacts or []) +
+            (getattr(player.inventory, "shells_bags", []) or []) +
+            (getattr(player.inventory, "meds", []) or []) +
+            (getattr(player.inventory, "food", []) or []) +
+            (getattr(player.inventory, "consumables", []) or []) +
+            (getattr(player.inventory, "resources", []) or []) +
             (player.inventory.other or [])
         )
-        sellables = [i for i in sellables if int(i.get('quantity', 0) or 0) > 0]
+        sellables = [i for i in sellables if _is_sellable_shop_item(player, i)]
+        safe_page, total_pages, start, end = _page_bounds(len(sellables), page)
 
         if not sellables:
             vk.messages.send(
@@ -1997,15 +2106,20 @@ def show_trader_sell_all(player, vk, user_id: int):
         set_shop_cache_data(user_id, {
             'merchant': database.NPC_MERCHANT_TRADER,
             'sell_all': sellables,
+            'view': 'sell',
+            'page': safe_page,
         })
 
         msg = f"{ui.title('Скупка Барыги')}\n"
         msg += f"💰 Твои деньги: {player.money} руб.\n\n"
+        msg += _page_prefix(safe_page, total_pages)
+        msg += "Показаны только предметы, которые можно продать сейчас. Надетое и ивентовое скрыто.\n"
+        msg += "Номер = строка во всём списке, не только на странице.\n\n"
         event_text = database.get_shop_event_text(database.NPC_MERCHANT_TRADER)
         if event_text:
             msg += f"📣 {event_text}\n\n"
 
-        for idx, item in enumerate(sellables, 1):
+        for idx, item in enumerate(sellables[start:end], start + 1):
             preview = database.get_npc_sell_price_preview(
                 item['name'],
                 merchant_id=database.NPC_MERCHANT_TRADER,
@@ -2016,10 +2130,13 @@ def show_trader_sell_all(player, vk, user_id: int):
 
         msg += "Напиши 'продать <номер>' или 'продать <название>'"
 
-        vk.messages.send(
-            user_id=user_id,
-            message=msg,
-            random_id=0
+        _send_shop_screen(
+            vk,
+            user_id,
+            msg,
+            keyboard=_shop_hud_keyboard("sell", safe_page, total_pages),
+            view="sell",
+            page=safe_page,
         )
     except Exception as e:
         logger.error(f"[TRADER_SELL_ALL] Ошибка: {e}")
@@ -2037,7 +2154,7 @@ def show_sell_artifacts(player, vk, user_id: int):
 
     try:
         player.inventory.reload()
-        artifacts = player.inventory.artifacts
+        artifacts = [item for item in player.inventory.artifacts if _is_sellable_shop_item(player, item)]
 
         if not artifacts:
             vk.messages.send(
@@ -2149,7 +2266,6 @@ def handle_sell_item_by_number(player, vk, user_id: int, item_num: str) -> bool:
         return True
 
     handle_sell_item(player, item_name, vk, user_id)
-    show_trader_sell_all(player, vk, user_id)
     return True
 
 

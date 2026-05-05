@@ -765,7 +765,7 @@ def _handle_pending_loot_choice(player, vk, user_id: int, text: str) -> bool:
 
 def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
     """Обработка покупки по номеру в магазине"""
-    from handlers.inventory import _get_shop_items_by_number, get_shop_cache_data, handle_buy_item
+    from handlers.inventory import _get_shop_item_by_number_any, _get_shop_items_by_number, get_shop_cache_data, handle_buy_item
 
     dialog_info = get_dialog_info(user_id)
     try:
@@ -776,23 +776,11 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
     if not dialog_info:
         # Вне диалога покупка по номеру должна работать для всех витрин.
         shop_data = get_shop_cache_data(user_id)
-
-        item_name = _get_shop_items_by_number(user_id, 'trader_all', num)
-        if item_name:
-            handle_buy_item(player, item_name, vk, user_id)
-            return True
-
-        item_name = _get_shop_items_by_number(user_id, 'weapons', num)
-        if item_name:
-            handle_buy_item(player, item_name, vk, user_id)
-            return True
-
-        item_name = _get_shop_items_by_number(user_id, 'armor', num)
-        if item_name:
-            handle_buy_item(player, item_name, vk, user_id)
-            return True
-
-        item_name = _get_shop_items_by_number(user_id, 'scientist', num)
+        item_name, _key = _get_shop_item_by_number_any(
+            user_id,
+            num,
+            ("trader_all", "weapons", "armor", "scientist"),
+        )
         if item_name:
             handle_buy_item(player, item_name, vk, user_id)
             return True
@@ -821,7 +809,7 @@ def _handle_shop_buy_by_number(player, vk, user_id: int, item_num: str) -> bool:
             vk.messages.send(user_id=user_id, message="Нет предмета с таким номером.", random_id=0)
             return True
     elif stage in {"buy_all", "buy_artifacts"}:
-        item_name = _get_shop_items_by_number(user_id, 'trader_all', num)
+        item_name, _key = _get_shop_item_by_number_any(user_id, num, ("trader_all", "artifacts"))
         if item_name:
             handle_buy_item(player, item_name, vk, user_id)
             return True
@@ -1005,6 +993,7 @@ def _do_callback_processing(event, vk):
             "inventory_section",
             "inventory_back",
             "inventory_page",
+            "shop_page",
             "storage_page",
             "resonance_back",
             "resonance_banner",
@@ -1092,6 +1081,13 @@ def _do_callback_processing(event, vk):
         _answer_callback(event, vk, "Возврат")
         player = get_player(user_id)
         go_back(player, vk, user_id)
+        return
+
+    if payload.get("command") == "shop_page":
+        _answer_callback(event, vk, "Витрина обновлена")
+        player = get_player(user_id)
+        from handlers.inventory import handle_shop_page_callback
+        handle_shop_page_callback(player, vk, user_id, payload)
         return
 
     if payload.get("command") == "market_purchase":

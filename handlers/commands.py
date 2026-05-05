@@ -777,7 +777,7 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
         show_trader_shop_all(player, vk, user_id)
         return True
 
-    if text in ['артефакты', 'артефакт', 'продать', 'продать артефакты', 'продать артефакт', 'продажа артефактов']:
+    if text in ['артефакты', 'артефакт', 'купить артефакты', 'артефакты купить', 'продать', 'продать артефакты', 'продать артефакт', 'продажа артефактов']:
         show_trader_sell_all(player, vk, user_id)
         return True
 
@@ -864,9 +864,8 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         from handlers.inventory import show_trader_shop_all, show_trader_sell_all
 
         if text in ["купить артефакты", "артефакты купить"]:
-            from handlers.inventory import show_artifact_shop
             set_dialog_state(user_id, npc_id, "sell_all")
-            show_artifact_shop(player, vk, user_id)
+            show_trader_sell_all(player, vk, user_id)
             return True
 
         if text in ["купить", "оружие", "броня"]:

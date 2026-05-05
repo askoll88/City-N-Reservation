@@ -100,6 +100,41 @@ def create_storage_keyboard(page: int = 0, total_pages: int = 1):
     return keyboard
 
 
+def create_shop_hud_keyboard(view: str = "buy", page: int = 0, total_pages: int = 1):
+    """Inline-клавиатура страниц витрины/скупки NPC."""
+    total = max(1, int(total_pages or 1))
+    current = max(0, min(total - 1, int(page or 0)))
+    prev_page = (current - 1) % total
+    next_page = (current + 1) % total
+    safe_view = "sell" if view == "sell" else "buy"
+    keyboard = VkKeyboard(one_time=False, inline=True)
+    _add_callback_button(
+        keyboard,
+        "Назад",
+        command="shop_page",
+        view=safe_view,
+        page=prev_page,
+        color=VkKeyboardColor.SECONDARY,
+    )
+    _add_callback_button(
+        keyboard,
+        f"{current + 1}/{total}",
+        command="shop_page",
+        view=safe_view,
+        page=current,
+        color=VkKeyboardColor.PRIMARY,
+    )
+    _add_callback_button(
+        keyboard,
+        "След.",
+        command="shop_page",
+        view=safe_view,
+        page=next_page,
+        color=VkKeyboardColor.SECONDARY,
+    )
+    return keyboard
+
+
 def create_research_active_keyboard():
     """Минимальная клавиатура на время активного исследования."""
     keyboard = VkKeyboard(one_time=False)
@@ -332,25 +367,12 @@ def create_inventory_keyboard(*, inline: bool = False):
 
 
 def create_inventory_hud_keyboard(section: str = "all", page: int = 0, total_pages: int = 1):
-    """Inline-клавиатура HUD инвентаря: разделы и страницы текущего раздела."""
+    """Inline-клавиатура HUD инвентаря: страницы текущего раздела."""
     total = max(1, int(total_pages or 1))
     current = max(0, min(total - 1, int(page or 0)))
     prev_page = (current - 1) % total
     next_page = (current + 1) % total
     keyboard = VkKeyboard(one_time=False, inline=True)
-
-    def color_for(target: str):
-        return VkKeyboardColor.POSITIVE if section == target else VkKeyboardColor.SECONDARY
-
-    _add_callback_button(keyboard, "Оружие", command="inventory_section", section="weapons", color=color_for("weapons"))
-    _add_callback_button(keyboard, "Броня", command="inventory_section", section="armor", color=color_for("armor"))
-    keyboard.add_line()
-    _add_callback_button(keyboard, "Артефакты", command="inventory_section", section="artifacts", color=color_for("artifacts"))
-    _add_callback_button(keyboard, "Другое", command="inventory_section", section="other", color=color_for("other"))
-    keyboard.add_line()
-    _add_callback_button(keyboard, "Рюкзаки", command="inventory_section", section="backpacks", color=color_for("backpacks"))
-    _add_callback_button(keyboard, "Все", command="inventory_section", section="all", color=color_for("all"))
-    keyboard.add_line()
     _add_callback_button(keyboard, "Назад", command="inventory_page", section=section, page=prev_page, color=VkKeyboardColor.SECONDARY)
     _add_callback_button(
         keyboard,
@@ -361,8 +383,6 @@ def create_inventory_hud_keyboard(section: str = "all", page: int = 0, total_pag
         color=VkKeyboardColor.PRIMARY,
     )
     _add_callback_button(keyboard, "След.", command="inventory_page", section=section, page=next_page, color=VkKeyboardColor.SECONDARY)
-    keyboard.add_line()
-    _add_callback_button(keyboard, "Выйти", command="inventory_back", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
