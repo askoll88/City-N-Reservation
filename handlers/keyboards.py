@@ -829,6 +829,28 @@ def create_admin_users_keyboard():
     return keyboard
 
 
+def create_admin_users_list_keyboard(page: int = 1, pages: int = 1):
+    """Пагинация списка пользователей в админке."""
+    keyboard = VkKeyboard(one_time=False)
+    page = max(1, int(page or 1))
+    pages = max(1, int(pages or 1))
+    has_nav = False
+
+    if page > 1:
+        keyboard.add_button("◀️ Игроки", color=VkKeyboardColor.SECONDARY)
+        has_nav = True
+    if page < pages:
+        if page > 1:
+            keyboard.add_line()
+        keyboard.add_button("Игроки ▶️", color=VkKeyboardColor.PRIMARY)
+        has_nav = True
+    if has_nav:
+        keyboard.add_line()
+    keyboard.add_button("👥 Пользователи", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
 # ---------- Выброс ----------
 
 def create_admin_emission_keyboard():

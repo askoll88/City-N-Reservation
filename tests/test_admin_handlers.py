@@ -17,6 +17,7 @@ class DummyVKMessages:
 class DummyVK:
     def __init__(self):
         self.messages = DummyVKMessages()
+        self.users = Mock()
 
 
 class AdminHandlersTest(unittest.TestCase):
@@ -26,12 +27,50 @@ class AdminHandlersTest(unittest.TestCase):
 
     @patch("handlers.admin.create_admin_keyboard", return_value=DummyKeyboard())
     @patch("handlers.admin.database.is_user_admin", return_value=False)
-    def test_denies_non_admin(self, _is_admin_mock, _kbd_mock):
+    def test_hides_admin_from_non_admin(self, _is_admin_mock, _kbd_mock):
         handled = admin.handle_admin_commands(
             self.player, self.vk, 1, "админка", "админка"
         )
+        self.assertFalse(handled)
+        self.vk.messages.send.assert_not_called()
+
+    @patch("handlers.admin.create_admin_users_list_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.database.set_user_flag")
+    @patch("handlers.admin.database.get_user_flag", return_value=0)
+    @patch("handlers.admin.database.admin_search_users")
+    @patch("handlers.admin.database.admin_count_users", return_value=12)
+    @patch("handlers.admin.database.is_user_admin", return_value=True)
+    def test_users_page_includes_vk_name(
+        self,
+        _is_admin_mock,
+        _count_mock,
+        search_mock,
+        _get_flag_mock,
+        _set_flag_mock,
+        _kbd_mock,
+    ):
+        search_mock.return_value = [{
+            "vk_id": 777,
+            "name": "Сталкер",
+            "level": 7,
+            "experience": 159,
+            "money": 446,
+            "location": "убежище",
+            "is_admin": 0,
+            "is_banned": 0,
+        }]
+        self.vk.users.get.return_value = [{"id": 777, "first_name": "Иван", "last_name": "Петров"}]
+
+        handled = admin.handle_admin_commands(
+            self.player, self.vk, 1, "последние пользователи", "Последние пользователи"
+        )
+
         self.assertTrue(handled)
-        self.vk.messages.send.assert_called_once()
+        message = self.vk.messages.send.call_args.kwargs["message"]
+        self.assertIn("Страница: 1/2", message)
+        self.assertIn("Иван Петров", message)
+        self.assertIn("ID: 777 | Ник: Сталкер", message)
+        search_mock.assert_called_once_with(query=None, limit=10, offset=0)
 
     @patch("handlers.admin.create_admin_keyboard", return_value=DummyKeyboard())
     @patch("handlers.admin.database.is_user_admin", return_value=True)

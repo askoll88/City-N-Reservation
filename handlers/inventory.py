@@ -1162,7 +1162,7 @@ def handle_buy_artifact_slot(player, vk, user_id: int):
     if not req:
         vk.messages.send(
             user_id=user_id,
-            message="Для следующего слота нет настроек покупки. Обратись к администратору.",
+            message="Покупка следующего слота временно недоступна. Попробуй позже.",
             random_id=0
         )
         return
@@ -1223,7 +1223,7 @@ def handle_buy_shells_bag(player, vk, user_id: int):
     if not bag_order:
         vk.messages.send(
             user_id=user_id,
-            message="Для мешочков не настроена прогрессия покупки. Обратись к администратору.",
+            message="Покупка мешочка временно недоступна. Попробуй позже.",
             random_id=0
         )
         return

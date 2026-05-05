@@ -362,7 +362,7 @@ def force_start_limited_event(event_id: str, vk=None) -> dict:
     prev_active = state.get("active_event_id")
     if prev_active and vk is not None and prev_active in LIMITED_EVENTS:
         prev_name = LIMITED_EVENTS[prev_active].get("name", prev_active)
-        _broadcast(vk, f"⚠️ Ивент «{prev_name}» остановлен администратором.")
+        _broadcast(vk, f"⚠️ Ивент «{prev_name}» досрочно завершён.")
 
     duration_min = max(10, int(event.get("duration_minutes") or 60))
     end_ts = now_ts + duration_min * 60
@@ -382,7 +382,7 @@ def force_start_limited_event(event_id: str, vk=None) -> dict:
         _broadcast(
             vk,
             (
-                f"⚡ АДМИН ЗАПУСТИЛ ИВЕНТ: «{event.get('name', event_id)}»\n\n"
+                f"⚡ НАЧАЛСЯ ИВЕНТ: «{event.get('name', event_id)}»\n\n"
                 f"Длительность: {duration_min} мин."
             ),
         )
@@ -417,6 +417,6 @@ def force_stop_limited_event(vk=None) -> dict:
     _save_state(state)
 
     if vk is not None:
-        _broadcast(vk, f"⛔ Ивент «{active_name}» досрочно остановлен администратором.")
+        _broadcast(vk, f"⛔ Ивент «{active_name}» досрочно завершён.")
 
     return {"success": True, "event_id": active_id, "event_name": active_name}

@@ -369,7 +369,7 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
     if not is_resonance_enabled():
         return {"success": False, "message": "Резонанс Зоны сейчас отключён."}
     if not database.is_user_admin(vk_id):
-        return {"success": False, "message": "Резонанс Зоны пока доступен только администраторам для тестов."}
+        return {"success": False, "message": "Резонанс Зоны пока не отвечает. Вернись позже."}
 
     cost = TEN_PULL_COST if count == 10 else SINGLE_PULL_COST
     current_shards = get_signal_shards(vk_id)

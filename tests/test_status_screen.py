@@ -47,6 +47,8 @@ class DummyPlayer:
     equipped_weapon = "АК-74 «Резонанс»"
     equipped_backpack = "Рюкзак"
     equipped_device = "Детектор"
+    current_location_id = "убежище"
+    previous_location = None
     inventory = DummyInventory()
     max_weight = 40
     artifact_slots = 2
@@ -95,6 +97,8 @@ class StatusScreenTest(unittest.TestCase):
 
     def test_status_pages_are_split_by_topic(self):
         with patch("handlers.status.database.get_user_by_vk", return_value={
+            "location": "убежище",
+            "previous_location": None,
             "level": 7,
             "experience": 1400,
             "health": 88,
@@ -121,6 +125,60 @@ class StatusScreenTest(unittest.TestCase):
         self.assertIn("ПРОИЗВОДНЫЕ", stats)
         self.assertIn("СТАТУС: СНАРЯЖЕНИЕ", gear)
         self.assertIn("Стабилизатор резонанса", gear)
+        self.assertIn("Ранг легендарное", gear)
+
+    def test_status_uses_previous_location_when_inventory_is_open(self):
+        player = DummyPlayer()
+        with patch("handlers.status.database.get_user_by_vk", return_value={
+            "location": "инвентарь",
+            "previous_location": "убежище",
+            "level": 7,
+            "experience": 1400,
+            "health": 88,
+            "energy": 64,
+            "radiation": 8,
+            "money": 1234,
+            "equipped_weapon": "АК-74 «Резонанс»",
+            "equipped_backpack": "Рюкзак",
+            "equipped_device": "Детектор",
+        }), patch("handlers.status.database.get_shells_info", return_value={
+            "current": 10,
+            "capacity": 20,
+            "equipped_bag": "Мешочек",
+        }), patch("handlers.status.database.get_user_flag", return_value=0), \
+             patch("handlers.status.database.get_item_by_name", return_value=None), \
+             patch("handlers.status.database.update_user_stats"):
+            overview = format_status_page(player, 777, 0)
+
+        self.assertIn("Локация: 🔐 Убежище (открыт инвентарь)", overview)
+
+    def test_status_hp_line_shows_total_and_artifact_bonus(self):
+        player = DummyPlayer()
+        player.max_health = 149
+        player.max_health_bonus = 25
+        with patch("handlers.status.database.get_user_by_vk", return_value={
+            "location": "убежище",
+            "previous_location": None,
+            "level": 7,
+            "experience": 1400,
+            "health": 124,
+            "energy": 64,
+            "radiation": 8,
+            "money": 1234,
+            "equipped_weapon": "АК-74 «Резонанс»",
+            "equipped_backpack": "Рюкзак",
+            "equipped_device": "Детектор",
+        }), patch("handlers.status.database.get_shells_info", return_value={
+            "current": 10,
+            "capacity": 20,
+            "equipped_bag": "Мешочек",
+        }), patch("handlers.status.database.get_user_flag", return_value=0), \
+             patch("handlers.status.database.get_item_by_name", return_value=None), \
+             patch("handlers.status.database.update_user_stats"):
+            stats = format_status_page(player, 777, 2)
+
+        self.assertIn("Макс. HP: 149 (база 144 +25 арты)", stats)
+        self.assertIn("Рукопашный урон", stats)
 
 
 if __name__ == "__main__":

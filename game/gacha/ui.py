@@ -524,7 +524,7 @@ def show_resonance_menu(player, vk, user_id: int) -> None:
         _send(
             vk,
             user_id,
-            "Резонанс Зоны пока закрыт: система включается админом и доступна только администраторам для тестов.",
+            "Резонанс Зоны пока не отвечает. Вернись позже.",
             create_location_keyboard(player.current_location_id, player.level),
         )
         return

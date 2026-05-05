@@ -9,10 +9,12 @@ from game.stat_balance import (
     stamina_energy_regen,
     stamina_max_energy_bonus,
 )
+from game.weapon_progression import weapon_rank_label
 from handlers.keyboards import create_status_keyboard
 from infra import config as game_config
 from infra import database
 from infra.state_manager import get_ui_current_screen, set_ui_screen, try_edit_or_send_ui
+from models.locations import get_location
 from models.player import (
     UNSPENT_STAT_POINTS_FLAG,
     calculate_player_max_health,
@@ -41,11 +43,34 @@ def _refresh_player(player, user_id: int):
     player.energy = user_data.get("energy", player.energy)
     player.radiation = user_data.get("radiation", player.radiation)
     player.money = user_data.get("money", player.money)
+    player.current_location_id = user_data.get("location", getattr(player, "current_location_id", None))
+    player.previous_location = user_data.get("previous_location", getattr(player, "previous_location", None))
     player.equipped_armor = user_data.get("equipped_armor")
     player.equipped_weapon = user_data.get("equipped_weapon")
     player.equipped_backpack = user_data.get("equipped_backpack")
     player.equipped_device = user_data.get("equipped_device")
     return user_data
+
+
+def _display_location_name(player) -> str:
+    current_id = getattr(player, "current_location_id", None)
+    if current_id == "инвентарь":
+        previous_id = getattr(player, "previous_location", None)
+        previous = get_location(previous_id) if previous_id else None
+        if previous:
+            return f"{previous.name} (открыт инвентарь)"
+    location = player.location
+    return location.name if location else "—"
+
+
+def _weapon_line(player, ctx: dict) -> str:
+    if not player.equipped_weapon:
+        return "Оружие: —"
+    return f"Оружие: {player.equipped_weapon} | ATK {ctx['weapon_attack']}"
+
+
+def _weapon_rank_text(weapon: dict) -> str:
+    return weapon_rank_label(weapon.get("item_rank") or weapon.get("rarity") or "common")
 
 
 def _armor_lines(user_data: dict | None) -> tuple[list[str], int]:
@@ -141,7 +166,6 @@ def _bonus_parts(passive_bonuses: dict) -> list[str]:
 
 def _status_context(player, user_id: int) -> dict:
     user_data = _refresh_player(player, user_id)
-    location = player.location
     exp_needed = get_level_xp_required(player.level, player.LEVELS, player.MAX_LEVEL)
     exp_progress = normalize_level_experience(player.level, player.experience, player.LEVELS, player.MAX_LEVEL)
     if player._is_rank_xp_locked() and player.level < player.MAX_LEVEL:
@@ -157,7 +181,7 @@ def _status_context(player, user_id: int) -> dict:
     weight_status = "в норме" if current_weight <= player.max_weight else "перегруз"
 
     return {
-        "location_name": location.name if location else "—",
+        "location_name": _display_location_name(player),
         "rank_name": player.get_rank_name(),
         "rank_block": player.get_rank_progress_block(),
         "class_name": player.player_class or "нет класса",
@@ -176,6 +200,7 @@ def _status_context(player, user_id: int) -> dict:
         "passive_bonuses": passive_bonuses,
         "bonus_parts": _bonus_parts(passive_bonuses),
         "unspent_points": int(database.get_user_flag(user_id, UNSPENT_STAT_POINTS_FLAG, 0) or 0),
+        "base_max_hp": calculate_player_max_health(player.level, player.effective_stamina, 0),
     }
 
 
@@ -200,8 +225,8 @@ def _overview_page(player, ctx: dict) -> list[str]:
         f"Опыт: {ctx['exp_progress']}/{ctx['exp_needed']} | Деньги: {player.money:,} руб.",
         "",
         ui.section("Боеготовность"),
-        f"Оружие: {player.equipped_weapon or '—'} | ATK {ctx['weapon_attack']}",
-        f"Броня: {ctx['armor_total']} | Артефакты: {len(ctx['artifacts'])}/{player.artifact_slots}",
+        _weapon_line(player, ctx),
+        f"Защита: {ctx['armor_total']} | Артефакты: {len(ctx['artifacts'])}/{player.artifact_slots}",
         f"Вес: {ctx['current_weight']:.1f}/{player.max_weight} кг ({ctx['weight_status']})",
         f"Гильзы: {shells['current']}/{shells['capacity']}",
     ])
@@ -234,7 +259,6 @@ def _stats_page(player, ctx: dict) -> list[str]:
     energy_regen = stamina_energy_regen(player.effective_stamina)
     energy_max_bonus = stamina_max_energy_bonus(player.effective_stamina)
     luck_outcome = luck_outcome_bonus(player.effective_luck)
-    base_hp = calculate_player_max_health(player.level, player.effective_stamina, 0)
     next_regen = next_stamina_energy_regen_breakpoint(player.effective_stamina)
     next_max_energy = next_stamina_max_energy_breakpoint(player.effective_stamina)
     lines = _header(player, ctx, 2)
@@ -248,8 +272,11 @@ def _stats_page(player, ctx: dict) -> list[str]:
         f"Удача: {player.effective_luck} (+{luck_outcome}% к исходам)",
         "",
         ui.section("Производные"),
-        f"Макс. HP: {base_hp}" + (f" + {player.max_health_bonus} от артефактов" if player.max_health_bonus else ""),
-        f"Урон: {player.melee_damage} | Броня: {player.total_defense}",
+        (
+            f"Макс. HP: {player.max_health}"
+            + (f" (база {ctx['base_max_hp']} +{player.max_health_bonus} арты)" if player.max_health_bonus else "")
+        ),
+        f"Рукопашный урон: {player.melee_damage} | Защита: {player.total_defense}",
         f"Крит: {player.crit_chance}% | Крит. урон: +{player.crit_damage}%",
         f"Уклонение: {player.dodge_chance}% | Сопротивление: {player.damage_resist}%",
         f"Находки: {player.find_chance}% | Редкое: {player.rare_find_chance}%",
@@ -266,16 +293,16 @@ def _equipment_page(player, ctx: dict) -> list[str]:
     lines = _header(player, ctx, 3)
     lines.extend([
         ui.section("Оружие"),
-        f"{player.equipped_weapon or '—'} | ATK {ctx['weapon_attack']}",
+        f"{player.equipped_weapon or '—'}" + (f" | ATK {ctx['weapon_attack']}" if player.equipped_weapon else ""),
     ])
     if weapon:
-        lines.append(f"L{weapon.get('item_level', 1)}/{weapon.get('weapon_cap', weapon.get('required_level', 1))} | Прорыв {weapon.get('weapon_ascension', 0)}/10 | Ранг {weapon.get('item_rank', 'common')}")
+        lines.append(f"L{weapon.get('item_level', 1)}/{weapon.get('weapon_cap', weapon.get('required_level', 1))} | Прорыв {weapon.get('weapon_ascension', 0)}/10 | Ранг {_weapon_rank_text(weapon)}")
         if weapon.get("event_bonus_text"):
             lines.append(f"{weapon.get('event_bonus_name')}: {weapon.get('event_bonus_text')}")
     lines.extend(["", ui.section("Броня")])
     if ctx["armor_lines"]:
         lines.extend(ctx["armor_lines"])
-        lines.append(f"Всего брони: {ctx['armor_total']}")
+        lines.append(f"Всего защиты: {ctx['armor_total']}")
     else:
         lines.append("Броня не надета.")
     lines.extend(["", ui.section("Артефакты")])

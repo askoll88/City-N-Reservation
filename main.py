@@ -223,7 +223,7 @@ def handle_message(event, vk):
         reason = player.ban_reason or "не указана"
         vk.messages.send(
             user_id=user_id,
-            message=f"⛔ Ты заблокирован администратором.\nПричина: {reason}",
+            message=f"⛔ Доступ к персонажу заблокирован.\nПричина: {reason}",
             random_id=0,
         )
         return

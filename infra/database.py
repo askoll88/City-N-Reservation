@@ -2586,24 +2586,41 @@ def get_admin_user(vk_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def admin_search_users(query: str | None = None, limit: int = 20) -> list[dict]:
+def admin_count_users(query: str | None = None) -> int:
     with db_cursor() as (cursor, _):
         if query:
             q = f"%{query}%"
             cursor.execute("""
-                SELECT vk_id, name, level, money, is_admin, is_banned
+                SELECT COUNT(*) AS cnt
+                FROM users
+                WHERE CAST(vk_id AS TEXT) ILIKE %s OR name ILIKE %s
+            """, (q, q))
+        else:
+            cursor.execute("SELECT COUNT(*) AS cnt FROM users")
+        row = cursor.fetchone()
+        return int(dict(row).get("cnt") or 0) if row else 0
+
+
+def admin_search_users(query: str | None = None, limit: int = 20, offset: int = 0) -> list[dict]:
+    with db_cursor() as (cursor, _):
+        if query:
+            q = f"%{query}%"
+            cursor.execute("""
+                SELECT vk_id, name, level, experience, money, location, is_admin, is_banned
                 FROM users
                 WHERE CAST(vk_id AS TEXT) ILIKE %s OR name ILIKE %s
                 ORDER BY id DESC
                 LIMIT %s
-            """, (q, q, limit))
+                OFFSET %s
+            """, (q, q, limit, offset))
         else:
             cursor.execute("""
-                SELECT vk_id, name, level, money, is_admin, is_banned
+                SELECT vk_id, name, level, experience, money, location, is_admin, is_banned
                 FROM users
                 ORDER BY id DESC
                 LIMIT %s
-            """, (limit,))
+                OFFSET %s
+            """, (limit, offset))
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
@@ -2955,7 +2972,7 @@ def claim_expired_market_notifications(limit: int = 100) -> list[dict]:
 
 def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quantity: int = 1) -> dict:
     if not is_market_enabled():
-        return {"success": False, "message": "P2P рынок временно отключён администратором."}
+        return {"success": False, "message": "P2P рынок временно закрыт."}
     if quantity <= 0:
         return {"success": False, "message": "Количество должно быть больше нуля."}
     if price_per_item <= 0:
@@ -3265,7 +3282,7 @@ def get_market_user_listings(vk_id: int, status: str = "active", page: int = 1, 
 
 def buy_market_listing(vk_id: int, listing_id: int) -> dict:
     if not is_market_enabled():
-        return {"success": False, "message": "P2P рынок временно отключён администратором."}
+        return {"success": False, "message": "P2P рынок временно закрыт."}
     with db_cursor() as (cursor, _):
         _expire_market_listings_tx(cursor)
 
@@ -3388,7 +3405,7 @@ def buy_market_listing(vk_id: int, listing_id: int) -> dict:
 
 def cancel_market_listing(vk_id: int, listing_id: int) -> dict:
     if not is_market_enabled():
-        return {"success": False, "message": "P2P рынок временно отключён администратором."}
+        return {"success": False, "message": "P2P рынок временно закрыт."}
     with db_cursor() as (cursor, _):
         _expire_market_listings_tx(cursor)
 
@@ -3520,7 +3537,7 @@ def admin_cancel_market_listing(listing_id: int) -> dict:
         "seller_vk_id": lot["seller_vk_id"],
         "item_name": lot["item_name"],
         "quantity": lot["quantity"],
-        "message": f"Лот #{listing_id} принудительно снят администратором.",
+        "message": f"Лот #{listing_id} принудительно снят.",
     }
 
 

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from handlers.keyboards import (
     create_admin_keyboard,
     create_admin_users_keyboard,
+    create_admin_users_list_keyboard,
     create_admin_emission_keyboard,
     create_admin_give_keyboard,
     create_admin_events_keyboard,
@@ -21,6 +22,8 @@ from infra import database
 
 
 MSK_TZ = timezone(timedelta(hours=3))
+ADMIN_USERS_PER_PAGE = 10
+ADMIN_USERS_PAGE_FLAG = "_admin_users_page"
 
 
 def _set_admin_menu(user_id: int, category: str):
@@ -50,6 +53,81 @@ def _send(vk, user_id: int, message: str, keyboard=None):
         keyboard=keyboard.get_keyboard(),
         random_id=0,
     )
+
+
+def _fetch_vk_display_names(vk, vk_ids: list[int]) -> dict[int, str]:
+    ids = [int(v) for v in vk_ids if int(v or 0) > 0]
+    if not ids:
+        return {}
+    users_api = getattr(vk, "users", None)
+    get_method = getattr(users_api, "get", None)
+    if not callable(get_method):
+        return {}
+    try:
+        response = get_method(user_ids=",".join(str(v) for v in ids))
+    except Exception:
+        return {}
+    if isinstance(response, dict) and "response" in response:
+        response = response.get("response")
+    names: dict[int, str] = {}
+    for row in response or []:
+        try:
+            vk_id = int(row.get("id") or row.get("uid") or 0)
+        except Exception:
+            continue
+        display_name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
+        if vk_id and display_name:
+            names[vk_id] = display_name
+    return names
+
+
+def _show_users_page(vk, user_id: int, page: int = 1, query: str | None = None) -> None:
+    total = database.admin_count_users(query=query)
+    pages = max(1, (total + ADMIN_USERS_PER_PAGE - 1) // ADMIN_USERS_PER_PAGE)
+    safe_page = min(max(1, int(page or 1)), pages)
+    if not query:
+        database.set_user_flag(user_id, ADMIN_USERS_PAGE_FLAG, safe_page)
+
+    users = database.admin_search_users(
+        query=query,
+        limit=ADMIN_USERS_PER_PAGE,
+        offset=(safe_page - 1) * ADMIN_USERS_PER_PAGE,
+    )
+    vk_names = _fetch_vk_display_names(vk, [int(u.get("vk_id") or 0) for u in users])
+
+    title = f"🔎 ИГРОКИ: {query}" if query else "👥 ИГРОКИ"
+    lines = [
+        f"{title}",
+        f"Страница: {safe_page}/{pages} | Всего: {total}",
+        "",
+    ]
+
+    if not users:
+        lines.append("Пользователи не найдены.")
+    for idx, u in enumerate(users, start=(safe_page - 1) * ADMIN_USERS_PER_PAGE + 1):
+        vk_id = int(u.get("vk_id") or 0)
+        vk_name = vk_names.get(vk_id)
+        game_name = str(u.get("name") or "-")
+        flags = []
+        if u.get("is_admin"):
+            flags.append("admin")
+        if u.get("is_banned"):
+            flags.append("ban")
+        suffix = f" | {' '.join(flags)}" if flags else ""
+        if vk_name and vk_name != game_name:
+            lines.append(f"{idx}. {vk_name}\n   ID: {vk_id} | Ник: {game_name}")
+        else:
+            lines.append(f"{idx}. {vk_name or game_name}\n   ID: {vk_id}")
+        lines.append(
+            f"   L{int(u.get('level') or 1)} | XP {int(u.get('experience') or 0)} | "
+            f"{int(u.get('money') or 0)} руб | {u.get('location') or '-'}{suffix}"
+        )
+
+    lines.extend([
+        "",
+        "Команды: админ профиль <id>, админ инвентарь <id>, админ локация <id> <локация>",
+    ])
+    _send(vk, user_id, "\n".join(lines), create_admin_users_list_keyboard(safe_page, pages))
 
 
 def _fmt_ts_msk(ts: int) -> str:
@@ -123,7 +201,8 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
 
     # Админ — всегда ловим. Если в подменю — любое сообщение.
     # Если нет подменю — проверяем триггеры.
-    if not _get_admin_menu(user_id):
+    admin_menu = _get_admin_menu(user_id)
+    if not admin_menu:
         if not (text.startswith("админ")
                 or text.startswith("бан ")
                 or text.startswith("разбан ")
@@ -146,8 +225,9 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             return False
 
     if not database.is_user_admin(user_id):
-        vk.messages.send(user_id=user_id, message="⛔ Нет доступа к админ-командам.", random_id=0)
-        return True
+        if admin_menu:
+            _clear_admin_menu(user_id)
+        return False
 
     # === Кнопки главного меню ===
     if text in {"👥 пользователи", "пользователи"}:
@@ -171,16 +251,15 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
 
     # === Кнопки: Пользователи ===
     if text == "последние пользователи":
-        users = database.admin_search_users(limit=20)
-        if not users:
-            _send(vk, user_id, "Пользователи не найдены.", create_admin_users_keyboard()); return True
-        lines = ["👥 ПОСЛЕДНИЕ ПОЛЬЗОВАТЕЛИ\n"]
-        for u in users:
-            flags = []
-            if u.get("is_admin"): flags.append("admin")
-            if u.get("is_banned"): flags.append("banned")
-            lines.append(f"{u['vk_id']} | {u['name']} | lvl {u['level']} | {u['money']} руб{' [' + ' '.join(flags) + ']' if flags else ''}")
-        _send(vk, user_id, "\n".join(lines), create_admin_users_keyboard()); return True
+        _show_users_page(vk, user_id, 1); return True
+
+    if text in {"игроки ▶️", "▶️ игроки", "следующая страница", "следующие игроки"}:
+        page = int(database.get_user_flag(user_id, ADMIN_USERS_PAGE_FLAG, 1) or 1)
+        _show_users_page(vk, user_id, page + 1); return True
+
+    if text in {"◀️ игроки", "игроки ◀️", "предыдущая страница", "предыдущие игроки"}:
+        page = int(database.get_user_flag(user_id, ADMIN_USERS_PAGE_FLAG, 1) or 1)
+        _show_users_page(vk, user_id, page - 1); return True
 
     if text == "забаненные":
         bans = database.admin_list_banned_users(limit=50)
@@ -474,12 +553,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     m = re.match(r"^админ\s+пользователи\s+(.+)$", original_text, flags=re.IGNORECASE)
     if m:
         query = m.group(1).strip()
-        users = database.admin_search_users(query=query, limit=20)
-        lines = [f"🔎 ПОИСК: {query}\n"]
-        for u in users:
-            lines.append(f"{u['vk_id']} | {u['name']} | lvl {u['level']} | {u['money']} руб")
-        if len(lines) == 1: lines.append("Ничего не найдено.")
-        _send(vk, user_id, "\n".join(lines)); return True
+        _show_users_page(vk, user_id, 1, query=query); return True
 
     m = re.match(r"^админ\s+профиль\s+(\d+)$", text)
     if m:
@@ -487,7 +561,10 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         user = database.get_admin_user(target)
         if not user:
             _send(vk, user_id, "Пользователь не найден."); return True
-        _send(vk, user_id, f"🧾 ПРОФИЛЬ {user['vk_id']}\n\nИмя: {user['name']}\nЛокация: {user['location']}\nУровень: {user['level']}\nДеньги: {user['money']}\nАдмин: {user['is_admin']}\nБан: {user['is_banned']}\nПричина: {user.get('ban_reason') or '-'}"); return True
+        vk_name = _fetch_vk_display_names(vk, [target]).get(target)
+        name_lines = [f"VK: {vk_name}"] if vk_name else []
+        name_lines.append(f"Ник: {user['name']}")
+        _send(vk, user_id, f"🧾 ПРОФИЛЬ {user['vk_id']}\n\n{chr(10).join(name_lines)}\nЛокация: {user['location']}\nУровень: {user['level']}\nДеньги: {user['money']}\nАдмин: {user['is_admin']}\nБан: {user['is_banned']}\nПричина: {user.get('ban_reason') or '-'}"); return True
 
     m = re.match(r"^админ\s+права\s+(\d+)\s+(on|off)$", text)
     if m:
@@ -560,7 +637,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                     vk.messages.send(
                         user_id=seller_vk_id,
                         message=(
-                            "⛔ ЛОТ СНЯТ АДМИНИСТРАТОРОМ\n\n"
+                            "⛔ ЛОТ СНЯТ С РЫНКА\n\n"
                             f"Лот #{result.get('listing_id')} снят с рынка.\n"
                             f"Предмет: {result.get('item_name')} x{result.get('quantity')}\n"
                             "Предмет возвращён в инвентарь."
@@ -612,7 +689,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             _send(vk, user_id, "❌ Рандомное событие не сгенерировалось."); return True
         set_pending_event(target, event)
         try:
-            show_random_event(target_player, vk, target, event, prefix="🎲 АДМИНСКИЙ ИВЕНТ")
+            show_random_event(target_player, vk, target, event, prefix="🎲 СОБЫТИЕ")
             _send(vk, user_id, f"✅ Ивент отправлен vk:{target} | Тип: {event.get('type', '?')}")
         except Exception as e:
             _send(vk, user_id, f"❌ Ошибка: {e}")

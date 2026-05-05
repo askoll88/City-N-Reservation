@@ -102,7 +102,7 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
     if result.get("error") == "exception":
         vk.messages.send(
             user_id=user_id,
-            message="⚠️ Ошибка при получении награды. Попробуй позже или напиши админу.",
+            message="⚠️ Ошибка при получении награды. Попробуй позже.",
             keyboard=create_daily_quests_keyboard().get_keyboard(),
             random_id=0,
         )
