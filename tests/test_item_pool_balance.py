@@ -42,6 +42,29 @@ class ItemPoolBalanceTest(unittest.TestCase):
             if category in {"armor", "rare_armor"}:
                 self.assertLess(int(defense or 0), 16, name)
 
+    def test_backpacks_have_meaningful_long_trip_progression(self):
+        backpacks = [item for item in ITEMS_POOL if item[1] == "backpacks"]
+        self.assertGreaterEqual(len(backpacks), 4)
+
+        previous_price = 0
+        previous_bonus = 0
+        previous_net = 0.0
+        for name, _category, _desc, price, _attack, _defense, weight, bonus, *_rest in backpacks:
+            net_capacity = float(bonus) - float(weight)
+            self.assertGreater(price, previous_price, name)
+            self.assertGreater(bonus, previous_bonus, name)
+            self.assertGreater(net_capacity, previous_net, name)
+            self.assertGreaterEqual(price / max(1, net_capacity), 50, name)
+            previous_price = price
+            previous_bonus = bonus
+            previous_net = net_capacity
+
+        starter = _by_name("Походный рюкзак")
+        cargo = _by_name("Грузовой рюкзак")
+        self.assertLessEqual(starter[7], 12)
+        self.assertGreaterEqual(cargo[3], 10_000)
+        self.assertGreaterEqual(cargo[6], 8.0)
+
 
 if __name__ == "__main__":
     unittest.main()

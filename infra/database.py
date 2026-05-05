@@ -1678,7 +1678,7 @@ _NPC_SHOPS = {
 }
 _TRADER_BLOCKED_RARITIES = frozenset({"epic", "legendary"})
 _TRADER_BUY_BLOCKED_CATEGORIES = frozenset({"artifacts", "rare_artifacts", "legendary_artifacts"})
-_TRADER_SINGLE_STOCK_CATEGORIES = frozenset({"weapons", "rare_weapons", "armor"})
+_TRADER_SINGLE_STOCK_CATEGORIES = frozenset({"weapons", "rare_weapons", "armor", "backpacks"})
 _TRADER_ESSENTIAL_STOCK_CATEGORIES = frozenset({"meds", "food"})
 _TRADER_ESSENTIAL_STOCK_BONUS = 4
 

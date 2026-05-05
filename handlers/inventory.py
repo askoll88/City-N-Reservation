@@ -53,6 +53,10 @@ def _price_line(item: dict, price: int | None = None) -> str:
     return f"Цена: {current} руб."
 
 
+def _backpack_net_capacity(item: dict) -> float:
+    return round(float(item.get("backpack_bonus", 0) or 0) - float(item.get("weight", 0) or 0), 1)
+
+
 def _shop_card(
     idx: int,
     item: dict,
@@ -208,6 +212,10 @@ def _iter_all_inventory_items(player) -> list[dict]:
     )
 
 
+def _normalize_lookup_name(value: object) -> str:
+    return str(value or "").strip().casefold().replace("ё", "е")
+
+
 def _artifact_effect_lines(item_name: str) -> list[str]:
     effects = database.ARTIFACT_BONUSES.get(item_name, {})
     if not effects:
@@ -297,6 +305,7 @@ def build_item_details(item: dict) -> str:
         lines.append(f"🛡️ Защита: {defense}")
     if backpack_bonus:
         lines.append(f"🎒 Бонус веса: +{backpack_bonus} кг")
+        lines.append(f"📦 Чистый объём: +{_backpack_net_capacity(item):g} кг")
 
     outfit_passive = get_event_outfit_passive_profile(name)
     if outfit_passive:
@@ -582,6 +591,88 @@ def _handle_artifact_digit(player, index: int, vk, user_id: int) -> bool:
     return True
 
 
+def _refresh_after_artifact_change(player, user_id: int):
+    if hasattr(player, "reload"):
+        player.reload()
+    if hasattr(player, "_recalculate_max_weight"):
+        player._recalculate_max_weight()
+
+    max_health = int(getattr(player, "max_health", 0) or 0)
+    health = int(getattr(player, "health", 0) or 0)
+    max_weight = getattr(player, "max_weight", None)
+    if max_health and health > max_health:
+        player.health = max_health
+        database.update_user_stats(user_id, health=player.health, max_weight=max_weight)
+    else:
+        database.update_user_stats(user_id, max_weight=max_weight)
+    player.inventory.reload()
+
+
+def _format_artifact_equip_result(player, base_message: str) -> str:
+    msg = f"{base_message}\n\n"
+    bonuses = getattr(player, "_artifact_bonuses", {}) or {}
+    if bonuses.get('crit'):
+        msg += f"Крит: +{bonuses['crit']}%\n"
+    if bonuses.get('find_chance'):
+        msg += f"Находка: +{bonuses['find_chance']}%\n"
+    if bonuses.get('radiation'):
+        msg += f"Радиация: {bonuses['radiation']}\n"
+    if bonuses.get('energy'):
+        msg += f"Энергия: +{bonuses['energy']}\n"
+    if bonuses.get('max_energy'):
+        msg += f"Макс. энергия: +{bonuses['max_energy']}\n"
+    if bonuses.get('defense'):
+        msg += f"Защита: +{bonuses['defense']}%\n"
+    if bonuses.get('dodge'):
+        msg += f"Уклонение: +{bonuses['dodge']}%\n"
+    if bonuses.get('max_health_bonus'):
+        msg += f"Здоровье: +{bonuses['max_health_bonus']} HP\n"
+    if bonuses.get('damage_resist'):
+        msg += f"Сопротивление урону: +{bonuses['damage_resist']}%\n"
+    return msg.rstrip()
+
+
+def handle_equip_artifact(player, target: str, vk, user_id: int) -> bool:
+    """Надеть артефакт по номеру текущего раздела или названию."""
+    player.inventory.reload()
+    target = str(target or "").strip()
+    if not target:
+        vk.messages.send(user_id=user_id, message="Напиши: надеть <номер|название артефакта>", random_id=0)
+        return True
+
+    if target.isdigit() and (player.inventory_section or "") == "artifacts":
+        return _handle_artifact_digit(player, int(target) - 1, vk, user_id)
+
+    normalized = _normalize_lookup_name(target)
+    artifact = next(
+        (
+            art for art in player.inventory.artifacts
+            if _normalize_lookup_name(art.get("name")) == normalized
+        ),
+        None,
+    )
+    if not artifact:
+        artifact = next(
+            (
+                art for art in player.inventory.artifacts
+                if normalized in _normalize_lookup_name(art.get("name"))
+            ),
+            None,
+        )
+    if not artifact:
+        vk.messages.send(user_id=user_id, message=f"У тебя нет артефакта '{target}' в инвентаре.", random_id=0)
+        return True
+
+    result = database.equip_artifact(user_id, artifact["name"])
+    if result.get("success"):
+        _refresh_after_artifact_change(player, user_id)
+        msg = _format_artifact_equip_result(player, result.get("message", f"✅ Артефакт {artifact['name']} экипирован!"))
+    else:
+        msg = str(result.get("message") or "Не удалось надеть артефакт.")
+    vk.messages.send(user_id=user_id, message=msg, random_id=0)
+    return True
+
+
 # === Разделы инвентаря ===
 
 def show_weapons(player, vk, user_id: int, page: int = 0):
@@ -679,7 +770,7 @@ def show_backpacks(player, vk, user_id: int, page: int = 0):
                 idx,
                 b,
                 "🎒",
-                [f"Бонус веса +{b.get('backpack_bonus', 0)}кг"],
+                [f"Объём +{b.get('backpack_bonus', 0)}кг", f"чисто +{_backpack_net_capacity(b):g}кг"],
                 equipped=b['name'] == player.equipped_backpack,
             )
         msg += f"\nНадето: {player.equipped_backpack or 'нет'}"

@@ -34,11 +34,12 @@ class TraderShopBalanceTest(unittest.TestCase):
         self.assertNotIn("Винтовка Гаусса", names)
         self.assertNotIn("Комбинезон сталкера", names)
 
-    def test_trader_weapon_and_armor_stock_is_single_copy(self):
+    def test_trader_gear_stock_is_single_copy(self):
         for item in (
             {"category": "weapons", "rarity": "common"},
             {"category": "rare_weapons", "rarity": "rare"},
             {"category": "armor", "rarity": "rare"},
+            {"category": "backpacks", "rarity": "common"},
         ):
             with self.subTest(item=item):
                 self.assertEqual(

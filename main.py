@@ -462,6 +462,7 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         handle_buy_item, handle_sell_item,
         handle_buy_artifact_slot,
         handle_inspect_item,
+        handle_equip_artifact,
         handle_unequip_backpack, handle_drop_item, handle_drop_item_by_index,
         handle_sell_item_by_number,
         show_weapons, show_armor, show_backpacks,
@@ -668,6 +669,10 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         if device:
             success, msg = player.equip_device(device['name'])
             vk.messages.send(user_id=user_id, message=msg, random_id=0)
+            return True
+
+        # Артефакт
+        if handle_equip_artifact(player, item_name, vk, user_id):
             return True
 
         vk.messages.send(user_id=user_id, message=f"У тебя нет предмета '{item_name}' в инвентаре.", random_id=0)

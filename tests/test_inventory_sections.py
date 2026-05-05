@@ -138,6 +138,32 @@ class InventorySectionsTest(unittest.TestCase):
         self.assertEqual(self.player.equipped_device, "Око Зоны")
         self.assertIn("Надето устройство: Око Зоны", self.vk.messages.sent[0]["message"])
 
+    def test_handle_equip_artifact_by_name_accepts_no_yo_input(self):
+        self.player.inventory.artifacts = [{"name": "Плёнка", "quantity": 1, "weight": 0.1}]
+        self.player._artifact_bonuses = {"dodge": 6, "radiation": -3}
+        self.player.health = 100
+        self.player.max_health = 100
+        self.player.reload = lambda: None
+        self.player._recalculate_max_weight = lambda: None
+
+        with patch.object(self.inventory_module.database, "equip_artifact", return_value={"success": True, "message": "✅ Артефакт Плёнка экипирован!"}) as equip_artifact, \
+             patch.object(self.inventory_module.database, "update_user_stats"):
+            handled = self.inventory_module.handle_equip_artifact(self.player, "пленка", self.vk, user_id=1)
+
+        self.assertTrue(handled)
+        equip_artifact.assert_called_once_with(1, "Плёнка")
+        self.assertIn("Плёнка экипирован", self.vk.messages.sent[0]["message"])
+        self.assertIn("Уклонение: +6%", self.vk.messages.sent[0]["message"])
+
+    def test_handle_equip_artifact_number_uses_current_artifact_section(self):
+        self.player.inventory_section = "artifacts"
+
+        with patch.object(self.inventory_module, "_handle_artifact_digit", return_value=True) as handle_digit:
+            handled = self.inventory_module.handle_equip_artifact(self.player, "1", self.vk, user_id=1)
+
+        self.assertTrue(handled)
+        handle_digit.assert_called_once_with(self.player, 0, self.vk, 1)
+
     def test_inventory_sections_edit_existing_inventory_screen(self):
         self.inventory_module.show_all(self.player, self.vk, user_id=9901)
         self.inventory_module.show_weapons(self.player, self.vk, user_id=9901)
