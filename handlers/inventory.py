@@ -6,6 +6,7 @@ import threading
 
 from infra import database
 from game import ui
+from game.anomalies import is_detector_name
 from game.constants import InventorySection
 
 
@@ -410,7 +411,7 @@ def _use_item(player, index: int, vk, user_id: int) -> bool:
     item_name = item['name']
 
     # Проверяем, не детектор ли это
-    if 'детектор' in item_name.lower():
+    if is_detector_name(item_name):
         success, msg = player.equip_device(item_name)
         vk.messages.send(
             user_id=user_id,
@@ -1045,21 +1046,26 @@ def handle_use_item(player, item_name: str, vk, user_id: int):
     """Использовать предмет"""
     from main import create_location_keyboard
 
-    # Проверяем, не детектор ли это
     item_lower = item_name.lower()
-    if 'детектор' in item_lower:
+    wants_any_detector = 'детектор' in item_lower
+    wants_known_detector = is_detector_name(item_name)
+    if wants_any_detector or wants_known_detector:
         # Ищем детектор в инвентаре
         player.inventory.reload()
         for item in player.inventory.other:
-            if 'детектор' in item['name'].lower():
-                success, msg = player.equip_device(item['name'])
-                vk.messages.send(
-                    user_id=user_id,
-                    message=msg,
-                    keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
-                    random_id=0
-                )
-                return
+            inventory_name = item['name']
+            if not is_detector_name(inventory_name):
+                continue
+            if wants_known_detector and item_lower not in inventory_name.lower() and inventory_name.lower() not in item_lower:
+                continue
+            success, msg = player.equip_device(item['name'])
+            vk.messages.send(
+                user_id=user_id,
+                message=msg,
+                keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+                random_id=0
+            )
+            return
 
         vk.messages.send(
             user_id=user_id,

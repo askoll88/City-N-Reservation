@@ -3428,10 +3428,56 @@ def get_artifact_bonuses(vk_id: int) -> dict:
     return bonuses
 
 
-def roll_artifact_from_anomaly(anomaly_type: str, luck: int, detector_bonus: int, chance_multiplier: float = 1.0) -> dict | None:
+def _select_artifact_by_rarity(artifacts_list: list[str], rarity_chances: dict[str, float]) -> dict | None:
+    """Выбрать артефакт из пула с учётом весов редкости."""
+    import random
+
+    by_rarity: dict[str, list[dict]] = {}
+    for artifact_name in artifacts_list:
+        artifact = get_item_by_name(artifact_name)
+        if not artifact:
+            continue
+        rarity = str(artifact.get("rarity") or "common").lower()
+        by_rarity.setdefault(rarity, []).append(artifact)
+
+    weighted_rarities = []
+    weights = []
+    for rarity in ("common", "rare", "unique", "legendary"):
+        if not by_rarity.get(rarity):
+            continue
+        weight = max(0.0, float(rarity_chances.get(rarity, 0) or 0))
+        if weight <= 0:
+            continue
+        weighted_rarities.append(rarity)
+        weights.append(weight)
+
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        return None
+
+    roll = random.uniform(0, total_weight)
+    cumulative = 0.0
+    selected_rarity = weighted_rarities[-1]
+    for rarity, weight in zip(weighted_rarities, weights):
+        cumulative += weight
+        if roll <= cumulative:
+            selected_rarity = rarity
+            break
+
+    return random.choice(by_rarity[selected_rarity])
+
+
+def roll_artifact_from_anomaly(
+    anomaly_type: str,
+    luck: int,
+    detector_bonus: int,
+    chance_multiplier: float = 1.0,
+    location_id: str | None = None,
+) -> dict | None:
     """Попытаться получить артефакт из аномалии с броском гильзы"""
     import random
     from game.anomalies import ANOMALIES
+    from game.location_mechanics import get_anomaly_rarity_chances
     from game.stat_balance import clamp, luck_artifact_bonus
 
     if anomaly_type not in ANOMALIES:
@@ -3454,10 +3500,10 @@ def roll_artifact_from_anomaly(anomaly_type: str, luck: int, detector_bonus: int
     if random.randint(1, 100) > total_chance:
         return None
 
-    artifact_name = random.choice(artifacts_list)
-    artifact = get_item_by_name(artifact_name)
+    rarity_chances = get_anomaly_rarity_chances(location_id, anomaly_type)
+    artifact = _select_artifact_by_rarity(artifacts_list, rarity_chances)
     if artifact:
-        return {'name': artifact_name, 'rarity': artifact.get('rarity', 'common')}
+        return {'name': artifact.get('name'), 'rarity': artifact.get('rarity', 'common')}
 
     return None
 
@@ -3592,6 +3638,8 @@ def give_newbie_kit(vk_id: int) -> dict:
         equip_updates["equipped_armor_hands"] = "Перчатки без пальцев"
     if not user_data.get("equipped_armor_feet"):
         equip_updates["equipped_armor_feet"] = "Кеды"
+    if not user_data.get("equipped_device"):
+        equip_updates["equipped_device"] = "Детектор Отклик-0"
     if equip_updates:
         update_user_stats(vk_id, **equip_updates)
 

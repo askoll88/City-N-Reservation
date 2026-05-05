@@ -73,6 +73,84 @@ ANOMALIES = {
         "fail_damage_chance": 10,
         "artifact_types": ["electromagnetic", "crystalline"],
         "difficulty": "medium"
+    },
+    "пси-поле": {
+        "name": "Пси-поле",
+        "icon": "🧠",
+        "description": "Пульсирующая зона ментального давления. Шумит в висках и сбивает направление.",
+        "danger_level": "высокая",
+        "damage_without_detector": [25, 55],
+        "damage_with_detector": [6, 16],
+        "artifacts": ["Выверт", "Лунный свет", "Мамины бусы", "Душа"],
+        "success_chance_with_detector": 48,
+        "fail_damage_chance": 14,
+        "artifact_types": ["psi"],
+        "difficulty": "high"
+    },
+    "кислотная топь": {
+        "name": "Кислотная топь",
+        "icon": "🧪",
+        "description": "Зелёные лужи шипят под травой. Почва проседает и разъедает подошвы.",
+        "danger_level": "средняя",
+        "damage_without_detector": [18, 38],
+        "damage_with_detector": [4, 10],
+        "artifacts": ["Капля", "Слизь", "Плёнка", "Ломоть мяса", "Слизняк"],
+        "success_chance_with_detector": 64,
+        "fail_damage_chance": 9,
+        "artifact_types": ["biochemical"],
+        "difficulty": "medium"
+    },
+    "пространственный сдвиг": {
+        "name": "Пространственный сдвиг",
+        "icon": "〰️",
+        "description": "Кусок пространства дрожит и смещает предметы на несколько шагов в сторону.",
+        "danger_level": "высокая",
+        "damage_without_detector": [35, 75],
+        "damage_with_detector": [8, 18],
+        "artifacts": ["Пружина", "Грави", "Ночная звезда", "Колобок", "Золотая рыбка", "Душа"],
+        "success_chance_with_detector": 44,
+        "fail_damage_chance": 16,
+        "artifact_types": ["gravitational"],
+        "difficulty": "high"
+    },
+    "электрошквал": {
+        "name": "Электрошквал",
+        "icon": "🌩️",
+        "description": "Разряды бегут по воздуху цепью, как короткая гроза на уровне земли.",
+        "danger_level": "высокая",
+        "damage_without_detector": [28, 58],
+        "damage_with_detector": [6, 14],
+        "artifacts": ["Бенгальский огонь", "Вспышка", "Батарейка", "Морской ёж"],
+        "success_chance_with_detector": 54,
+        "fail_damage_chance": 13,
+        "artifact_types": ["electromagnetic"],
+        "difficulty": "high"
+    },
+    "радиационный карман": {
+        "name": "Радиационный карман",
+        "icon": "☢️",
+        "description": "Невидимое пятно фонит волнами. Детектор щёлкает чаще с каждым шагом.",
+        "danger_level": "средняя",
+        "damage_without_detector": [16, 36],
+        "damage_with_detector": [3, 9],
+        "artifacts": ["Капля", "Плёнка", "Слизь", "Слизняк", "Выверт"],
+        "success_chance_with_detector": 58,
+        "fail_damage_chance": 8,
+        "artifact_types": ["biochemical", "psi"],
+        "difficulty": "medium"
+    },
+    "огненный разлом": {
+        "name": "Огненный разлом",
+        "icon": "♨️",
+        "description": "Тонкая трещина в земле выдыхает жаром и красным светом.",
+        "danger_level": "высокая",
+        "damage_without_detector": [38, 82],
+        "damage_with_detector": [10, 22],
+        "artifacts": ["Слюда", "Огненный шар", "Кровь камня", "Каменный цветок", "Кристалл"],
+        "success_chance_with_detector": 42,
+        "fail_damage_chance": 18,
+        "artifact_types": ["thermal"],
+        "difficulty": "high"
     }
 }
 
@@ -257,87 +335,106 @@ RARE_ARTIFACTS = [
 # Приборы
 DEVICES = {
     "Детектор аномалий": {
-        "description": "Базовый прибор для обнаружения аномалий. Показывает тип и опасность.",
-        "bonus": "Видишь аномалии, +10% шанс артефакта",
+        "description": "Старый базовый прибор для обнаружения аномалий. Показывает тип и опасность.",
+        "bonus": "Видишь аномалии, +8% к шансу артефакта",
         "effect": "anomaly_detector",
-        "bonus_value": 10,
+        "bonus_value": 8,
         "weight": 0.5,
         "price": 800
     },
+    "Детектор Отклик-0": {
+        "description": "Учебный детектор с грубым контуром аномалий. Его достаточно, чтобы не идти вслепую.",
+        "bonus": "Показывает тип аномалии и возможные артефакты, +6% к шансу добычи",
+        "effect": "otklik_0",
+        "bonus_value": 6,
+        "weight": 0.45,
+        "price": 250
+    },
+    "Детектор Отклик-1": {
+        "description": "Первый нормальный апгрейд: сигнал стабильнее, ложных писков меньше.",
+        "bonus": "+10% к базовому шансу артефакта",
+        "effect": "otklik_1",
+        "bonus_value": 10,
+        "weight": 0.45,
+        "price": 900
+    },
     "Эхо-1": {
-        "description": "Недорогой детектор начального уровня. Хорош для новичков.",
-        "bonus": "+15% к базовому шансу артефакта",
+        "description": "Старое название начального детектора. По характеристикам близок к Отклик-1.",
+        "bonus": "+10% к базовому шансу артефакта",
         "effect": "echo_1",
-        "bonus_value": 15,
+        "bonus_value": 10,
         "weight": 0.4,
-        "price": 1200
+        "price": 900
     },
-    "Отклик-М": {
+    "Детектор Отклик-М": {
         "description": "Улучшенная версия с усиленным приёмником сигналов.",
-        "bonus": "+25% к базовому шансу артефакта",
+        "bonus": "+14% к базовому шансу артефакта",
         "effect": "otklik_m",
-        "bonus_value": 25,
+        "bonus_value": 14,
         "weight": 0.5,
-        "price": 2500
+        "price": 1800
     },
-    "Сканер-П": {
+    "Детектор Сканер-П": {
         "description": "Специализированный детектор для электромагнитных аномалий.",
-        "bonus": "+30% для электромагнитных артефактов (Бенгальский огонь, Вспышка)",
+        "bonus": "+16% базово, до +24% для электромагнитных артефактов",
         "effect": "scanner_p",
-        "bonus_value": 30,
+        "bonus_value": 16,
         "bonus_type": "electromagnetic",
+        "type_bonus": 24,
         "weight": 0.6,
         "price": 3500
     },
-    "Пеленг-3": {
+    "Детектор Пеленг-3": {
         "description": "Профессиональный прибор с высокой точностью обнаружения.",
-        "bonus": "+40% к базовому шансу артефакта",
+        "bonus": "+20% к базовому шансу артефакта",
         "effect": "peleng_3",
-        "bonus_value": 40,
+        "bonus_value": 20,
         "weight": 0.7,
         "price": 5000
     },
-    "Гном-Т": {
+    "Детектор Гном-Т": {
         "description": "Тяжёлый, но мощный детектор для гравитационных аномалий.",
-        "bonus": "+50% для гравитационных артефактов (Грави, Золотая рыбка, Ночная звезда)",
+        "bonus": "+21% базово, до +28% для гравитационных артефактов",
         "effect": "gnom_t",
-        "bonus_value": 50,
+        "bonus_value": 21,
         "bonus_type": "gravitational",
+        "type_bonus": 28,
         "weight": 1.2,
         "price": 6000
     },
     "Детектор-Х": {
         "description": "Экспериментальный прибор с повышенной чувствительностью.",
-        "bonus": "+35% к базовому, +60% для редких артефактов",
+        "bonus": "+24% базово, до +32% для редких артефактов",
         "effect": "detector_x",
-        "bonus_value": 35,
-        "rare_bonus": 60,
+        "bonus_value": 24,
+        "rare_bonus": 32,
         "weight": 0.5,
         "price": 7500
     },
-    "Аномалист-2": {
+    "Детектор Аномалист-2": {
         "description": "Популярный среди сталкеров прибор среднего класса.",
-        "bonus": "+45% к базовому шансу артефакта",
+        "bonus": "+27% к базовому шансу артефакта",
         "effect": "anomalist_2",
-        "bonus_value": 45,
+        "bonus_value": 27,
         "weight": 0.6,
         "price": 6500
     },
-    "Мираж-Альфа": {
+    "Детектор Мираж-Альфа": {
         "description": "Специализированный детектор для пси-активных артефактов.",
-        "bonus": "+65% для пси-активных артефактов (Выверт, Пузырь, Лунный свет)",
+        "bonus": "+28% базово, до +36% для пси-активных артефактов",
         "effect": "mirage_alpha",
-        "bonus_value": 65,
+        "bonus_value": 28,
         "bonus_type": "psi",
+        "type_bonus": 36,
         "weight": 0.4,
         "price": 8000
     },
     "Око Зоны": {
         "description": "Легендарный детектор, разработанный учёными Зоны.",
-        "bonus": "+55% к базовому для всех типов, +80% в скоплении аномалий",
+        "bonus": "+32% базово, до +40% в скоплении аномалий",
         "effect": "oko_zony",
-        "bonus_value": 55,
-        "cluster_bonus": 80,
+        "bonus_value": 32,
+        "cluster_bonus": 40,
         "weight": 0.3,
         "price": 15000
     },
@@ -400,7 +497,7 @@ def get_equipped_detector(player) -> dict | None:
 
     # Ищем детектор по названию
     for device_name, device_data in DEVICES.items():
-        if device_name.lower() in equipped_device.lower() or equipped_device.lower() in device_name.lower():
+        if _device_names_match(device_name, equipped_device):
             return {
                 "name": device_name,
                 **device_data
@@ -409,17 +506,35 @@ def get_equipped_detector(player) -> dict | None:
     return None
 
 
+def _device_names_match(canonical_name: str, item_name: str) -> bool:
+    canonical = str(canonical_name or "").lower()
+    actual = str(item_name or "").lower()
+    return bool(canonical and actual and (canonical in actual or actual in canonical))
+
+
+def is_detector_name(item_name: str) -> bool:
+    """Проверить, является ли предмет известным детектором."""
+    normalized = str(item_name or "").lower()
+    if "детектор" in normalized:
+        return True
+    return any(
+        _device_names_match(device_name, item_name)
+        for device_name, device_data in DEVICES.items()
+        if device_data.get("effect") != "compass"
+    )
+
+
 def get_detector_bonus(player, artifact_type: str = None, is_rare: bool = False, in_cluster: bool = False) -> int:
     """Получить бонус детектора к шансу артефакта"""
     detector = get_equipped_detector(player)
     if not detector:
         return 0
 
-    bonus = detector.get("bonus_value", 0)
+    bonus = int(detector.get("bonus_value", 0) or 0)
 
     # Бонус для специфических типов артефактов
     if artifact_type and detector.get("bonus_type") == artifact_type:
-        bonus = max(bonus, detector.get("bonus_value", 0))
+        bonus = max(bonus, int(detector.get("type_bonus", detector.get("bonus_value", 0)) or 0))
 
     # Бонус для редких артефактов (Детектор-Х)
     if is_rare and "rare_bonus" in detector:
@@ -430,5 +545,3 @@ def get_detector_bonus(player, artifact_type: str = None, is_rare: bool = False,
         bonus = max(bonus, detector["cluster_bonus"])
 
     return bonus
-
-

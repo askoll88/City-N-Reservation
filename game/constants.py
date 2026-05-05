@@ -234,12 +234,12 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
 # === Порог уровней по локациям (для дропа/скейла) ===
 # Если локации нет в таблице — используем fallback: min=1, max=100.
 LOCATION_LEVEL_THRESHOLDS = {
-    LocationType.MILITARY_ROAD.value: {"min": 1, "max": 5},
-    LocationType.NII_ROAD.value: {"min": 1, "max": 5},
-    LocationType.INFECTED_FOREST.value: {"min": 3, "max": 7},
-    LocationType.MILITARY_BASE.value: {"min": 5, "max": 10},
-    LocationType.NII_MAIN_BUILDING.value: {"min": 5, "max": 10},
-    LocationType.INFECTED_FOREST_DEEP.value: {"min": 5, "max": 10},
+    LocationType.MILITARY_ROAD.value: {"min": 1, "max": 7},
+    LocationType.NII_ROAD.value: {"min": 4, "max": 10},
+    LocationType.INFECTED_FOREST.value: {"min": 8, "max": 14},
+    LocationType.MILITARY_BASE.value: {"min": 10, "max": 17},
+    LocationType.NII_MAIN_BUILDING.value: {"min": 14, "max": 23},
+    LocationType.INFECTED_FOREST_DEEP.value: {"min": 18, "max": 28},
 }
 
 # === Баланс дропа по фарм-локациям ===
@@ -314,4 +314,5 @@ NEWBIE_KIT_ITEMS = [
     ("Бинт", 1),                 # Медицина
     ("Вода", 1),                 # Вода
     ("Маленький мешочек", 1),    # Стартовый мешочек под гильзы
+    ("Детектор Отклик-0", 1),    # Стартовый детектор аномалий
 ]

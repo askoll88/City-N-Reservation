@@ -23,14 +23,9 @@ LOCATION_MODIFIERS = {
         "radiation_mult": 1.0,         # нормальная радиация
         "loot_quality": "military",    # тип лута
 
-        # Пул аномалий (с весами)
-        "anomaly_weights": {
-            "жарка": 20,
-            "электра": 40,             # больше электромагнитных (остатки техники)
-            "воронка": 10,
-            "туман": 10,
-            "магнит": 40,              # больше магнитных (военное оборудование)
-        },
+        # На дороге нет стабильных аномальных пятен: событие anomaly не спавнится.
+        "anomaly_weights": {},
+        "anomaly_rarity_chances": {},
 
         # Пул событий (множители к весам из RESEARCH_EVENTS)
         "event_weights": {
@@ -58,11 +53,18 @@ LOCATION_MODIFIERS = {
         "radiation_mult": 1.02,
         "loot_quality": "military",
         "anomaly_weights": {
-            "жарка": 18,
-            "электра": 45,
-            "воронка": 10,
-            "туман": 8,
-            "магнит": 48,
+            "электра": 28,
+            "электрошквал": 18,
+            "магнит": 32,
+            "жарка": 10,
+            "пси-поле": 6,
+        },
+        "anomaly_rarity_chances": {
+            "электра": {"common": 91.0, "rare": 9.0, "unique": 0.0, "legendary": 0.0},
+            "электрошквал": {"common": 88.5, "rare": 11.5, "unique": 0.0, "legendary": 0.0},
+            "магнит": {"common": 90.0, "rare": 10.0, "unique": 0.0, "legendary": 0.0},
+            "жарка": {"common": 92.0, "rare": 8.0, "unique": 0.0, "legendary": 0.0},
+            "пси-поле": {"common": 86.0, "rare": 14.0, "unique": 0.0, "legendary": 0.0},
         },
         "event_weights": {
             "mutant": 0.75,
@@ -77,6 +79,7 @@ LOCATION_MODIFIERS = {
         "event_pool": [
             "common_item",
             "rare_item",
+            "anomaly",
             "military",
             "armory_locker",
             "garrison_orders",
@@ -99,14 +102,9 @@ LOCATION_MODIFIERS = {
         "radiation_mult": 1.1,         # +10% радиация
         "loot_quality": "scientific",  # тип лута
 
-        # Пул аномалий
-        "anomaly_weights": {
-            "жарка": 10,
-            "электра": 25,
-            "воронка": 40,             # больше гравитационных (лабораторные установки)
-            "туман": 40,               # больше биохимических (химикаты)
-            "магнит": 15,
-        },
+        # На подъездной дороге к НИИ стабильных аномальных пятен нет.
+        "anomaly_weights": {},
+        "anomaly_rarity_chances": {},
 
         # Пул событий
         "event_weights": {
@@ -135,11 +133,20 @@ LOCATION_MODIFIERS = {
         "radiation_mult": 1.18,
         "loot_quality": "scientific",
         "anomaly_weights": {
-            "жарка": 8,
-            "электра": 24,
-            "воронка": 48,
-            "туман": 45,
-            "магнит": 18,
+            "воронка": 24,
+            "пространственный сдвиг": 18,
+            "туман": 22,
+            "радиационный карман": 16,
+            "пси-поле": 14,
+            "электрошквал": 8,
+        },
+        "anomaly_rarity_chances": {
+            "воронка": {"common": 81.5, "rare": 18.5, "unique": 0.0, "legendary": 0.0},
+            "пространственный сдвиг": {"common": 78.75, "rare": 21.25, "unique": 0.0, "legendary": 0.0},
+            "туман": {"common": 84.0, "rare": 16.0, "unique": 0.0, "legendary": 0.0},
+            "радиационный карман": {"common": 82.25, "rare": 17.75, "unique": 0.0, "legendary": 0.0},
+            "пси-поле": {"common": 77.5, "rare": 22.5, "unique": 0.0, "legendary": 0.0},
+            "электрошквал": {"common": 85.5, "rare": 14.5, "unique": 0.0, "legendary": 0.0},
         },
         "event_weights": {
             "mutant": 1.15,
@@ -176,14 +183,9 @@ LOCATION_MODIFIERS = {
         "radiation_mult": 1.12,        # +12% радиация
         "loot_quality": "organic",     # тип лута
 
-        # Пул аномалий
-        "anomaly_weights": {
-            "жарка": 50,               # больше термальных (биологические аномалии)
-            "электра": 10,
-            "воронка": 15,
-            "туман": 30,               # биохимический туман
-            "магнит": 5,
-        },
+        # На дороге нет стабильных аномальных пятен: они начинаются в чаще.
+        "anomaly_weights": {},
+        "anomaly_rarity_chances": {},
 
         # Пул событий
         "event_weights": {
@@ -212,11 +214,20 @@ LOCATION_MODIFIERS = {
         "radiation_mult": 1.18,
         "loot_quality": "organic",
         "anomaly_weights": {
-            "жарка": 55,
-            "электра": 8,
-            "воронка": 18,
-            "туман": 38,
-            "магнит": 5,
+            "жарка": 22,
+            "огненный разлом": 14,
+            "туман": 28,
+            "кислотная топь": 24,
+            "радиационный карман": 12,
+            "воронка": 8,
+        },
+        "anomaly_rarity_chances": {
+            "жарка": {"common": 86.0, "rare": 14.0, "unique": 0.0, "legendary": 0.0},
+            "огненный разлом": {"common": 82.4, "rare": 17.6, "unique": 0.0, "legendary": 0.0},
+            "туман": {"common": 88.5, "rare": 11.5, "unique": 0.0, "legendary": 0.0},
+            "кислотная топь": {"common": 86.0, "rare": 14.0, "unique": 0.0, "legendary": 0.0},
+            "радиационный карман": {"common": 85.25, "rare": 14.75, "unique": 0.0, "legendary": 0.0},
+            "воронка": {"common": 83.0, "rare": 17.0, "unique": 0.0, "legendary": 0.0},
         },
         "event_weights": {
             "mutant": 1.65,
@@ -266,14 +277,14 @@ LOCATION_LOOT_BIAS = {
     },
     "дорога_нии": {
         "bias_items": [
-            "Аптечка", "Антирад", "Детектор аномалий", "Стимулятор",
+            "Аптечка", "Антирад", "Детектор Отклик-1", "Стимулятор",
             "Бинт", "Научная аптечка", "Дозиметр",
         ],
         "bias_weight": 0.30,
     },
     "главный_корпус_нии": {
         "bias_items": [
-            "Аптечка", "Антирад", "Детектор аномалий", "Стимулятор",
+            "Аптечка", "Антирад", "Детектор Отклик-1", "Стимулятор",
             "Научная аптечка", "Дозиметр", "Капля", "Слизь",
         ],
         "bias_weight": 0.34,
@@ -666,6 +677,49 @@ def get_anomaly_weights(location_id: str) -> dict:
     return mod.get("anomaly_weights")
 
 
+def get_location_anomaly_types(location_id: str) -> set[str]:
+    """Вернуть типы аномалий, которые могут появиться в локации."""
+    weights = get_anomaly_weights(location_id) or {}
+    return {str(name) for name, weight in weights.items() if float(weight or 0) > 0}
+
+
+def location_has_anomalies(location_id: str | None) -> bool:
+    """Проверить, есть ли у локации разрешённый пул аномалий."""
+    if not location_id:
+        return True
+    return bool(get_location_anomaly_types(location_id))
+
+
+DEFAULT_ANOMALY_RARITY_CHANCES = {
+    "common": 84.0,
+    "rare": 16.0,
+    "unique": 0.0,
+    "legendary": 0.0,
+}
+
+
+def get_anomaly_rarity_chances(location_id: str | None, anomaly_type: str) -> dict[str, float]:
+    """Получить проценты редкостей артефактов для аномалии в локации."""
+    if not location_id:
+        return dict(DEFAULT_ANOMALY_RARITY_CHANCES)
+
+    mod = LOCATION_MODIFIERS.get(location_id) or {}
+    location_rules = mod.get("anomaly_rarity_chances") or {}
+    raw = location_rules.get(anomaly_type)
+    if raw is None:
+        raw = mod.get("default_anomaly_rarity_chances")
+    if raw is None:
+        return dict(DEFAULT_ANOMALY_RARITY_CHANCES)
+
+    result = {}
+    for rarity in ("common", "rare", "unique", "legendary"):
+        try:
+            result[rarity] = max(0.0, float(raw.get(rarity, 0) or 0))
+        except (TypeError, ValueError):
+            result[rarity] = 0.0
+    return result
+
+
 def get_event_weights(location_id: str) -> dict:
     """Получить множители весов событий для локации"""
     mod = LOCATION_MODIFIERS.get(location_id)
@@ -823,14 +877,17 @@ def get_random_anomaly_for_location(location_id: str) -> dict:
 
     weights = get_anomaly_weights(location_id)
     if not weights:
-        # Без весов — равномерно
-        return anomalies.get_random_anomaly()
+        return None
 
     # Фильтруем только аномалии, которые есть в ANOMALIES
-    valid_anomalies = {k: v for k, v in weights.items() if k in anomalies.ANOMALIES}
+    valid_anomalies = {
+        k: float(v)
+        for k, v in weights.items()
+        if k in anomalies.ANOMALIES and float(v or 0) > 0
+    }
 
     if not valid_anomalies:
-        return anomalies.get_random_anomaly()
+        return None
 
     # weighted random selection
     anomaly_type = random.choices(

@@ -173,7 +173,7 @@ def _combat_log(event: str, user_id: int | None = None, player=None, combat: dic
         logging.getLogger(__name__).exception("Failed to write combat log")
 
 # Гарантированная аномалия: не реже 1 раза в N исследований.
-ANOMALY_GUARANTEE_RESEARCHES = 150
+ANOMALY_GUARANTEE_RESEARCHES = 40
 ANOMALY_GUARANTEE_FLAG = "research_no_anomaly_streak"
 
 # Без детектора можно "влететь" в аномалию и потерять ресурсы.
@@ -1310,12 +1310,14 @@ def _select_research_event_by_chance(
         get_event_weights,
         get_find_chance_mult,
         get_danger_mult,
+        location_has_anomalies,
         get_region_loop_event_weights,
     )
     from game.limited_events import get_limited_event_modifiers
 
     no_anomaly_streak = 0
-    if user_id is not None:
+    anomaly_pool_available = location_has_anomalies(location_id)
+    if user_id is not None and anomaly_pool_available:
         no_anomaly_streak = int(database.get_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, 0) or 0)
         if no_anomaly_streak >= ANOMALY_GUARANTEE_RESEARCHES - 1:
             database.set_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, 0)
@@ -1337,7 +1339,7 @@ def _select_research_event_by_chance(
 
     # Проверяем, нашли ли что-то
     if random.randint(1, 100) > base_find_chance:
-        if user_id is not None:
+        if user_id is not None and anomaly_pool_available:
             database.set_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, no_anomaly_streak + 1)
         return "nothing"
 
@@ -1402,7 +1404,7 @@ def _select_research_event_by_chance(
             selected = event_ids[i]
             break
 
-    if user_id is not None:
+    if user_id is not None and anomaly_pool_available:
         if selected == "anomaly":
             database.set_user_flag(user_id, ANOMALY_GUARANTEE_FLAG, 0)
         else:
@@ -1418,6 +1420,12 @@ def _is_research_event_allowed_for_location(
     loc_event_weights: dict | None = None,
 ) -> bool:
     """Проверить location/tags-фильтры события исследования."""
+    if event_data.get("type") == "anomaly" and location_id:
+        from game.location_mechanics import location_has_anomalies
+
+        if not location_has_anomalies(location_id):
+            return False
+
     allowed_locations = set(event_data.get("locations") or [])
     if allowed_locations and location_id not in allowed_locations:
         return False
@@ -1675,6 +1683,14 @@ def _handle_anomaly(player, vk, user_id: int):
     # Получаем случайную аномалию (с учётом локации)
     from game.location_mechanics import get_random_anomaly_for_location
     anomaly = get_random_anomaly_for_location(player.current_location_id)
+    if not anomaly:
+        vk.messages.send(
+            user_id=user_id,
+            message="Аномальный след сорвался: в этой локации нет стабильных аномалий.",
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0,
+        )
+        return
     anomaly_type = anomaly["type"]
     anomaly_name = anomaly["name"]
     anomaly_icon = anomaly["icon"]
@@ -1683,7 +1699,16 @@ def _handle_anomaly(player, vk, user_id: int):
 
     # Данные детектора / урон
     has_detector = bool(detector)
-    detector_bonus = anomalies_module.get_detector_bonus(player) if has_detector else 0
+    detector_bonus = 0
+    if has_detector:
+        anomaly_artifact_types = anomaly.get("artifact_types") or []
+        detector_bonus = max(
+            [anomalies_module.get_detector_bonus(player)]
+            + [
+                anomalies_module.get_detector_bonus(player, artifact_type=artifact_type)
+                for artifact_type in anomaly_artifact_types
+            ]
+        )
     detector_name = detector["name"] if has_detector else "нет"
     if has_detector:
         damage_min, damage_max = anomaly.get("damage_with_detector", [5, 15])
@@ -1892,7 +1917,16 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
 
         # Получаем бонус детектора
         detector = anomalies_module.get_equipped_detector(player)
-        detector_bonus = anomalies_module.get_detector_bonus(player) if detector else 0
+        detector_bonus = 0
+        if detector:
+            anomaly_artifact_types = anomalies_module.ANOMALIES.get(anomaly_type, {}).get("artifact_types") or []
+            detector_bonus = max(
+                [anomalies_module.get_detector_bonus(player)]
+                + [
+                    anomalies_module.get_detector_bonus(player, artifact_type=artifact_type)
+                    for artifact_type in anomaly_artifact_types
+                ]
+            )
 
         # Бросок гильзы - пытаемся получить артефакт
         luck = int(getattr(player, "effective_luck", user.get('luck', 5)) or 5)
@@ -1905,6 +1939,7 @@ def handle_anomaly_action(player, vk, user_id: int, action: str):
             luck,
             detector_bonus,
             chance_multiplier=artifact_bonus_mult,
+            location_id=location_id,
         )
 
         if result:

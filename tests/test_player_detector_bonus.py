@@ -1,6 +1,7 @@
 import types
 import unittest
 
+from game.anomalies import get_detector_bonus, is_detector_name
 from models.player import Player
 
 
@@ -21,6 +22,33 @@ class PlayerDetectorBonusTest(unittest.TestCase):
         player._get_passive_bonuses = types.MethodType(lambda self: {}, player)
 
         self.assertGreater(player.find_chance, 12)
+
+    def test_detector_progression_bonus_grows_without_starter_spike(self):
+        player = Player.__new__(Player)
+
+        player.equipped_device = "Детектор Отклик-0"
+        self.assertEqual(get_detector_bonus(player), 6)
+
+        player.equipped_device = "Детектор Отклик-1"
+        self.assertEqual(get_detector_bonus(player), 10)
+
+        player.equipped_device = "Око Зоны"
+        self.assertEqual(get_detector_bonus(player), 32)
+        self.assertEqual(get_detector_bonus(player, in_cluster=True), 40)
+
+    def test_detector_type_specialization_uses_higher_matching_bonus(self):
+        player = Player.__new__(Player)
+        player.equipped_device = "Детектор Сканер-П"
+
+        self.assertEqual(get_detector_bonus(player), 16)
+        self.assertEqual(get_detector_bonus(player, artifact_type="thermal"), 16)
+        self.assertEqual(get_detector_bonus(player, artifact_type="electromagnetic"), 24)
+
+    def test_detector_name_lookup_includes_endgame_detector_without_detector_word(self):
+        self.assertTrue(is_detector_name("Око Зоны"))
+        self.assertTrue(is_detector_name("детектор"))
+        self.assertFalse(is_detector_name("Компас"))
+        self.assertFalse(is_detector_name("Бинт"))
 
 
 if __name__ == "__main__":

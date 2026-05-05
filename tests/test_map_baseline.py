@@ -9,6 +9,7 @@ from game.constants import (
     SAFE_LOCATIONS,
 )
 from game.location_mechanics import LOCATION_LOOT_BIAS, LOCATION_MODIFIERS
+from game.anomalies import ANOMALIES
 from handlers.combat import RESEARCH_EVENTS
 from models.enemies import ENEMIES
 from models.locations import LOCATIONS
@@ -83,6 +84,20 @@ class MapBaselineTests(unittest.TestCase):
             self.assertIn(location_id, LOCATION_LEVEL_THRESHOLDS)
             self.assertIn(location_id, LOCATION_DROP_BALANCE_RULES)
 
+    def test_current_research_locations_are_spread_across_early_midgame(self):
+        expected_ranges = {
+            "дорога_военная_часть": (1, 7),
+            "дорога_нии": (4, 10),
+            "дорога_зараженный_лес": (8, 14),
+            "военная_часть": (10, 17),
+            "главный_корпус_нии": (14, 23),
+            "зараженный_лес": (18, 28),
+        }
+
+        for location_id, (min_level, max_level) in expected_ranges.items():
+            rules = LOCATION_LEVEL_THRESHOLDS[location_id]
+            self.assertEqual((rules["min"], rules["max"]), (min_level, max_level))
+
     def test_enemy_tables_are_rollable(self):
         for location_id in RESEARCH_LOCATIONS:
             enemies = ENEMIES[location_id]
@@ -115,6 +130,29 @@ class MapBaselineTests(unittest.TestCase):
                 if event_id in RESEARCH_EVENTS:
                     continue
                 self.assertIn(event_id, known_event_types, f"{location_id}: unknown event weight {event_id}")
+
+    def test_location_anomaly_pools_reference_known_anomalies_and_fractional_rarity(self):
+        found_fractional = False
+        for location_id, modifier in LOCATION_MODIFIERS.items():
+            for anomaly_type, weight in (modifier.get("anomaly_weights") or {}).items():
+                self.assertIn(anomaly_type, ANOMALIES, f"{location_id}: unknown anomaly {anomaly_type}")
+                self.assertGreater(float(weight), 0)
+
+                rarity_rules = (modifier.get("anomaly_rarity_chances") or {}).get(anomaly_type)
+                self.assertIsNotNone(rarity_rules, f"{location_id}: missing rarity chances for {anomaly_type}")
+                for rarity in ("common", "rare", "unique", "legendary"):
+                    self.assertIn(rarity, rarity_rules)
+                    value = float(rarity_rules[rarity])
+                    self.assertGreaterEqual(value, 0.0)
+                    if value and value != int(value):
+                        found_fractional = True
+                self.assertEqual(float(rarity_rules["unique"]), 0.0)
+                self.assertEqual(float(rarity_rules["legendary"]), 0.0)
+
+            if modifier.get("anomaly_weights") and "event_pool" in modifier:
+                self.assertIn("anomaly", modifier["event_pool"], f"{location_id}: anomaly pool is blocked by event_pool")
+
+        self.assertTrue(found_fractional)
 
     def test_loot_bias_is_attached_to_known_research_locations(self):
         for location_id, bias in LOCATION_LOOT_BIAS.items():

@@ -4,6 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from handlers.combat import (
+    ANOMALY_GUARANTEE_FLAG,
+    ANOMALY_GUARANTEE_RESEARCHES,
     _apply_weapon_damage_bonus,
     _hide_lower_keyboard_for_combat,
     _select_research_event_by_chance,
@@ -98,6 +100,27 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
 
         item_events = sum(1 for event in events if RESEARCH_EVENTS.get(event, {}).get("type") == "item")
         self.assertGreater(item_events / len(events), 0.12)
+
+    def test_research_anomaly_guarantee_is_not_far_beyond_onboarding(self):
+        self.assertLessEqual(ANOMALY_GUARANTEE_RESEARCHES, 40)
+
+    def test_research_anomaly_guarantee_forces_anomaly_and_resets_streak(self):
+        with patch("handlers.combat.database.get_user_flag", return_value=ANOMALY_GUARANTEE_RESEARCHES - 1), \
+                patch("handlers.combat.database.set_user_flag") as set_user_flag:
+            event = _select_research_event_by_chance(1, 1.0, 1.0, "зараженный_лес", 77)
+
+        self.assertEqual(event, "anomaly")
+        set_user_flag.assert_called_once_with(77, ANOMALY_GUARANTEE_FLAG, 0)
+
+    def test_research_anomaly_event_is_blocked_without_location_pool(self):
+        with patch("handlers.combat.database.get_user_flag", return_value=ANOMALY_GUARANTEE_RESEARCHES - 1), \
+                patch("handlers.combat.database.set_user_flag") as set_user_flag, \
+                patch("handlers.combat.random.randint", return_value=1), \
+                patch("handlers.combat.random.uniform", return_value=10**9):
+            event = _select_research_event_by_chance(95, 1.0, 1.0, "дорога_зараженный_лес", 77)
+
+        self.assertNotEqual(event, "anomaly")
+        set_user_flag.assert_not_called()
 
     def test_spawn_item_uses_location_drop_chance_as_weight_not_second_failure_roll(self):
         class Inventory:

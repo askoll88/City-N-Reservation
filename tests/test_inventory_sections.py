@@ -61,6 +61,7 @@ class DummyPlayer:
         self.artifact_slots = 3
         self.max_weight = 30
         self.money = 100
+        self.current_location_id = "город"
 
 
 class InventorySectionsTest(unittest.TestCase):
@@ -74,6 +75,7 @@ class InventorySectionsTest(unittest.TestCase):
 
         fake_main = types.ModuleType("main")
         fake_main.create_inventory_keyboard = lambda *args, **kwargs: DummyKeyboard()
+        fake_main.create_location_keyboard = lambda *args, **kwargs: DummyKeyboard()
         sys.modules["main"] = fake_main
 
         cls.inventory_module = importlib.import_module("handlers.inventory")
@@ -115,6 +117,20 @@ class InventorySectionsTest(unittest.TestCase):
         self.inventory_module.show_other(self.player, self.vk, user_id=1)
         self.assertEqual(self.player.inventory_section, "other")
         self.fake_db.update_user_stats.assert_not_called()
+
+    def test_handle_use_item_equips_endgame_detector_without_detector_word(self):
+        self.player.inventory.other = [{"name": "Око Зоны", "quantity": 1, "weight": 0.3}]
+
+        def equip_device(name):
+            self.player.equipped_device = name
+            return True, f"Надето устройство: {name}"
+
+        self.player.equip_device = equip_device
+
+        self.inventory_module.handle_use_item(self.player, "Око Зоны", self.vk, user_id=1)
+
+        self.assertEqual(self.player.equipped_device, "Око Зоны")
+        self.assertIn("Надето устройство: Око Зоны", self.vk.messages.sent[0]["message"])
 
     def test_inventory_sections_edit_existing_inventory_screen(self):
         self.inventory_module.show_all(self.player, self.vk, user_id=9901)

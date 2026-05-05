@@ -29,9 +29,11 @@ class DummyPlayer:
     RANK_TIERS = [
         {"name": "Новичок", "min_level": 1, "max_level": 4},
         {"name": "Салага", "min_level": 5, "max_level": 8},
+        {"name": "Ходок", "min_level": 9, "max_level": 13},
+        {"name": "Следопыт", "min_level": 14, "max_level": 19},
     ]
 
-    def __init__(self, level=5, rank_tier=2, current_location_id="дорога_военная_часть"):
+    def __init__(self, level=10, rank_tier=3, current_location_id="дорога_военная_часть"):
         self.user_id = 1
         self.level = level
         self.rank_tier = rank_tier
@@ -64,12 +66,12 @@ class InternalLocationsStage5Tests(unittest.TestCase):
         self.assertEqual(LOCATIONS["зараженный_лес"]["exits"]["дорога на зараженный лес"], "дорога_зараженный_лес")
 
     def test_access_blocks_underleveled_player_from_internal_layer(self):
-        low_player = DummyPlayer(level=4, rank_tier=1)
+        low_player = DummyPlayer(level=9, rank_tier=2)
         result = can_enter_location(low_player, "военная_часть")
 
         self.assertFalse(result.allowed)
-        self.assertIn("уровень 5+", "\n".join(result.reasons))
-        self.assertIn("ранг 2+", "\n".join(result.reasons))
+        self.assertIn("уровень 10+", "\n".join(result.reasons))
+        self.assertIn("ранг 3+", "\n".join(result.reasons))
 
     def test_map_routes_from_road_to_internal_location(self):
         command, text = get_next_map_step("military", "дорога_военная_часть")

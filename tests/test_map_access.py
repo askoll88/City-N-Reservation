@@ -51,6 +51,7 @@ class DummyPlayer:
 class MapAccessTests(unittest.TestCase):
     def test_current_access_allows_existing_route_when_level_and_rank_fit(self):
         player = DummyPlayer()
+        player.level = 8
         result = can_enter_location(player, "дорога_зараженный_лес")
         self.assertTrue(result.allowed)
         self.assertEqual(result.reasons, [])
@@ -65,7 +66,7 @@ class MapAccessTests(unittest.TestCase):
         player.level = 2
         result = can_enter_location(player, "дорога_зараженный_лес")
         self.assertFalse(result.allowed)
-        self.assertIn("уровень 3+ (сейчас 2)", result.reasons)
+        self.assertIn("уровень 8+ (сейчас 2)", result.reasons)
 
     def test_required_rank_is_inferred_from_location_level(self):
         self.assertEqual(get_required_rank_tier_for_level(1, DummyPlayer()), 1)
@@ -74,10 +75,11 @@ class MapAccessTests(unittest.TestCase):
 
     def test_rank_gate_blocks_even_if_player_level_is_high_enough(self):
         player = DummyPlayer()
-        player.level = 5
+        player.level = 8
         player.rank_tier = 1
         result = can_enter_location(player, "дорога_зараженный_лес")
-        self.assertTrue(result.allowed)  # forest still belongs to rank 1 by level_min=3
+        self.assertFalse(result.allowed)
+        self.assertIn("ранг 2+ (сейчас 1)", result.reasons)
 
         with patch("game.map_access.get_map_location") as get_location:
             get_location.return_value = {

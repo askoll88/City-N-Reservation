@@ -71,7 +71,7 @@ class MapScreenTests(unittest.TestCase):
         text = format_region_map(player, "forest")
 
         self.assertIn("закрыто", text)
-        self.assertIn("уровень 3+", text)
+        self.assertIn("уровень 8+", text)
         self.assertIn("Следующий шаг маршрута: Дорога на зараженный лес", text)
         self.assertIn("нижнюю клавиатуру", text)
 

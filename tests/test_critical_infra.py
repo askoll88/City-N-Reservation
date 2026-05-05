@@ -447,26 +447,30 @@ class TestLocationModifiers(unittest.TestCase):
 
     # --- Anomaly weights ---
 
-    def test_anomaly_weights_military(self):
+    def test_anomaly_weights_military_road_has_no_anomalies(self):
         w = get_anomaly_weights("дорога_военная_часть")
-        self.assertIsNotNone(w)
-        # Электра и Магнит должны доминировать
-        self.assertGreater(w["электра"], w["воронка"])
-        self.assertGreater(w["магнит"], w["туман"])
+        self.assertEqual(w, {})
 
-    def test_anomaly_weights_nii(self):
+    def test_anomaly_weights_nii_road_has_no_anomalies(self):
         w = get_anomaly_weights("дорога_нии")
-        self.assertIsNotNone(w)
-        # Воронка и Туман должны доминировать
-        self.assertGreater(w["воронка"], w["жарка"])
-        self.assertGreater(w["туман"], w["электра"])
+        self.assertEqual(w, {})
 
-    def test_anomaly_weights_forest(self):
+    def test_anomaly_weights_forest_road_has_no_anomalies(self):
         w = get_anomaly_weights("дорога_зараженный_лес")
-        self.assertIsNotNone(w)
-        # Жарка должна доминировать
-        self.assertGreater(w["жарка"], w["электра"])
-        self.assertGreater(w["жарка"], w["магнит"])
+        self.assertEqual(w, {})
+
+    def test_internal_locations_have_strict_anomaly_pools(self):
+        military = get_anomaly_weights("военная_часть")
+        nii = get_anomaly_weights("главный_корпус_нии")
+        forest = get_anomaly_weights("зараженный_лес")
+
+        self.assertIn("магнит", military)
+        self.assertIn("пси-поле", military)
+        self.assertNotIn("кислотная топь", military)
+        self.assertIn("пространственный сдвиг", nii)
+        self.assertIn("радиационный карман", nii)
+        self.assertIn("кислотная топь", forest)
+        self.assertIn("огненный разлом", forest)
 
     def test_anomaly_weights_non_research(self):
         self.assertIsNone(get_anomaly_weights("город"))
@@ -474,10 +478,15 @@ class TestLocationModifiers(unittest.TestCase):
     def test_location_anomaly_roll_imports_game_anomalies(self):
         from game.location_mechanics import get_random_anomaly_for_location
 
-        anomaly = get_random_anomaly_for_location("дорога_нии")
+        anomaly = get_random_anomaly_for_location("главный_корпус_нии")
 
         self.assertIn("type", anomaly)
         self.assertIn("name", anomaly)
+
+    def test_location_without_anomaly_pool_rolls_no_anomaly(self):
+        from game.location_mechanics import get_random_anomaly_for_location
+
+        self.assertIsNone(get_random_anomaly_for_location("дорога_нии"))
 
     # --- Event weights ---
 
