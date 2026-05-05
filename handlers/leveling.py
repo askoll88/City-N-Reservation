@@ -8,6 +8,7 @@ from models.player import (
     UNSPENT_STAT_POINTS_FLAG,
     calculate_player_max_health,
 )
+from game.stat_balance import stamina_max_energy_bonus
 
 STAT_LABELS = {
     "strength": "Сила",
@@ -18,9 +19,9 @@ STAT_LABELS = {
 
 STAT_DESCRIPTIONS = {
     "strength": "урон и переносимый вес",
-    "stamina": "макс. HP и восстановление энергии",
+    "stamina": "макс. HP, максимум энергии и восстановление энергии",
     "perception": "поиск, аномалии и разведка",
-    "luck": "криты и редкие находки",
+    "luck": "криты, редкие находки и позитивные исходы событий",
 }
 
 
@@ -134,7 +135,7 @@ def apply_stat_choice(vk, user_id: int, stat: str) -> dict:
     with database.db_cursor() as (cursor, _):
         cursor.execute(
             """
-            SELECT id, level, health, stamina, max_health_bonus,
+            SELECT id, level, health, energy, stamina, max_health_bonus,
                    strength, perception, luck, max_weight
             FROM users
             WHERE vk_id = %s
@@ -175,7 +176,12 @@ def apply_stat_choice(vk, user_id: int, stat: str) -> dict:
             old_max_hp = calculate_player_max_health(level, old_stamina, bonus)
             new_max_hp = calculate_player_max_health(level, new_value, bonus)
             hp_delta = max(0, new_max_hp - old_max_hp)
+            old_energy_bonus = stamina_max_energy_bonus(old_stamina)
+            new_energy_bonus = stamina_max_energy_bonus(new_value)
+            energy_delta = max(0, new_energy_bonus - old_energy_bonus)
             updates["health"] = min(new_max_hp, int(user.get("health", 0) or 0) + hp_delta)
+            if energy_delta > 0:
+                updates["energy"] = min(100 + new_energy_bonus, int(user.get("energy", 0) or 0) + energy_delta)
 
         sets = ", ".join(f"{key} = %s" for key in updates)
         params = list(updates.values()) + [user_id]
@@ -196,7 +202,7 @@ def apply_stat_choice(vk, user_id: int, stat: str) -> dict:
     if stat == "strength":
         msg += "\nПереносимый вес: +2 кг."
     if stat == "stamina":
-        msg += "\nМаксимальное HP выросло."
+        msg += "\nМаксимальное HP выросло. Максимум энергии тоже растёт от выносливости."
     if remaining > 0:
         msg += f"\n\nОсталось очков: {remaining}"
     else:

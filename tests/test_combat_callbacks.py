@@ -170,6 +170,21 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         self.assertEqual(damage, 112)
         self.assertEqual(bonus_pct, 12)
 
+    def test_knife_damage_bonus_applies_only_to_knives(self):
+        class Player:
+            _artifact_bonuses = {}
+
+            def _get_passive_bonuses(self):
+                return {"weapon_damage": 6, "knife_damage": 10}
+
+        generic_damage, generic_bonus = _apply_weapon_damage_bonus(Player(), 100)
+        knife_damage, knife_bonus = _apply_weapon_damage_bonus(Player(), 100, weapon_is_knife=True)
+
+        self.assertEqual(generic_damage, 106)
+        self.assertEqual(generic_bonus, 6)
+        self.assertEqual(knife_damage, 115)
+        self.assertEqual(knife_bonus, 16)
+
     def test_inline_combat_keyboard_has_no_back_button(self):
         keyboard = json.loads(create_combat_keyboard(DummyClassPlayer(), user_id=1).get_keyboard())
 

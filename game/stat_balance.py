@@ -69,6 +69,22 @@ def stamina_energy_regen(stamina: int | float) -> int:
     return int(round(diminishing_bonus(stamina, baseline=4, cap=12, scale=50)))
 
 
+def stamina_max_energy_bonus(stamina: int | float) -> int:
+    """Maximum energy bonus from stamina."""
+    return int(round(diminishing_bonus(stamina, baseline=4, cap=40, scale=80)))
+
+
+def next_stamina_max_energy_breakpoint(stamina: int | float, *, max_stamina: int = 300) -> tuple[int, int] | None:
+    """Return (stamina, max energy bonus) for the next visible max-energy increase."""
+    current_stamina = max(1, int(stamina or 1))
+    current_bonus = stamina_max_energy_bonus(current_stamina)
+    for candidate in range(current_stamina + 1, max(1, int(max_stamina or 1)) + 1):
+        bonus = stamina_max_energy_bonus(candidate)
+        if bonus > current_bonus:
+            return candidate, bonus
+    return None
+
+
 def next_stamina_energy_regen_breakpoint(stamina: int | float, *, max_stamina: int = 300) -> tuple[int, int] | None:
     """Return (stamina, regen) for the next visible combat energy regen increase."""
     current_stamina = max(1, int(stamina or 1))

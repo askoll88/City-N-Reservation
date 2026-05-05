@@ -98,6 +98,8 @@ class ItemOperationsTest(unittest.TestCase):
     def test_artifact_energy_bonus_increases_player_max_energy(self):
         player = Player.__new__(Player)
         player._artifact_bonuses = {"energy": 15, "max_energy": 20}
+        player.stamina = 4
+        player._get_passive_bonuses = lambda: {}
 
         self.assertEqual(player.max_energy, 135)
 

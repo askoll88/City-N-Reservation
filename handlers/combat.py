@@ -3739,7 +3739,7 @@ def _resolve_player_weapon(player, user_id: int | None = None) -> tuple[int, str
     return weapon_damage, weapon_name, weapon_is_knife
 
 
-def _apply_weapon_damage_bonus(player, damage: int) -> tuple[int, int]:
+def _apply_weapon_damage_bonus(player, damage: int, *, weapon_is_knife: bool = False) -> tuple[int, int]:
     """Применить процентные модификаторы общего урона атаки."""
     passive = player._get_passive_bonuses()
     artifact_bonuses = getattr(player, "_artifact_bonuses", {}) or {}
@@ -3747,6 +3747,8 @@ def _apply_weapon_damage_bonus(player, damage: int) -> tuple[int, int]:
         int(passive.get('weapon_damage', 0) or 0)
         + int(artifact_bonuses.get('damage_boost', 0) or 0)
     )
+    if weapon_is_knife:
+        bonus_pct += int(passive.get('knife_damage', 0) or 0)
     if bonus_pct == 0:
         return damage, 0
     multiplier = max(0.1, 1 + bonus_pct / 100)
@@ -3789,7 +3791,7 @@ def handle_combat_attack(player, vk, user_id: int):
 
     melee = player.melee_damage
     total_damage = weapon_damage + melee
-    total_damage, weapon_bonus_pct = _apply_weapon_damage_bonus(player, total_damage)
+    total_damage, weapon_bonus_pct = _apply_weapon_damage_bonus(player, total_damage, weapon_is_knife=weapon_is_knife)
     enemy_hp_before = combat.get('enemy_hp', 0)
     
     # === Применяем эффекты навыков ===

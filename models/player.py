@@ -12,9 +12,12 @@ from game.stat_balance import (
     clamp,
     luck_crit_bonus,
     luck_rare_find_bonus,
+    luck_outcome_bonus,
+    next_stamina_max_energy_breakpoint,
     next_stamina_energy_regen_breakpoint,
     stamina_energy_regen,
     stamina_hp_bonus,
+    stamina_max_energy_bonus,
 )
 
 logger = logging.getLogger(__name__)
@@ -485,9 +488,10 @@ class Player:
 
     @property
     def max_energy(self) -> int:
-        """Максимальная энергия с учетом энергетических артефактов."""
+        """Максимальная энергия с учетом выносливости и энергетических артефактов."""
         bonus = int(self._artifact_bonuses.get('energy', 0) or 0) + int(self._artifact_bonuses.get('max_energy', 0) or 0)
-        return max(1, min(160, 100 + bonus))
+        stamina_bonus = stamina_max_energy_bonus(self.effective_stamina)
+        return max(1, min(180, 100 + stamina_bonus + bonus))
 
     @property
     def artifact_radiation(self) -> int:
@@ -956,18 +960,25 @@ class Player:
         strength_per_level = max(0, int(getattr(game_config, "STRENGTH_DAMAGE_PER_LEVEL", 2) or 2))
         strength_damage_bonus = self.effective_strength * strength_per_level
         energy_regen = stamina_energy_regen(self.effective_stamina)
+        energy_max_bonus = stamina_max_energy_bonus(self.effective_stamina)
+        luck_outcome = luck_outcome_bonus(self.effective_luck)
         lines.append(f"⚔️ Сила: {self.effective_strength} (+{strength_damage_bonus} урона)  |  🏃 Выносливость: {self.effective_stamina}")
-        lines.append(f"👁️ Восприятие: {self.effective_perception}  |  🍀 Удача: {self.effective_luck}")
+        lines.append(f"👁️ Восприятие: {self.effective_perception}  |  🍀 Удача: {self.effective_luck} (+{luck_outcome}% к исходам)")
         base_hp = calculate_player_max_health(self.level, self.effective_stamina, 0)
         if self.max_health_bonus:
             lines.append(f"❤️ Макс. HP: {base_hp} + {self.max_health_bonus} от артефактов")
         else:
             lines.append(f"❤️ Макс. HP: {self.max_health} (уровень + выносливость)")
         next_regen = next_stamina_energy_regen_breakpoint(self.effective_stamina)
+        next_max_energy = next_stamina_max_energy_breakpoint(self.effective_stamina)
         if next_regen:
             lines.append(f"🔋 Реген энергии в бою: +{energy_regen}/ход (след. +{next_regen[1]} с {next_regen[0]} выносливости)")
         else:
             lines.append(f"🔋 Реген энергии в бою: +{energy_regen}/ход")
+        max_energy_text = f"⚡ Макс. энергия от выносливости: +{energy_max_bonus}"
+        if next_max_energy:
+            max_energy_text += f" (след. +{next_max_energy[1]} с {next_max_energy[0]} выносливости)"
+        lines.append(max_energy_text)
         lines.append("")
         lines.append(f"📊 Урон: {self.melee_damage}  |  Броня: {self.total_defense}")
         lines.append(f"🎯 Крит: {self.crit_chance}%  |  Уклонение: {self.dodge_chance}%")
@@ -992,6 +1003,8 @@ class Player:
                 bonus_parts.append(f"продажа {passive_bonuses['sell_bonus']:+d}%")
             if passive_bonuses.get('weapon_damage'):
                 bonus_parts.append(f"урон {passive_bonuses['weapon_damage']:+d}%")
+            if passive_bonuses.get('knife_damage'):
+                bonus_parts.append(f"ножи {passive_bonuses['knife_damage']:+d}%")
             if passive_bonuses.get('max_weight'):
                 bonus_parts.append(f"вес {passive_bonuses['max_weight']:+d}кг")
             if passive_bonuses.get('defense'):
