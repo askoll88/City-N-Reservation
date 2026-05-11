@@ -175,6 +175,7 @@ class CraftingSystemTest(unittest.TestCase):
 
         self.assertIn("Оружейный отклик", sent[0]["message"])
         self.assertIn("Осколки сигнала x160", sent[0]["message"])
+        self.assertIn("Можно сделать: x1", sent[0]["message"])
 
     def test_crafting_weapon_ticket_converts_shards(self):
         class Player:
@@ -198,6 +199,8 @@ class CraftingSystemTest(unittest.TestCase):
             "xp": 0,
             "next_threshold": 80,
         }), \
+             patch("handlers.crafting.database.get_user_inventory", return_value=[]), \
+             patch("game.gacha.service.get_signal_shards", return_value=160), \
              patch("game.gacha.service.convert_signal_shards_to_tickets", return_value={"success": True, "message": "Собрано", "converted": 1}), \
              patch("handlers.crafting.add_crafting_xp", return_value={
                  "old_level": 1,
@@ -210,6 +213,90 @@ class CraftingSystemTest(unittest.TestCase):
         self.assertIn("Скрафчено: Оружейный отклик x1", vk.messages.sent[0]["message"])
         self.assertIn("Осколки сигнала x160", vk.messages.sent[0]["message"])
         add_xp.assert_called_once_with(777, 10)
+
+    def test_crafting_weapon_ticket_converts_shards_in_batch(self):
+        class Player:
+            current_location_id = "убежище"
+            level = 1
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        vk = Vk()
+        with patch("handlers.crafting.get_crafting_progress", return_value={
+            "level": 1,
+            "xp": 0,
+            "next_threshold": 80,
+        }), \
+             patch("handlers.crafting.database.get_user_inventory", return_value=[]), \
+             patch("game.gacha.service.get_signal_shards", return_value=1600), \
+             patch("game.gacha.service.convert_signal_shards_to_tickets", return_value={"success": True, "message": "Собрано", "converted": 10}) as convert, \
+             patch("handlers.crafting.add_crafting_xp", return_value={
+                 "old_level": 1,
+                 "new_level": 2,
+                 "gained": 100,
+                 "new_xp": 100,
+             }) as add_xp:
+            craft_recipe(Player(), vk, 777, "Оружейный отклик 10")
+
+        convert.assert_called_once_with(777, "weapon", 10)
+        add_xp.assert_called_once_with(777, 100)
+        self.assertIn("Оружейный отклик x10", vk.messages.sent[0]["message"])
+        self.assertIn("Осколки сигнала x1600", vk.messages.sent[0]["message"])
+
+    def test_crafting_regular_recipe_in_batch_by_index(self):
+        class Player:
+            current_location_id = "убежище"
+            level = 1
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        vk = Vk()
+        with patch("handlers.crafting.get_crafting_progress", return_value={
+            "level": 1,
+            "xp": 0,
+            "next_threshold": 80,
+        }), \
+             patch("handlers.crafting.database.get_user_inventory", return_value=[
+                 {"name": "Бинт", "quantity": 2},
+                 {"name": "Энергетик", "quantity": 2},
+             ]), \
+             patch("game.gacha.service.get_signal_shards", return_value=0), \
+             patch("handlers.crafting.database.craft_item_transaction", return_value={"success": True}) as craft_tx, \
+             patch("handlers.crafting.add_crafting_xp", return_value={
+                 "old_level": 1,
+                 "new_level": 1,
+                 "gained": 50,
+                 "new_xp": 50,
+             }) as add_xp:
+            craft_recipe(Player(), vk, 777, "3 2")
+
+        craft_tx.assert_called_once_with(
+            vk_id=777,
+            ingredients=[("Бинт", 2), ("Энергетик", 2)],
+            result_item_name="Стимулятор",
+            result_quantity=2,
+        )
+        add_xp.assert_called_once_with(777, 50)
+        self.assertIn("Стимулятор x2", vk.messages.sent[0]["message"])
+        self.assertIn("Бинт x2", vk.messages.sent[0]["message"])
 
     def test_newbie_kit_contains_basic_anomaly_detector(self):
         kit_items = {name for name, _quantity in NEWBIE_KIT_ITEMS}

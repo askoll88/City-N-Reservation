@@ -3,6 +3,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 from game import ui
@@ -24,6 +26,7 @@ from infra.state_manager import try_edit_or_send_ui
 
 
 CRAFTING_PAGE_SIZE = 5
+MAX_CRAFT_BATCH_SIZE = 999
 
 
 def _recipe_line(recipe: dict, idx: int, player_level: int) -> str:
@@ -52,17 +55,26 @@ def _inventory_quantities(user_id: int) -> dict[str, int]:
 
 def _recipe_status(recipe: dict, craft_level: int, quantities: dict[str, int]) -> dict:
     missing = []
-    for name, required_qty in [*recipe.get("ingredients", []), *recipe.get("currency_ingredients", [])]:
+    requirements = [*recipe.get("ingredients", []), *recipe.get("currency_ingredients", [])]
+    possible_counts = []
+    for name, required_qty in requirements:
+        required_qty = int(required_qty)
         have_qty = int(quantities.get(name, 0) or 0)
-        if have_qty < int(required_qty):
-            missing.append((name, have_qty, int(required_qty)))
+        if required_qty > 0:
+            possible_counts.append(have_qty // required_qty)
+        if have_qty < required_qty:
+            missing.append((name, have_qty, required_qty))
     required_level = int(recipe["required_level"])
     level_ok = craft_level >= required_level
+    max_craftable = min(possible_counts) if possible_counts else 0
+    if not level_ok:
+        max_craftable = 0
     return {
-        "can_craft": level_ok and not missing,
+        "can_craft": level_ok and max_craftable > 0 and not missing,
         "level_ok": level_ok,
         "required_level": required_level,
         "missing": missing,
+        "max_craftable": max_craftable,
     }
 
 
@@ -107,6 +119,7 @@ def _format_recipe_card(idx: int, recipe: dict, status: dict, *, available_view:
         lines.append(f"   Эффект: {recipe['description']}")
     if available_view:
         lines.append("   Статус: можно крафтить")
+        lines.append(f"   Можно сделать: x{status.get('max_craftable', 0)}")
     else:
         reasons = []
         if not status["level_ok"]:
@@ -203,7 +216,7 @@ def show_crafting_menu(player, vk, user_id: int, view: str = "available", page: 
 
     lines.append("")
     lines.append(ui.section("Управление"))
-    lines.append("Страницы и разделы — inline-кнопками. Крафт: скрафтить <номер>.")
+    lines.append("Страницы и разделы — inline-кнопками. Крафт: скрафтить <номер> [кол-во].")
 
     _send_crafting_screen(
         vk,
@@ -316,6 +329,26 @@ def _find_recipe_by_text(target: str) -> dict | None:
     return None
 
 
+def _parse_recipe_target(target: str) -> tuple[str, int]:
+    raw = (target or "").strip()
+    if not raw:
+        return "", 1
+
+    match = re.match(r"^(?P<recipe>.+?)\s+[xх](?P<qty>\d+)$", raw, flags=re.IGNORECASE)
+    if not match:
+        match = re.match(r"^(?P<recipe>.+?)\s+(?P<qty>\d+)$", raw)
+    if not match:
+        return raw, 1
+
+    recipe_target = match.group("recipe").strip()
+    craft_qty = max(1, min(MAX_CRAFT_BATCH_SIZE, int(match.group("qty"))))
+    return recipe_target, craft_qty
+
+
+def _multiply_requirements(requirements: list[tuple[str, int]], craft_qty: int) -> list[tuple[str, int]]:
+    return [(name, int(qty) * craft_qty) for name, qty in requirements]
+
+
 def craft_recipe(player, vk, user_id: int, target: str, *, refresh_view: str | None = None, refresh_page: int = 0):
     reply_keyboard = None if refresh_view else create_location_keyboard(player.current_location_id, player.level).get_keyboard()
     reply_kwargs = {"keyboard": reply_keyboard} if reply_keyboard else {}
@@ -328,7 +361,8 @@ def craft_recipe(player, vk, user_id: int, target: str, *, refresh_view: str | N
         )
         return
 
-    recipe = _find_recipe_by_text(target)
+    recipe_target, craft_qty = _parse_recipe_target(target)
+    recipe = _find_recipe_by_text(recipe_target)
     if not recipe:
         vk.messages.send(
             user_id=user_id,
@@ -353,16 +387,29 @@ def craft_recipe(player, vk, user_id: int, target: str, *, refresh_view: str | N
         )
         return
 
+    quantities = _inventory_quantities(user_id)
+    status = _recipe_status(recipe, craft_level, quantities)
+    max_craftable = int(status.get("max_craftable", 0) or 0)
+    if craft_qty > max_craftable:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ Можно скрафтить максимум x{max_craftable}.",
+            **reply_kwargs,
+            random_id=0,
+        )
+        return
+
     result_name, result_qty = recipe["result"]
+    total_result_qty = int(result_qty) * craft_qty
     if recipe.get("resonance_ticket_banner"):
         from game.gacha.service import convert_signal_shards_to_tickets
-        tx = convert_signal_shards_to_tickets(user_id, str(recipe["resonance_ticket_banner"]), int(result_qty))
+        tx = convert_signal_shards_to_tickets(user_id, str(recipe["resonance_ticket_banner"]), total_result_qty)
     else:
         tx = database.craft_item_transaction(
             vk_id=user_id,
-            ingredients=recipe["ingredients"],
+            ingredients=_multiply_requirements(recipe["ingredients"], craft_qty),
             result_item_name=result_name,
-            result_quantity=result_qty,
+            result_quantity=total_result_qty,
         )
     if not tx.get("success"):
         vk.messages.send(
@@ -373,19 +420,22 @@ def craft_recipe(player, vk, user_id: int, target: str, *, refresh_view: str | N
         )
         return
 
-    gain = add_crafting_xp(user_id, int(recipe.get("xp_gain", 0) or 0))
+    gain = add_crafting_xp(user_id, int(recipe.get("xp_gain", 0) or 0) * craft_qty)
     level_up_msg = ""
     if gain["new_level"] > gain["old_level"]:
         level_up_msg = f"\n🎯 Навык крафта повышен: {gain['old_level']} -> {gain['new_level']}"
 
     ingredients_text = ", ".join(
         f"{name} x{qty}"
-        for name, qty in [*recipe.get("ingredients", []), *recipe.get("currency_ingredients", [])]
+        for name, qty in [
+            *_multiply_requirements(recipe.get("ingredients", []), craft_qty),
+            *_multiply_requirements(recipe.get("currency_ingredients", []), craft_qty),
+        ]
     )
     vk.messages.send(
         user_id=user_id,
         message=(
-            f"✅ Скрафчено: {result_name} x{result_qty}\n"
+            f"✅ Скрафчено: {result_name} x{total_result_qty}\n"
             f"Списано: {ingredients_text}\n"
             f"Опыт крафта: +{gain['gained']} (всего {gain['new_xp']})"
             f"{level_up_msg}"
