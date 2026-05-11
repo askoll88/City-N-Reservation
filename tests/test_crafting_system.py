@@ -1,4 +1,5 @@
 import unittest
+import json
 from unittest.mock import patch
 
 from game.constants import NEWBIE_KIT_ITEMS
@@ -9,7 +10,7 @@ from game.crafting import (
 )
 from game.item_pool import ITEMS_POOL
 from handlers.keyboards import create_location_keyboard, create_weapon_upgrade_keyboard, create_workbench_keyboard
-from handlers.crafting import show_weapon_upgrade_menu
+from handlers.crafting import show_crafting_menu, show_weapon_upgrade_menu
 
 
 class CraftingSystemTest(unittest.TestCase):
@@ -76,6 +77,68 @@ class CraftingSystemTest(unittest.TestCase):
         self.assertIn("ПМ", message)
         self.assertNotIn("АК-74", message)
 
+    def test_crafting_menu_splits_available_and_blocked_recipes_inline(self):
+        class Player:
+            current_location_id = "убежище"
+            level = 1
+
+        class Vk:
+            pass
+
+        sent = []
+        with patch("handlers.crafting.get_crafting_progress", return_value={
+            "level": 1,
+            "xp": 0,
+            "next_threshold": 80,
+        }), \
+             patch("handlers.crafting.database.get_user_inventory", return_value=[
+                 {"name": "Бинт", "quantity": 1},
+                 {"name": "Энергетик", "quantity": 1},
+             ]), \
+             patch("handlers.crafting.try_edit_or_send_ui", side_effect=lambda _vk, user_id, screen, message, keyboard=None: sent.append({
+                 "user_id": user_id,
+                 "screen": screen,
+                 "message": message,
+                 "keyboard": keyboard,
+             })):
+            show_crafting_menu(Player(), Vk(), 777, view="available")
+
+        self.assertEqual(sent[0]["screen"], "crafting")
+        self.assertIn("МОЖНО СКРАФТИТЬ", sent[0]["message"])
+        self.assertIn("Полевой стим-пак", sent[0]["message"])
+        self.assertIn("Готово сейчас: 1", sent[0]["message"])
+        keyboard = json.loads(sent[0]["keyboard"])
+        payloads = [json.loads(button["action"]["payload"]) for row in keyboard["buttons"] for button in row]
+        self.assertIn({"command": "crafting_page", "view": "blocked", "page": 0}, payloads)
+        self.assertTrue(any(payload.get("command") == "crafting_build" for payload in payloads))
+
+    def test_crafting_blocked_page_shows_missing_reasons_without_build_buttons(self):
+        class Player:
+            current_location_id = "убежище"
+            level = 1
+
+        class Vk:
+            pass
+
+        sent = []
+        with patch("handlers.crafting.get_crafting_progress", return_value={
+            "level": 1,
+            "xp": 0,
+            "next_threshold": 80,
+        }), \
+             patch("handlers.crafting.database.get_user_inventory", return_value=[]), \
+             patch("handlers.crafting.try_edit_or_send_ui", side_effect=lambda _vk, user_id, screen, message, keyboard=None: sent.append({
+                 "message": message,
+                 "keyboard": keyboard,
+             })):
+            show_crafting_menu(Player(), Vk(), 777, view="blocked")
+
+        self.assertIn("ПОКА НЕЛЬЗЯ СКРАФТИТЬ", sent[0]["message"])
+        self.assertIn("Не хватает:", sent[0]["message"])
+        keyboard = json.loads(sent[0]["keyboard"])
+        payloads = [json.loads(button["action"]["payload"]) for row in keyboard["buttons"] for button in row]
+        self.assertFalse(any(payload.get("command") == "crafting_build" for payload in payloads))
+
     def test_newbie_kit_contains_basic_anomaly_detector(self):
         kit_items = {name for name, _quantity in NEWBIE_KIT_ITEMS}
 
@@ -105,6 +168,22 @@ class CraftingSystemTest(unittest.TestCase):
             self.assertIn(result_detector, known_items)
             for ingredient_name, _quantity in recipe["ingredients"]:
                 self.assertIn(ingredient_name, known_items)
+
+    def test_detector_item_pool_prices_follow_late_upgrade_chain(self):
+        pool_by_name = {item[0]: item for item in ITEMS_POOL}
+        names = ["Детектор-Х", "Детектор Аномалист-2", "Детектор Мираж-Альфа", "Око Зоны"]
+        prices = [pool_by_name[name][3] for name in names]
+
+        self.assertEqual(prices, sorted(prices))
+        self.assertGreater(pool_by_name["Детектор Аномалист-2"][3], pool_by_name["Детектор-Х"][3])
+        self.assertIn("Апгрейд Детектора-Х", pool_by_name["Детектор Аномалист-2"][2])
+
+    def test_dosimeter_uses_replacement_resource_not_retired_bottle(self):
+        recipes_by_id = {recipe["id"]: recipe for recipe in CRAFT_RECIPES}
+        dosimeter = recipes_by_id["dosimeter"]
+
+        self.assertIn(("Стеклянная тара", 1), dosimeter["ingredients"])
+        self.assertNotIn(("Пустая бутылка", 1), dosimeter["ingredients"])
 
 
 if __name__ == "__main__":

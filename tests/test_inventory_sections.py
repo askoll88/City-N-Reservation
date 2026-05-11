@@ -39,6 +39,7 @@ class DummyInventory:
         self.backpacks = [{"name": "Рюкзак", "quantity": 1, "backpack_bonus": 10, "weight": 1.5}]
         self.artifacts = [{"name": "Медуза", "quantity": 1, "weight": 0.5}]
         self.shells_bags = []
+        self.trash = [{"name": "Комок ржавой стружки", "quantity": 1, "weight": 0.06, "price": 2}]
         self.other = [{"name": "Бинт", "quantity": 2, "weight": 0.1}]
         self.total_weight = 4.6
 
@@ -123,6 +124,32 @@ class InventorySectionsTest(unittest.TestCase):
         self.inventory_module.show_other(self.player, self.vk, user_id=1)
         self.assertEqual(self.player.inventory_section, "other")
         self.fake_db.update_user_stats.assert_not_called()
+
+    def test_show_trash_sets_section_in_memory_only(self):
+        self.inventory_module.show_trash(self.player, self.vk, user_id=1)
+        self.assertEqual(self.player.inventory_section, "trash")
+        self.fake_db.update_user_stats.assert_not_called()
+        output = (self.vk.messages.sent or self.vk.messages.edited)[0]["message"]
+        self.assertIn("ИНВЕНТАРЬ: ХЛАМ", output)
+
+    def test_handle_sell_all_trash_uses_single_database_transaction(self):
+        self.inventory_module.database.NPC_MERCHANT_TRADER = "trader"
+        self.inventory_module.database.sell_all_trash_transaction = Mock(return_value={
+            "success": True,
+            "message": "Барыга забрал весь хлам: 3 шт. за 7 руб.",
+            "remaining_money": 107,
+        })
+
+        with patch("handlers.quests.track_quest_shop_sell"):
+            self.inventory_module.handle_sell_all_trash(self.player, self.vk, user_id=1)
+
+        self.inventory_module.database.sell_all_trash_transaction.assert_called_once_with(
+            1,
+            sell_bonus_pct=0,
+            merchant_id="trader",
+        )
+        self.assertEqual(self.player.money, 107)
+        self.assertIn("Барыга забрал весь хлам", self.vk.messages.sent[0]["message"])
 
     def test_handle_use_item_equips_endgame_detector_without_detector_word(self):
         self.player.inventory.other = [{"name": "Око Зоны", "quantity": 1, "weight": 0.3}]
@@ -249,6 +276,10 @@ class InventorySectionsTest(unittest.TestCase):
         self.assertEqual(json.loads(page_buttons[0]["action"]["payload"]), {"command": "shop_page", "view": "sell", "page": 2})
         self.assertEqual(json.loads(page_buttons[1]["action"]["payload"]), {"command": "shop_page", "view": "sell", "page": 0})
         self.assertEqual(json.loads(page_buttons[2]["action"]["payload"]), {"command": "shop_page", "view": "sell", "page": 1})
+        self.assertEqual(
+            json.loads(keyboard["buttons"][1][0]["action"]["payload"]),
+            {"command": "sell_all_trash"},
+        )
 
     def test_trader_shop_outputs_ten_items_per_page(self):
         invalidate_edit_targets(8811)
@@ -344,6 +375,40 @@ class InventorySectionsTest(unittest.TestCase):
         self.assertNotIn("АК-74 «Резонанс»", message)
         self.assertIn("ТТ", message)
         self.assertIn("Медуза", message)
+
+    def test_sell_filter_allows_duplicate_when_one_copy_equipped(self):
+        self.player.equipped_artifacts = ["Кристалл", "Кристальная колючка", "Бусы"]
+
+        self.assertTrue(self.inventory_module._is_sellable_shop_item(
+            self.player,
+            {"name": "Кристалл", "quantity": 2, "weight": 0.5},
+        ))
+        self.assertTrue(self.inventory_module._is_sellable_shop_item(
+            self.player,
+            {"name": "Кристальная колючка", "quantity": 2, "weight": 0.5},
+        ))
+        self.assertFalse(self.inventory_module._is_sellable_shop_item(
+            self.player,
+            {"name": "Бусы", "quantity": 1, "weight": 0.5},
+        ))
+
+    def test_sell_artifacts_shows_inventory_duplicate_of_equipped_artifact(self):
+        self.player.equipped_artifacts = ["Кристалл", "Кристальная колючка", "Бусы"]
+        self.player.inventory.artifacts = [
+            {"name": "Кристалл", "quantity": 2, "weight": 0.5},
+            {"name": "Кристальная колючка", "quantity": 2, "weight": 0.5},
+            {"name": "Бусы", "quantity": 1, "weight": 0.5},
+        ]
+        self.inventory_module.database.NPC_MERCHANT_TRADER = "trader"
+        self.inventory_module.database.get_shop_event_text = Mock(return_value="")
+        self.inventory_module.database.get_npc_sell_price_preview = Mock(return_value={"sell_price": 10})
+
+        self.inventory_module.show_sell_artifacts(self.player, self.vk, 780)
+        message = self.vk.messages.sent[0]["message"]
+
+        self.assertIn("Кристалл", message)
+        self.assertIn("Кристальная колючка", message)
+        self.assertNotIn("Бусы", message)
 
 
 if __name__ == "__main__":

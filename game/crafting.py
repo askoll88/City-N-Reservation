@@ -74,7 +74,7 @@ CRAFT_RECIPES: list[dict[str, Any]] = [
     {
         "id": "dosimeter",
         "name": "Самодельный дозиметр",
-        "ingredients": [("Пустая бутылка", 1), ("Медная проволока", 1)],
+        "ingredients": [("Стеклянная тара", 1), ("Медная проволока", 1)],
         "result": ("Дозиметр", 1),
         "required_level": 2,
         "xp_gain": 30,
@@ -159,7 +159,7 @@ CRAFT_RECIPES: list[dict[str, Any]] = [
         "result": ("Детектор-Х", 1),
         "required_level": 6,
         "xp_gain": 85,
-        "description": "лучше ловит редкие артефактные следы",
+        "description": "редкий след: +24% базово, до +32% для редких артефактов",
     },
     {
         "id": "detector_anomalist_2",
@@ -168,7 +168,7 @@ CRAFT_RECIPES: list[dict[str, Any]] = [
         "result": ("Детектор Аномалист-2", 1),
         "required_level": 7,
         "xp_gain": 100,
-        "description": "+27% к шансу добычи",
+        "description": "универсальный апгрейд Детектора-Х: +29% базово, до +34% для редких",
     },
     {
         "id": "detector_mirage_alpha",
@@ -177,7 +177,7 @@ CRAFT_RECIPES: list[dict[str, Any]] = [
         "result": ("Детектор Мираж-Альфа", 1),
         "required_level": 8,
         "xp_gain": 120,
-        "description": "лучше работает с пси-активными артефактами",
+        "description": "+31% базово, до +38% для пси-активных артефактов",
     },
     {
         "id": "detector_oko_zony",
@@ -186,7 +186,7 @@ CRAFT_RECIPES: list[dict[str, Any]] = [
         "result": ("Око Зоны", 1),
         "required_level": 10,
         "xp_gain": 160,
-        "description": "эндгейм-детектор для самых опасных маршрутов",
+        "description": "эндгейм-детектор: +36% базово, до +45% в скоплениях аномалий",
     },
 ]
 

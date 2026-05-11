@@ -8,9 +8,10 @@ from handlers.keyboards import create_location_keyboard
 from infra.state_manager import get_ui_current_screen, set_ui_screen, try_edit_or_send_ui
 from infra import vk_messages
 
-from .assets import first_ssr_attachment
+from .assets import first_ssr_attachment, upload_item_image
 from .banners import (
     BANNER_DURATION_DAYS,
+    BANNER_PATCH_DURATION_DAYS,
     SINGLE_PULL_COST,
     TEN_PULL_COST,
     SR_HARD_PITY,
@@ -19,11 +20,16 @@ from .banners import (
     SSR_BASE_RATE,
     SSR_SOFT_PITY_START,
     SSR_SOFT_PITY_STEP,
+    get_ssr_hard_pity,
+    get_ssr_soft_pity_start,
+    get_ssr_soft_pity_step,
 )
 from .service import get_banners, get_banner_state, get_signal_shards, is_resonance_available, perform_pulls
 from .service import get_banner_time_left
 from .service import get_pull_history
+from .service import get_rate_disclosure
 from .event_items import (
+    EVENT_OUTFIT_SET_BONUSES,
     GACHA_EVENT_ITEMS,
     format_event_outfit_passive_stats,
     get_event_item_lore,
@@ -39,7 +45,7 @@ RARITY_VIEW = {
 }
 
 HISTORY_PAGE_SIZE = 5
-RATES_TOTAL_PAGES = 3
+RATES_TOTAL_PAGES = 4
 _EVENT_ITEMS_BY_NAME = {row[0]: row for row in GACHA_EVENT_ITEMS}
 
 
@@ -170,6 +176,24 @@ def _featured_line(items: tuple[str, ...]) -> str:
     return ", ".join(items)
 
 
+def _reward_names(entries) -> tuple[str, ...]:
+    return tuple(entry.name for entry in entries or ())
+
+
+def _set_bonus_lines(featured_ssr: tuple[str, ...]) -> list[str]:
+    featured = set(featured_ssr or ())
+    for profile in EVENT_OUTFIT_SET_BONUSES.values():
+        items = set(profile.get("items") or ())
+        if items and items.issubset(featured):
+            stats = format_event_outfit_passive_stats(profile.get("stats"))
+            return [
+                f"Сет-бонус: {profile['name']}",
+                f"Эффект: {stats}",
+                str(profile.get("description") or ""),
+            ]
+    return []
+
+
 def format_resonance_menu(vk_id: int) -> str:
     time_left = get_banner_time_left()
     lines = [
@@ -179,22 +203,26 @@ def format_resonance_menu(vk_id: int) -> str:
         "• РЕСУРС",
         f"💠 Осколки сигнала: {get_signal_shards(vk_id)}",
         f"Отклик x1: {SINGLE_PULL_COST} | Отклик x10: {TEN_PULL_COST}",
-        f"Цикл баннера: {BANNER_DURATION_DAYS} дней",
-        f"До конца баннера: {time_left['formatted']}",
+        f"Фаза баннера: {time_left.get('phase_number', 1)}/{time_left.get('phases_per_patch', 1)}",
+        f"Патч: {BANNER_PATCH_DURATION_DAYS} дней, волна: {BANNER_DURATION_DAYS} дней",
+        f"До конца волны: {time_left['formatted']}",
         "",
         "• БАННЕРЫ",
     ]
     for banner in get_banners():
         state = get_banner_state(vk_id, banner.id)
         guarantee = "rate-up гарантирован" if state.get("featured_guaranteed") else "50/50 активен"
+        sr_guarantee = "SR rate-up гарантирован" if state.get("featured_sr_guaranteed") else "SR 50/50 активен"
+        ssr_hard_pity = get_ssr_hard_pity(banner.id)
         lines.extend([
             "",
             f"◆ {banner.name.upper()}",
-            f"До конца: {time_left['formatted']}",
+            f"До конца волны: {time_left['formatted']}",
             f"Rate-up SSR: {_featured_line(banner.featured_ssr)}",
-            f"SSR {_bar(state['pity_ssr'], SSR_HARD_PITY)} {state['pity_ssr']}/{SSR_HARD_PITY}",
+            f"SSR {_bar(state['pity_ssr'], ssr_hard_pity)} {state['pity_ssr']}/{ssr_hard_pity}",
             f"SR  {_bar(state['pity_sr'], SR_HARD_PITY)} {state['pity_sr']}/{SR_HARD_PITY}",
             f"Гарант: {guarantee}",
+            f"SR-гарант: {sr_guarantee}",
         ])
     lines.extend([
         "",
@@ -212,9 +240,12 @@ def format_banner_menu(vk_id: int, banner_id: str) -> str:
     state = get_banner_state(vk_id, banner.id)
     time_left = get_banner_time_left()
     guarantee = "rate-up гарантирован" if state.get("featured_guaranteed") else "50/50 активен"
+    sr_guarantee = "rate-up SR гарантирован" if state.get("featured_sr_guaranteed") else "SR 50/50 активен"
+    ssr_hard_pity = get_ssr_hard_pity(banner.id)
     lines = [
         f"▰ {banner.name.upper()}",
-        f"До конца баннера: {time_left['formatted']}",
+        f"Фаза баннера: {time_left.get('phase_number', 1)}/{time_left.get('phases_per_patch', 1)}",
+        f"До конца волны: {time_left['formatted']}",
         "",
         "• РЕСУРС",
         f"💠 Осколки сигнала: {get_signal_shards(vk_id)}",
@@ -223,12 +254,17 @@ def format_banner_menu(vk_id: int, banner_id: str) -> str:
         "• RATE-UP",
         f"SSR: {_featured_line(banner.featured_ssr)}",
         f"Off-rate SSR: {_featured_line(banner.off_ssr)}",
+        f"SR rate-up: {_featured_line(_reward_names(banner.featured_sr))}",
         "",
         "• ПРОГРЕСС",
-        f"SSR {_bar(state['pity_ssr'], SSR_HARD_PITY)} {state['pity_ssr']}/{SSR_HARD_PITY}",
+        f"SSR {_bar(state['pity_ssr'], ssr_hard_pity)} {state['pity_ssr']}/{ssr_hard_pity}",
         f"SR  {_bar(state['pity_sr'], SR_HARD_PITY)} {state['pity_sr']}/{SR_HARD_PITY}",
         f"Гарант: {guarantee}",
+        f"SR-гарант: {sr_guarantee}",
     ]
+    set_lines = _set_bonus_lines(banner.featured_ssr)
+    if set_lines:
+        lines.extend(["", "• ПОЛНЫЙ КОМПЛЕКТ", *set_lines])
     return "\n".join(lines)
 
 
@@ -313,10 +349,15 @@ def _format_rateup_rates(banner) -> list[str]:
     featured_count = max(1, len(banner.featured_ssr or ()))
     per_featured = (SSR_BASE_RATE * 0.5) / featured_count
     guaranteed_per_featured = SSR_BASE_RATE / featured_count
+    disclosure = get_rate_disclosure()
+    hard_pity = get_ssr_hard_pity(banner.id)
     return [
         f"SSR базово: {_format_rate_value(SSR_BASE_RATE)}",
+        f"SSR средний шанс с учётом pity: {_format_rate_value(disclosure['ssr_consolidated_rate'])}",
+        f"Rate-up SSR средний шанс: {_format_rate_value(disclosure['featured_ssr_consolidated_rate'])}",
         f"Rate-up при активном 50/50: {_format_rate_value(per_featured)} на предмет",
         f"Rate-up после проигрыша 50/50: {_format_rate_value(guaranteed_per_featured)} на предмет SSR-проверки",
+        f"SSR-гарант этого баннера: {hard_pity} откликов",
     ]
 
 
@@ -329,6 +370,31 @@ def _format_offrate_rates(banner) -> list[str]:
     ]
 
 
+def _format_sr_rateup_page(banner, page: int) -> str:
+    lines = [
+        f"▰ ШАНСЫ: {banner.name.upper()}",
+        f"Страница {page + 1}/{RATES_TOTAL_PAGES}: rate-up SR",
+        "",
+        "• УСИЛЕННЫЕ SR",
+    ]
+    for entry in banner.featured_sr or banner.sr_pool:
+        lines.extend(_format_item_presentation(entry.name, prefix="Rate-up SR: "))
+        lines.append("")
+    off_names = _reward_names(banner.off_sr)
+    featured_count = max(1, len(banner.featured_sr or banner.sr_pool or ()))
+    per_featured = (SR_BASE_RATE * 0.5) / featured_count
+    guaranteed_per_featured = SR_BASE_RATE / featured_count
+    lines.extend([
+        "• ШАНС ПОЛУЧЕНИЯ",
+        f"SR базово: {_format_rate_value(SR_BASE_RATE)}",
+        f"SR средний шанс с учётом pity: {_format_rate_value(get_rate_disclosure()['sr_consolidated_rate'])}",
+        f"Rate-up при активном 50/50: {_format_rate_value(per_featured)} на предмет",
+        f"Rate-up после проигрыша 50/50: {_format_rate_value(guaranteed_per_featured)} на предмет SR-проверки",
+        f"Off-rate SR: {_featured_line(off_names)}",
+    ])
+    return "\n".join(line for line in lines if line is not None).rstrip()
+
+
 def _format_rates_rateup_page(banner, page: int) -> str:
     lines = [
         f"▰ ШАНСЫ: {banner.name.upper()}",
@@ -339,6 +405,9 @@ def _format_rates_rateup_page(banner, page: int) -> str:
     for item_name in banner.featured_ssr:
         lines.extend(_format_item_presentation(item_name, prefix="RankUP SSR: "))
         lines.append("")
+    set_lines = _set_bonus_lines(banner.featured_ssr)
+    if set_lines:
+        lines.extend(["• БОНУС ПОЛНОГО КОМПЛЕКТА", *set_lines, ""])
     lines.extend(["• ШАНС ПОЛУЧЕНИЯ", *_format_rateup_rates(banner)])
     return "\n".join(line for line in lines if line is not None).rstrip()
 
@@ -363,18 +432,29 @@ def _format_rates_offrate_page(banner, page: int) -> str:
 def _format_rates_details_page(banner, page: int) -> str:
     sr_names = tuple(item.name for item in banner.sr_pool)
     r_names = tuple(item.name for item in banner.r_pool)
+    disclosure = get_rate_disclosure()
+    hard_pity = get_ssr_hard_pity(banner.id)
+    soft_start = get_ssr_soft_pity_start(banner.id)
+    soft_step = get_ssr_soft_pity_step(banner.id)
     lines = [
         f"▰ ШАНСЫ: {banner.name.upper()}",
         f"Страница {page + 1}/{RATES_TOTAL_PAGES}: подробности",
         "",
         "• БАЗОВЫЕ ШАНСЫ",
-        f"🟨 SSR: {_format_rate_value(SSR_BASE_RATE)}. После {SSR_SOFT_PITY_START} откликов шанс растёт на {_format_rate_value(SSR_SOFT_PITY_STEP)} за отклик. На {SSR_HARD_PITY} — гарант.",
-        f"🟪 SR: {_format_rate_value(SR_BASE_RATE)}. На {SR_HARD_PITY} отклике — гарант.",
+        f"🟨 SSR: {_format_rate_value(SSR_BASE_RATE)} базово, {_format_rate_value(disclosure['ssr_consolidated_rate'])} средне с pity. После {soft_start} откликов шанс растёт на {_format_rate_value(soft_step)} за отклик. На {hard_pity} — гарант.",
+        f"🟪 SR: {_format_rate_value(SR_BASE_RATE)} базово, {_format_rate_value(disclosure['sr_consolidated_rate'])} средне с pity. На {SR_HARD_PITY} отклике — гарант.",
         "⬜ R: всё остальное.",
         "",
         "• ГАРАНТ",
         "Если SSR не оказался rate-up, следующий SSR на этом типе баннера будет rate-up.",
+        "Если SR не оказался rate-up, следующий SR на этом типе баннера будет rate-up.",
         "Оружие и снаряжение считают пити отдельно.",
+        "",
+        "• SR RATE-UP",
+        _featured_line(_reward_names(banner.featured_sr)),
+        "",
+        "• SR OFF-RATE",
+        _featured_line(_reward_names(banner.off_sr)),
         "",
         "• SR ПУЛ",
         _featured_line(sr_names),
@@ -395,6 +475,8 @@ def format_rates(banner_id: str | None = None, page: int = 0) -> tuple[str, int,
     if safe_page == 0:
         message = _format_rates_rateup_page(banner, safe_page)
     elif safe_page == 1:
+        message = _format_sr_rateup_page(banner, safe_page)
+    elif safe_page == 2:
         message = _format_rates_offrate_page(banner, safe_page)
     else:
         message = _format_rates_details_page(banner, safe_page)
@@ -494,21 +576,90 @@ def _format_pull_result(result: dict) -> str:
                 f"(дубликат -> +{reward.quantity} осколков сигнала)"
             )
             continue
-        suffix = " (дубликат)" if reward.duplicate else ""
+        tags = []
+        if reward.featured or reward.sr_featured:
+            tags.append("rate-up")
+        if reward.guaranteed or reward.sr_guaranteed:
+            tags.append("гарант")
+        if reward.fifty_fifty_lost or reward.sr_rateup_lost:
+            tags.append("проигрыш 50/50")
+        if reward.duplicate:
+            tags.append("дубликат")
+        suffix = f" ({', '.join(tags)})" if tags else ""
         qty = f" x{reward.quantity}" if reward.quantity != 1 else ""
         lines.append(f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} — {reward.name}{qty}{suffix}")
     state = result["state"]
     time_left = get_banner_time_left()
     guarantee = "следующий SSR гарантированно rate-up" if state.get("featured_guaranteed") else "50/50 активен"
+    sr_guarantee = "следующий SR гарантированно rate-up" if state.get("featured_sr_guaranteed") else "SR 50/50 активен"
+    ssr_hard_pity = get_ssr_hard_pity(result["banner"].id)
     lines.extend([
         "",
         "• СОСТОЯНИЕ БАННЕРА",
-        f"SSR {_bar(state['pity_ssr'], SSR_HARD_PITY)} {state['pity_ssr']}/{SSR_HARD_PITY}",
+        f"SSR {_bar(state['pity_ssr'], ssr_hard_pity)} {state['pity_ssr']}/{ssr_hard_pity}",
         f"SR  {_bar(state['pity_sr'], SR_HARD_PITY)} {state['pity_sr']}/{SR_HARD_PITY}",
         f"Гарант: {guarantee}",
+        f"SR-гарант: {sr_guarantee}",
         f"До конца баннера: {time_left['formatted']}",
     ])
     return "\n".join(lines)
+
+
+def _reward_tags(reward) -> list[str]:
+    tags = []
+    if getattr(reward, "featured", False) or getattr(reward, "sr_featured", False):
+        tags.append("rate-up")
+    if getattr(reward, "guaranteed", False) or getattr(reward, "sr_guaranteed", False):
+        tags.append("гарант")
+    if getattr(reward, "fifty_fifty_lost", False) or getattr(reward, "sr_rateup_lost", False):
+        tags.append("проигрыш 50/50")
+    if getattr(reward, "duplicate", False):
+        tags.append("дубликат")
+    return tags
+
+
+def _format_ssr_showcase(result: dict, reward, index: int, total: int) -> str:
+    source_name = getattr(reward, "source_name", None) or getattr(reward, "name", "SSR предмет")
+    tags = _reward_tags(reward)
+    title_tags = f" | {', '.join(tags)}" if tags else ""
+    lines = [
+        "▰ ЛЕГЕНДАРНЫЙ СИГНАЛ",
+        f"{index}/{total} из отклика x{result.get('count', 1)}{title_tags}",
+        "",
+    ]
+    if getattr(reward, "duplicate", False) and getattr(reward, "kind", "") == "currency":
+        lines.extend([
+            f"◆ {source_name}",
+            f"Дубликат конвертирован: +{int(getattr(reward, 'quantity', 0) or 0)} осколков сигнала.",
+        ])
+    else:
+        lines.extend(_format_item_presentation(source_name))
+    lines.extend([
+        "",
+        "Предмет отправлен в шкаф убежища.",
+    ])
+    return "\n".join(lines)
+
+
+def _send_pull_result(vk, user_id: int, banner_id: str, result: dict) -> None:
+    keyboard = create_resonance_banner_keyboard(banner_id)
+    message = _format_pull_result(result) if result.get("success") else result.get("message", "Не удалось выполнить отклик.")
+    if not result.get("success"):
+        _send(vk, user_id, message, keyboard)
+        return
+
+    rewards = result.get("rewards", [])
+    ssr_rewards = [reward for reward in rewards if getattr(reward, "rarity", None) == "SSR"]
+    summary_attachment = None if int(result.get("count", 1) or 1) == 10 and ssr_rewards else first_ssr_attachment(vk, user_id, rewards)
+    _send(vk, user_id, message, keyboard, attachment=summary_attachment)
+
+    if int(result.get("count", 1) or 1) != 10:
+        return
+    total = len(ssr_rewards)
+    for index, reward in enumerate(ssr_rewards, 1):
+        item_name = getattr(reward, "source_name", None) or getattr(reward, "name", None)
+        attachment = upload_item_image(vk, user_id, item_name)
+        _send(vk, user_id, _format_ssr_showcase(result, reward, index, total), keyboard, attachment=attachment)
 
 
 def show_resonance_menu(player, vk, user_id: int) -> None:
@@ -561,6 +712,9 @@ def show_history(vk, user_id: int, banner_id: str, page: int = 0) -> None:
 def handle_resonance_command(player, vk, user_id: int, text: str) -> bool:
     text = (text or "").strip().lower()
     if text in {"резонанс", "резонанс зоны", "резонанс зоны", "отклик", "отклики"}:
+        show_resonance_menu(player, vk, user_id)
+        return True
+    if text in {"назад к резонансу", "к резонансу"}:
         show_resonance_menu(player, vk, user_id)
         return True
     if text in {"резонанс оружия", "оружейный резонанс"}:
@@ -618,9 +772,7 @@ def handle_resonance_command(player, vk, user_id: int, text: str) -> bool:
         return True
     banner_id, count = target
     result = perform_pulls(user_id, banner_id, count)
-    message = _format_pull_result(result) if result.get("success") else result.get("message", "Не удалось выполнить отклик.")
-    attachment = first_ssr_attachment(vk, user_id, result.get("rewards", [])) if result.get("success") else None
-    _send(vk, user_id, message, create_resonance_banner_keyboard(banner_id), attachment=attachment)
+    _send_pull_result(vk, user_id, banner_id, result)
     return True
 
 
@@ -662,8 +814,6 @@ def handle_resonance_callback(player, vk, user_id: int, payload: dict) -> bool:
         banner_id = str(payload.get("banner") or "weapon")
         count = int(payload.get("count", 1) or 1)
         result = perform_pulls(user_id, banner_id, count)
-        message = _format_pull_result(result) if result.get("success") else result.get("message", "Не удалось выполнить отклик.")
-        attachment = first_ssr_attachment(vk, user_id, result.get("rewards", [])) if result.get("success") else None
-        _send(vk, user_id, message, create_resonance_banner_keyboard(banner_id), attachment=attachment)
+        _send_pull_result(vk, user_id, banner_id, result)
         return True
     return False

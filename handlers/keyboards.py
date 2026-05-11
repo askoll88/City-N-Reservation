@@ -133,6 +133,14 @@ def create_shop_hud_keyboard(view: str = "buy", page: int = 0, total_pages: int 
         page=next_page,
         color=VkKeyboardColor.SECONDARY,
     )
+    if safe_view == "sell":
+        keyboard.add_line()
+        _add_callback_button(
+            keyboard,
+            "Продать весь хлам",
+            command="sell_all_trash",
+            color=VkKeyboardColor.POSITIVE,
+        )
     return keyboard
 
 
@@ -364,9 +372,11 @@ def create_inventory_keyboard(*, inline: bool = False):
     _add_callback_button(keyboard, "Броня", command="inventory_section", section="armor", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     _add_callback_button(keyboard, "Артефакты", command="inventory_section", section="artifacts", color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Рюкзаки", command="inventory_section", section="backpacks", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    _add_callback_button(keyboard, "Хлам", command="inventory_section", section="trash", color=VkKeyboardColor.SECONDARY)
     _add_callback_button(keyboard, "Другое", command="inventory_section", section="other", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    _add_callback_button(keyboard, "Рюкзаки", command="inventory_section", section="backpacks", color=VkKeyboardColor.PRIMARY)
     _add_callback_button(keyboard, "Все", command="inventory_section", section="all", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     _add_callback_button(keyboard, "Назад", command="inventory_back", color=VkKeyboardColor.NEGATIVE)
@@ -644,8 +654,8 @@ def create_npc_select_keyboard(location_id: str):
         "военный": "Военный",
         "ученый": "Учёный",
         "барыга": "Барыга",
-        "местный житель": "Местный житель",
-        "наставник": "Наставник",
+        "местный житель": "Проводник",
+        "наставник": "Инструктор классов",
         "ранговик": "Куратор рангов",
         "медик": "Медик",
         "дозиметрист": "Дозиметрист",
@@ -676,11 +686,17 @@ def create_npc_dialog_keyboard(npc_id: str):
         return create_location_keyboard("кпп")
 
     menu = npc.get_menu()
+    row_buttons = 0
     for dialog_id in menu:
         question = npc.get_question_text(dialog_id)
         if question:
             keyboard.add_button(question, color=VkKeyboardColor.SECONDARY)
-            keyboard.add_line()
+            row_buttons += 1
+            if row_buttons >= 2:
+                keyboard.add_line()
+                row_buttons = 0
+    if row_buttons:
+        keyboard.add_line()
     keyboard.add_button("К выбору NPC", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
@@ -706,7 +722,7 @@ def create_warehouse17_threat_keyboard(player):
 
 
 def create_class_selection_keyboard():
-    """Отдельная клавиатура выбора класса у Наставника."""
+    """Отдельная клавиатура выбора класса у инструктора."""
     keyboard = VkKeyboard(one_time=False)
     from models.classes import get_all_classes
 
@@ -724,7 +740,7 @@ def create_class_selection_keyboard():
 
     if row_buttons:
         keyboard.add_line()
-    keyboard.add_button("Назад к наставнику", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Назад к инструктору", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 

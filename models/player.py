@@ -192,6 +192,7 @@ class Inventory:
         self.backpacks = []
         self.artifacts = []
         self.shells_bags = []
+        self.trash = []
         self.other = []
 
         for item in items:
@@ -206,6 +207,8 @@ class Inventory:
                 self.artifacts.append(item)
             elif category == 'shells_bag':
                 self.shells_bags.append(item)
+            elif category == 'trash':
+                self.trash.append(item)
             else:
                 self.other.append(item)
 
@@ -213,15 +216,29 @@ class Inventory:
     def total_weight(self) -> float:
         """Общий вес инвентаря"""
         total = 0.0
-        for item in (self.weapons + self.armor + self.backpacks +
-                     self.artifacts + self.shells_bags + self.other):
+        for item in (
+            (getattr(self, "weapons", []) or []) +
+            (getattr(self, "armor", []) or []) +
+            (getattr(self, "backpacks", []) or []) +
+            (getattr(self, "artifacts", []) or []) +
+            (getattr(self, "shells_bags", []) or []) +
+            (getattr(self, "trash", []) or []) +
+            (getattr(self, "other", []) or [])
+        ):
             total += item.get('weight', 1.0) * item.get('quantity', 1)
         return round(total, 1)
 
     def is_empty(self) -> bool:
         """Проверить, пуст ли инвентарь"""
-        return not (self.weapons or self.armor or self.artifacts or
-                    self.backpacks or self.shells_bags or self.other)
+        return not (
+            (getattr(self, "weapons", []) or []) or
+            (getattr(self, "armor", []) or []) or
+            (getattr(self, "artifacts", []) or []) or
+            (getattr(self, "backpacks", []) or []) or
+            (getattr(self, "shells_bags", []) or []) or
+            (getattr(self, "trash", []) or []) or
+            (getattr(self, "other", []) or [])
+        )
 
     def __str__(self) -> str:
         """Строковое представление инвентаря"""
@@ -258,6 +275,15 @@ class Inventory:
             ))
         else:
             lines.append("Артефакты:\n  Пусто")
+
+        trash = getattr(self, "trash", []) or []
+        if trash:
+            lines.append("Хлам:\n" + "\n".join(
+                f"{idx}. {item['name']} x{item['quantity']} ВЕС:{item.get('weight', 1.0)}кг"
+                for idx, item in enumerate(trash, 1)
+            ))
+        else:
+            lines.append("Хлам:\n  Пусто")
 
         if self.other:
             lines.append("Другое:\n" + "\n".join(
@@ -568,7 +594,7 @@ class Player:
     def _get_event_outfit_bonuses(self) -> dict:
         """Получить пассивы от надетого ивентового снаряжения Резонанса."""
         try:
-            from game.gacha.event_items import get_event_outfit_passive_profile
+            from game.gacha.event_items import get_event_outfit_passive_profile, get_event_outfit_set_bonus
             equipped = [
                 self.equipped_armor,
                 self.equipped_armor_head,
@@ -582,6 +608,9 @@ class Player:
                 profile = get_event_outfit_passive_profile(item_name)
                 if not profile:
                     continue
+                for key, value in (profile.get("stats") or {}).items():
+                    bonuses[key] = int(bonuses.get(key, 0) or 0) + int(value or 0)
+            for profile in get_event_outfit_set_bonus(equipped):
                 for key, value in (profile.get("stats") or {}).items():
                     bonuses[key] = int(bonuses.get(key, 0) or 0) + int(value or 0)
             return bonuses
@@ -1702,6 +1731,7 @@ class Player:
             self.inventory.armor +
             self.inventory.artifacts +
             self.inventory.backpacks +
+            (getattr(self.inventory, "trash", []) or []) +
             self.inventory.other
         )
 

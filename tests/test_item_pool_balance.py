@@ -15,6 +15,56 @@ def _by_name(name: str) -> tuple:
 
 
 class ItemPoolBalanceTest(unittest.TestCase):
+    def test_restored_trash_is_separate_from_useful_resources(self):
+        still_retired = {"Суп с опилками", "Патрон 5.45", "Патрон 9мм"}
+        still_retired.update({
+            "Ржавая гильза",
+            "Сломанный патрон",
+            "Пустая гильза",
+            "Ржавый болт",
+            "Обрывок проволоки",
+            "Грязная тряпка",
+            "Пустая банка",
+            "Пустая бутылка",
+            "Кость",
+            "Мокрая газета",
+            "Ржавая железка",
+            "Сломанный нож",
+            "Мёртвый артефакт",
+            "Зажигалка",
+            "Монета",
+            "Документ",
+            "Фотография",
+        })
+        restored_trash = {
+            "Погнутый жетон",
+            "Треснувший изолятор",
+            "Комок ржавой стружки",
+            "Плавленая пуговица",
+            "Слипшийся блокнот",
+            "Обугленный ремешок",
+            "Коробок сырых спичек",
+            "Треснувшая линза",
+            "Пустой фильтр",
+            "Осколок керамики",
+            "Почерневшая батарейка",
+            "Провонявший бинт",
+            "Мятый шеврон",
+            "Застывшая капля смолы",
+            "Крышка от фляги",
+            "Сломанная пряжка",
+            "Пыльный предохранитель",
+        }
+        names = {item[0] for item in ITEMS_POOL}
+
+        self.assertTrue(still_retired.isdisjoint(names))
+        self.assertTrue(restored_trash.issubset(names))
+        for item_name in restored_trash:
+            self.assertEqual(_by_name(item_name)[1], "trash", item_name)
+        for replacement in {"Металлолом", "Ветошь", "Стеклянная тара", "Старые документы", "Аномальный шлак"}:
+            self.assertIn(replacement, names)
+            self.assertEqual(_by_name(replacement)[1], "resources", replacement)
+
     def test_powerful_legacy_items_are_not_common(self):
         expected = {
             "Экзоскелет": "legendary",

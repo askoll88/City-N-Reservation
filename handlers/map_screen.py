@@ -169,7 +169,7 @@ def _format_active_events(location_id: str) -> str:
     try:
         from game.limited_events import get_active_limited_event
 
-        limited = get_active_limited_event()
+        limited = get_active_limited_event(location_id=location_id)
         if limited:
             mins_left = max(0, int(limited.get("seconds_left", 0) or 0) // 60)
             parts.append(f"слух Зоны: {limited.get('name', 'Событие Зоны')} ~{mins_left} мин")

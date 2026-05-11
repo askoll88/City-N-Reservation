@@ -41,6 +41,35 @@ def luck_initiative_bonus(luck: int | float) -> int:
     return int(round(diminishing_bonus(luck, baseline=1, cap=6, scale=20)))
 
 
+def early_enemy_detection_chance(perception: int | float, luck: int | float) -> float:
+    """
+    Chance to spot an enemy before direct contact.
+
+    This is intentionally rare: a character at the practical stat cap
+    (100 perception and 100 luck) reaches 1/30 encounters. Lower values fall
+    off quadratically, so this remains a build bonus instead of a reliable skip.
+    """
+    max_chance = 1.0 / 30.0
+    perc = min(100.0, max(1.0, float(perception or 1)))
+    luck_value = min(100.0, max(1.0, float(luck or 1)))
+    perc_excess = max(0.0, perc - 4.0)
+    luck_excess = max(0.0, luck_value - 4.0)
+    if perc_excess <= 0 and luck_excess <= 0:
+        return 0.0
+
+    perc_curve = perc_excess / (perc_excess + 36.0)
+    luck_curve = luck_excess / (luck_excess + 44.0)
+    synergy = (perc_curve * luck_curve) ** 0.5 if perc_curve > 0 and luck_curve > 0 else 0.0
+    score = 0.55 * perc_curve + 0.30 * luck_curve + 0.15 * synergy
+
+    max_perc_curve = 96.0 / (96.0 + 36.0)
+    max_luck_curve = 96.0 / (96.0 + 44.0)
+    max_synergy = (max_perc_curve * max_luck_curve) ** 0.5
+    max_score = 0.55 * max_perc_curve + 0.30 * max_luck_curve + 0.15 * max_synergy
+    normalized = clamp(score / max_score, 0.0, 1.0)
+    return max_chance * (normalized ** 2.0)
+
+
 def luck_bleed_chance_bonus(luck: int | float) -> int:
     return int(round(diminishing_bonus(luck, baseline=1, cap=25, scale=20)))
 

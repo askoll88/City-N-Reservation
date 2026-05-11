@@ -115,6 +115,8 @@ ENABLE_PLAYER_CACHE = os.getenv('ENABLE_PLAYER_CACHE', 'false').lower() == 'true
 BOT_WORKERS = int(os.getenv('BOT_WORKERS', '8'))
 BOT_QUEUE_MAX = int(os.getenv('BOT_QUEUE_MAX', '2000'))
 BOT_QUEUE_PUT_TIMEOUT = float(os.getenv('BOT_QUEUE_PUT_TIMEOUT', '0.2'))
+BOT_USER_LOCK_TIMEOUT = float(os.getenv('BOT_USER_LOCK_TIMEOUT', '15'))
+BOT_SLOW_EVENT_LOG_SEC = float(os.getenv('BOT_SLOW_EVENT_LOG_SEC', '3'))
 
 # === Выброс (Emission) ===
 EMISSION_ENABLED = os.getenv('EMISSION_ENABLED', 'true').lower() == 'true'
@@ -139,10 +141,10 @@ EMISSION_BONUS_ARTIFACT_CHANCE = float(os.getenv('EMISSION_BONUS_ARTIFACT_CHANCE
 EMISSION_BONUS_RARE_ENEMY_CHANCE = float(os.getenv('EMISSION_BONUS_RARE_ENEMY_CHANCE', '0.35'))  # шанс редкого врага
 EMISSION_BONUS_COMBAT_REWARD_MULT = float(os.getenv('EMISSION_BONUS_COMBAT_REWARD_MULT', '1.30'))  # +30% к наградам за бой
 
-# === Ограниченные глобальные ивенты ===
+# === Ограниченные автоматические ивенты Зоны ===
 LIMITED_EVENTS_ENABLED = os.getenv('LIMITED_EVENTS_ENABLED', 'true').lower() == 'true'
-LIMITED_EVENT_MIN_INTERVAL_MINUTES = int(os.getenv('LIMITED_EVENT_MIN_INTERVAL_MINUTES', '300'))
-LIMITED_EVENT_MAX_INTERVAL_MINUTES = int(os.getenv('LIMITED_EVENT_MAX_INTERVAL_MINUTES', '540'))
+LIMITED_EVENT_MIN_INTERVAL_MINUTES = int(os.getenv('LIMITED_EVENT_MIN_INTERVAL_MINUTES', '1080'))
+LIMITED_EVENT_MAX_INTERVAL_MINUTES = int(os.getenv('LIMITED_EVENT_MAX_INTERVAL_MINUTES', '2160'))
 LIMITED_EVENT_ANNOUNCE_MINUTES = int(os.getenv('LIMITED_EVENT_ANNOUNCE_MINUTES', '15'))
 
 # "Тихие часы" — когда выброс НЕ запускается (по UTC)

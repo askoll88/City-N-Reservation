@@ -45,6 +45,31 @@ from game.weapon_progression import (
 )
 
 logger = logging.getLogger(__name__)
+_game_settings_value_text_checked = False
+
+RETIRED_TRASH_CASHBACK_SETTING = "retired_trash_cashback_v1"
+RETIRED_TRASH_ITEM_NAMES = (
+    "Ржавая гильза",
+    "Сломанный патрон",
+    "Пустая гильза",
+    "Ржавый болт",
+    "Обрывок проволоки",
+    "Грязная тряпка",
+    "Пустая банка",
+    "Пустая бутылка",
+    "Кость",
+    "Мокрая газета",
+    "Ржавая железка",
+    "Сломанный нож",
+    "Мёртвый артефакт",
+    "Суп с опилками",
+    "Патрон 5.45",
+    "Патрон 9мм",
+    "Зажигалка",
+    "Монета",
+    "Документ",
+    "Фотография",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -285,10 +310,11 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS game_settings (
                 key         VARCHAR(100) PRIMARY KEY,
-                value       VARCHAR(255) NOT NULL,
+                value       TEXT NOT NULL,
                 updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
             )
         """)
+        cursor.execute("ALTER TABLE game_settings ALTER COLUMN value TYPE TEXT")
 
         # -- market_listings ------------------------------------------------
         cursor.execute("""
@@ -573,6 +599,137 @@ def _seed_items():
     logger.info("Справочник предметов заполнен")
 
 
+def cleanup_retired_trash_items_cashback() -> list[dict]:
+    """
+    Единоразово убрать старый мелкий trash из инвентарей/шкафов и начислить
+    игрокам кешбэк по полной справочной цене предметов.
+
+    Возвращает список уведомлений:
+    {"vk_id": int, "items_removed": int, "cashback": int, "details": [(name, qty, subtotal), ...]}
+    """
+    retired_names = list(RETIRED_TRASH_ITEM_NAMES)
+    if not retired_names:
+        return []
+
+    notifications: list[dict] = []
+    with db_cursor() as (cursor, _):
+        cursor.execute(
+            "SELECT value FROM game_settings WHERE key = %s FOR UPDATE",
+            (RETIRED_TRASH_CASHBACK_SETTING,),
+        )
+        marker = cursor.fetchone()
+        if marker and str(marker.get("value") or "") == "done":
+            return []
+
+        cursor.execute(
+            """
+            SELECT u.vk_id, i.name, COALESCE(i.price, 0) AS price, SUM(src.quantity) AS quantity
+            FROM (
+                SELECT user_id, item_id, quantity FROM user_inventory
+                UNION ALL
+                SELECT user_id, item_id, quantity FROM user_storage
+                UNION ALL
+                SELECT u.id AS user_id, ml.item_id, ml.quantity
+                FROM market_listings ml
+                JOIN users u ON u.vk_id = ml.seller_vk_id
+                WHERE ml.status = 'active'
+            ) src
+            JOIN users u ON u.id = src.user_id
+            JOIN items i ON i.id = src.item_id
+            WHERE i.name = ANY(%s)
+            GROUP BY u.vk_id, i.name, i.price
+            ORDER BY u.vk_id, i.name
+            """,
+            (retired_names,),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+
+        by_user: dict[int, dict] = {}
+        for row in rows:
+            vk_id = int(row["vk_id"])
+            qty = max(0, int(row.get("quantity") or 0))
+            price = max(0, int(row.get("price") or 0))
+            if qty <= 0:
+                continue
+            subtotal = qty * price
+            data = by_user.setdefault(vk_id, {"vk_id": vk_id, "items_removed": 0, "cashback": 0, "details": []})
+            data["items_removed"] += qty
+            data["cashback"] += subtotal
+            data["details"].append((str(row["name"]), qty, subtotal))
+
+        cursor.execute(
+            """
+            DELETE FROM user_inventory ui
+            USING items i
+            WHERE i.id = ui.item_id AND i.name = ANY(%s)
+            """,
+            (retired_names,),
+        )
+        cursor.execute(
+            """
+            DELETE FROM user_storage us
+            USING items i
+            WHERE i.id = us.item_id AND i.name = ANY(%s)
+            """,
+            (retired_names,),
+        )
+        cursor.execute(
+            """
+            UPDATE market_listings ml
+            SET status = 'cancelled',
+                cancelled_at = NOW()
+            FROM items i
+            WHERE i.id = ml.item_id
+              AND i.name = ANY(%s)
+              AND ml.status = 'active'
+            """,
+            (retired_names,),
+        )
+
+        for data in by_user.values():
+            cashback = int(data["cashback"])
+            if cashback <= 0:
+                continue
+            cursor.execute(
+                """
+                UPDATE users
+                SET money = money + %s
+                WHERE vk_id = %s
+                """,
+                (cashback, int(data["vk_id"])),
+            )
+            notifications.append(data)
+
+        cursor.execute(
+            """
+            UPDATE items
+            SET category = 'retired',
+                drop_chance = 0,
+                location_drop_chances = '{}'::jsonb
+            WHERE name = ANY(%s)
+            """,
+            (retired_names,),
+        )
+        cursor.execute(
+            """
+            INSERT INTO game_settings (key, value)
+            VALUES (%s, 'done')
+            ON CONFLICT (key) DO UPDATE SET value = 'done', updated_at = NOW()
+            """,
+            (RETIRED_TRASH_CASHBACK_SETTING,),
+        )
+
+    if notifications:
+        logger.info(
+            "cleanup_retired_trash_items_cashback: users=%d cashback=%d items=%d",
+            len(notifications),
+            sum(int(n.get("cashback", 0) or 0) for n in notifications),
+            sum(int(n.get("items_removed", 0) or 0) for n in notifications),
+        )
+    _reset_items_cache()
+    return notifications
+
+
 def _weapon_material_flag_name(material_name: str) -> str:
     return f"wmat:{str(material_name or '').strip()}"
 
@@ -785,7 +942,6 @@ def _with_lore_description(name: str, category: str, description: str) -> str:
         base = f"{name}."
 
     overrides = {
-        "Суп с опилками": "Консерва без этикетки, от которой пахнет костром и железом. В Зоне такие банки не выбрасывают даже самые сытые.",
         "Гильза": "Тёплая латунная гильза, подобранная у свежего следа. В аномальных местах такая мелочь решает, вернёшься ли с добычей.",
         "Гильзы": "Стянутая резинкой связка гильз. Сталкеры берегут их как валюту риска у самой кромки аномалий.",
         "Душа": "Пульсирующий артефакт, от которого воздух становится плотнее. Про такие находки говорят шёпотом и прячут под тремя замками.",
@@ -2286,6 +2442,87 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
     }
 
 
+def sell_all_trash_transaction(vk_id: int, sell_bonus_pct: int = 0, merchant_id: str | None = None) -> dict:
+    """Атомарно продать весь хлам из инвентаря игрока."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден"}
+
+        cursor.execute(
+            """
+            SELECT ui.item_id, ui.quantity, i.name, i.price, i.category
+            FROM user_inventory ui
+            JOIN items i ON ui.item_id = i.id
+            WHERE ui.user_id = %s AND LOWER(i.category) = 'trash'
+            FOR UPDATE
+            """,
+            (user["id"],),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return {"success": False, "message": "В рюкзаке нет хлама для продажи."}
+
+        event_bonus_pct = _get_sell_event_bonus_pct(merchant_id, "trash")
+        total_mult = 1.0 + (sell_bonus_pct + event_bonus_pct) / 100.0
+        total_mult = _clamp(total_mult, config.SHOP_SELL_MULT_FLOOR, config.SHOP_SELL_MULT_CEIL)
+
+        total_price = 0
+        total_quantity = 0
+        sold_lines = []
+        item_ids = []
+        for row in rows:
+            quantity = max(0, int(row.get("quantity") or 0))
+            if quantity <= 0:
+                continue
+            unit_price = max(1, int((int(row.get("price") or 0) // 2) * total_mult))
+            total_price += unit_price * quantity
+            total_quantity += quantity
+            item_ids.append(row["item_id"])
+            sold_lines.append({
+                "name": row["name"],
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "total_price": unit_price * quantity,
+            })
+
+        if total_quantity <= 0 or total_price <= 0:
+            return {"success": False, "message": "В рюкзаке нет хлама для продажи."}
+
+        for item_id in item_ids:
+            cursor.execute(
+                "DELETE FROM user_inventory WHERE user_id = %s AND item_id = %s",
+                (user["id"], item_id),
+            )
+
+        cursor.execute(
+            """
+            UPDATE users
+            SET money = money + %s
+            WHERE id = %s
+            RETURNING money
+            """,
+            (total_price, user["id"]),
+        )
+        new_balance = int(cursor.fetchone()["money"])
+
+    bonuses = []
+    if sell_bonus_pct:
+        bonuses.append(f"+{sell_bonus_pct}% класс")
+    if event_bonus_pct:
+        bonuses.append(f"+{event_bonus_pct}% ивент")
+    bonus_msg = f" ({', '.join(bonuses)})" if bonuses else ""
+    return {
+        "success": True,
+        "message": f"Барыга забрал весь хлам: {total_quantity} шт. за {total_price} руб.{bonus_msg}",
+        "sell_price": total_price,
+        "sold_quantity": total_quantity,
+        "sold_items": sold_lines,
+        "remaining_money": new_balance,
+    }
+
+
 def _get_inventory_quantity_tx(cursor, user_id: int, item_name: str) -> tuple[int, int | None]:
     cursor.execute(
         """
@@ -2513,8 +2750,17 @@ def get_game_setting(key: str, default: str | None = None) -> str | None:
         return str(row["value"])
 
 
+def _ensure_game_settings_value_text(cursor) -> None:
+    global _game_settings_value_text_checked
+    if _game_settings_value_text_checked:
+        return
+    cursor.execute("ALTER TABLE game_settings ALTER COLUMN value TYPE TEXT")
+    _game_settings_value_text_checked = True
+
+
 def set_game_setting(key: str, value: str):
     with db_cursor() as (cursor, _):
+        _ensure_game_settings_value_text(cursor)
         cursor.execute("""
             INSERT INTO game_settings (key, value, updated_at)
             VALUES (%s, %s, NOW())

@@ -159,7 +159,7 @@ def _show_category(vk, user_id: int, category: str):
         "give": "📦 ВЫДАЧА\n\nВыдача/удаление предметов и статов:",
         "events": "🎲 ИВЕНТЫ\n\nУправление событиями и квестами:",
         "market": "🏪 МАРКЕТ\n\nУправление P2P рынком:",
-        "gacha": "🌀 РЕЗОНАНС ЗОНЫ\n\nТестовый доступ только для админов:\n"
+        "gacha": "🌀 РЕЗОНАНС ЗОНЫ\n\nГлобальное управление доступом:\n"
                  "• админ гача on|off\n"
                  "• админ гача статус\n"
                  "• админ гача осколки <vk_id> <кол-во>\n",
@@ -328,11 +328,14 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             msg = (
                 "🌐 ОГРАНИЧЕННЫЕ ИВЕНТЫ\n\n"
                 f"Активный: {active_id}\n"
+                f"Сектор: {st.get('active_scope_name') or '-'}\n"
                 f"Старт: {_fmt_ts_msk(st.get('active_start_ts', 0))} МСК\n"
                 f"Конец: {_fmt_ts_msk(st.get('active_end_ts', 0))} МСК\n"
                 f"Осталось: {int(st.get('active_seconds_left', 0)) // 60} мин\n\n"
                 f"Следующий: {st.get('next_event_id') or '-'}\n"
+                f"Сектор следующего: {st.get('next_scope_name') or '-'}\n"
                 f"Старт следующего: {_fmt_ts_msk(st.get('next_start_ts', 0))} МСК\n"
+                f"Сезонная ротация: {', '.join(st.get('seasonal_event_ids') or []) or '-'}\n"
                 f"Анонс отправлен: {'да' if st.get('announce_sent') else 'нет'}"
             )
         else:
@@ -340,8 +343,10 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                 "🌐 ОГРАНИЧЕННЫЕ ИВЕНТЫ\n\n"
                 "Активного ивента нет.\n\n"
                 f"Следующий: {st.get('next_event_id') or '-'}\n"
+                f"Сектор: {st.get('next_scope_name') or '-'}\n"
                 f"Старт: {_fmt_ts_msk(st.get('next_start_ts', 0))} МСК\n"
                 f"До старта: {int(st.get('next_seconds_left', 0)) // 60} мин\n"
+                f"Сезонная ротация: {', '.join(st.get('seasonal_event_ids') or []) or '-'}\n"
                 f"Анонс отправлен: {'да' if st.get('announce_sent') else 'нет'}"
             )
         _send(vk, user_id, msg, create_admin_events_keyboard()); return True
@@ -350,7 +355,8 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         catalog = get_limited_events_catalog()
         lines = ["Введи:\nадмин ивент старт <event_id>\n\nДоступные event_id:"]
         for row in catalog:
-            lines.append(f"• {row['id']} — {row['name']} ({row['duration_minutes']} мин)")
+            scopes = ", ".join(row.get("scope_ids") or [])
+            lines.append(f"• {row['id']} — {row['name']} ({row['duration_minutes']} мин, {scopes})")
         _send(vk, user_id, "\n".join(lines), create_admin_events_keyboard()); return True
     if text in {"⚡ резонанс", "☠️ хищники", "🎒 мародёры"}:
         from game.limited_events import force_start_limited_event
@@ -367,6 +373,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                 user_id,
                 (
                     f"✅ Ивент запущен: {result.get('event_id')} ({result.get('event_name')})\n"
+                    f"Сектор: {result.get('scope_name') or '-'}\n"
                     f"Длительность: {result.get('duration_minutes')} мин"
                 ),
                 create_admin_events_keyboard(),
@@ -433,7 +440,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     if text == "🟢 гача on":
         from game.gacha.service import set_resonance_enabled
         set_resonance_enabled(True)
-        _send(vk, user_id, "✅ Резонанс Зоны включён для админ-теста.", create_admin_gacha_keyboard()); return True
+        _send(vk, user_id, "✅ Резонанс Зоны включён для всех игроков.", create_admin_gacha_keyboard()); return True
     if text == "🔴 гача off":
         from game.gacha.service import set_resonance_enabled
         set_resonance_enabled(False)
@@ -441,7 +448,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
     if text == "📊 гача статус":
         from game.gacha.service import is_resonance_enabled
         status = "включён" if is_resonance_enabled() else "отключён"
-        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: только админы.", create_admin_gacha_keyboard()); return True
+        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: все игроки.", create_admin_gacha_keyboard()); return True
     if text == "📈 гача статистика":
         from game.gacha.service import get_current_banner_stats
         data = get_current_banner_stats()
@@ -484,14 +491,14 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         from game.gacha.service import set_resonance_enabled
         enabled = m.group(1) == "on"
         set_resonance_enabled(enabled)
-        message = "✅ Резонанс Зоны включён для админ-теста." if enabled else "⛔ Резонанс Зоны отключён."
+        message = "✅ Резонанс Зоны включён для всех игроков." if enabled else "⛔ Резонанс Зоны отключён."
         _send(vk, user_id, message, create_admin_gacha_keyboard()); return True
 
     m = re.match(r"^админ:?\s+гача\s+статус$", text)
     if m:
         from game.gacha.service import is_resonance_enabled
         status = "включён" if is_resonance_enabled() else "отключён"
-        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: только админы.", create_admin_gacha_keyboard()); return True
+        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: все игроки.", create_admin_gacha_keyboard()); return True
 
     m = re.match(r"^админ:?\s+гача\s+(статистика|стата|stats)$", text)
     if m:
@@ -704,11 +711,14 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             msg = (
                 "🌐 ОГРАНИЧЕННЫЕ ИВЕНТЫ\n\n"
                 f"Активный: {active_id}\n"
+                f"Сектор: {st.get('active_scope_name') or '-'}\n"
                 f"Старт: {_fmt_ts_msk(st.get('active_start_ts', 0))} МСК\n"
                 f"Конец: {_fmt_ts_msk(st.get('active_end_ts', 0))} МСК\n"
                 f"Осталось: {int(st.get('active_seconds_left', 0)) // 60} мин\n\n"
                 f"Следующий: {st.get('next_event_id') or '-'}\n"
+                f"Сектор следующего: {st.get('next_scope_name') or '-'}\n"
                 f"Старт следующего: {_fmt_ts_msk(st.get('next_start_ts', 0))} МСК\n"
+                f"Сезонная ротация: {', '.join(st.get('seasonal_event_ids') or []) or '-'}\n"
                 f"Анонс отправлен: {'да' if st.get('announce_sent') else 'нет'}"
             )
         else:
@@ -716,8 +726,10 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                 "🌐 ОГРАНИЧЕННЫЕ ИВЕНТЫ\n\n"
                 "Активного ивента нет.\n\n"
                 f"Следующий: {st.get('next_event_id') or '-'}\n"
+                f"Сектор: {st.get('next_scope_name') or '-'}\n"
                 f"Старт: {_fmt_ts_msk(st.get('next_start_ts', 0))} МСК\n"
                 f"До старта: {int(st.get('next_seconds_left', 0)) // 60} мин\n"
+                f"Сезонная ротация: {', '.join(st.get('seasonal_event_ids') or []) or '-'}\n"
                 f"Анонс отправлен: {'да' if st.get('announce_sent') else 'нет'}"
             )
         _send(vk, user_id, msg, create_admin_events_keyboard()); return True
@@ -728,7 +740,8 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         catalog = get_limited_events_catalog()
         lines = ["🌐 ДОСТУПНЫЕ LIMITED EVENT ID\n"]
         for row in catalog:
-            lines.append(f"• {row['id']} — {row['name']} ({row['duration_minutes']} мин)")
+            scopes = ", ".join(row.get("scope_ids") or [])
+            lines.append(f"• {row['id']} — {row['name']} ({row['duration_minutes']} мин, {scopes})")
         _send(vk, user_id, "\n".join(lines), create_admin_events_keyboard()); return True
 
     m = re.match(r"^админ\s+ивент\s+старт\s+([a-z0-9_\\-]+)$", text)
@@ -742,6 +755,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                 user_id,
                 (
                     f"✅ Ивент запущен: {result.get('event_id')} ({result.get('event_name')})\n"
+                    f"Сектор: {result.get('scope_name') or '-'}\n"
                     f"Длительность: {result.get('duration_minutes')} мин"
                 ),
                 create_admin_events_keyboard(),

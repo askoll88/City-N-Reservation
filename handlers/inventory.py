@@ -2,6 +2,7 @@
 Обработчики инвентаря
 """
 from __future__ import annotations
+from collections import Counter
 import threading
 
 from infra import database
@@ -203,12 +204,13 @@ def _send_shop_screen(vk, user_id: int, message: str, keyboard=None, *, view: st
 
 def _iter_all_inventory_items(player) -> list[dict]:
     return (
-        player.inventory.weapons +
-        player.inventory.armor +
-        player.inventory.backpacks +
-        player.inventory.artifacts +
-        player.inventory.shells_bags +
-        player.inventory.other
+        (getattr(player.inventory, "weapons", []) or []) +
+        (getattr(player.inventory, "armor", []) or []) +
+        (getattr(player.inventory, "backpacks", []) or []) +
+        (getattr(player.inventory, "artifacts", []) or []) +
+        (getattr(player.inventory, "shells_bags", []) or []) +
+        (getattr(player.inventory, "trash", []) or []) +
+        (getattr(player.inventory, "other", []) or [])
     )
 
 
@@ -271,6 +273,7 @@ def build_item_details(item: dict) -> str:
         "backpacks": "Рюкзак",
         "artifacts": "Артефакт",
         "shells_bag": "Мешочек",
+        "trash": "Хлам",
     }.get(category, "Предмет")
 
     lines = [ui.title(f"Осмотр: {name}")]
@@ -351,6 +354,8 @@ def _get_inventory_item_by_target(player, target: str) -> tuple[dict | None, str
             items = equipped + player.inventory.artifacts
         elif section == "other":
             items = player.inventory.other
+        elif section == "trash":
+            items = getattr(player.inventory, "trash", []) or []
         else:
             items = _iter_all_inventory_items(player)
 
@@ -388,6 +393,7 @@ def handle_inventory_digit(player, text: str, vk, user_id: int) -> bool:
         'weapons': _equip_weapon,
         'armor': _equip_armor,
         'backpacks': _equip_backpack,
+        'trash': _inspect_trash_item,
         'other': _use_item,
     }
     
@@ -418,6 +424,28 @@ def handle_inspect_item(player, target: str, vk, user_id: int):
     keyboard = create_inventory_keyboard().get_keyboard() if player.current_location_id == "инвентарь" else create_location_keyboard(player.current_location_id).get_keyboard()
     attachment = upload_item_image(vk, user_id, item.get("name"))
     vk_messages.send(vk, user_id=user_id, message=details, keyboard=keyboard, attachment=attachment)
+
+
+def _inspect_trash_item(player, index: int, vk, user_id: int) -> bool:
+    """Цифра в разделе хлама открывает описание, а не пытается использовать предмет."""
+    from main import create_inventory_keyboard
+
+    player.inventory.reload()
+    trash_items = getattr(player.inventory, "trash", []) or []
+    if index >= len(trash_items):
+        vk.messages.send(user_id=user_id, message="Нет хлама с таким номером.", random_id=0)
+        return True
+
+    item = trash_items[index]
+    full = database.get_item_by_name(item["name"])
+    details = build_item_details({**(full or {}), **item})
+    vk.messages.send(
+        user_id=user_id,
+        message=details,
+        keyboard=create_inventory_keyboard().get_keyboard(),
+        random_id=0,
+    )
+    return True
 
 
 def _equip_weapon(player, index: int, vk, user_id: int) -> bool:
@@ -852,6 +880,37 @@ def show_other(player, vk, user_id: int, page: int = 0):
     )
 
 
+def show_trash(player, vk, user_id: int, page: int = 0):
+    """Показать хлам отдельно от рабочих предметов и ресурсов."""
+    from infra import database
+
+    player.inventory_section = 'trash'
+    database.update_user_stats(user_id, inventory_section='trash')
+
+    items = getattr(player.inventory, "trash", []) or []
+    safe_page, total_pages, start, end = _page_bounds(len(items), page)
+    if items:
+        msg = _screen_header("Инвентарь: хлам", player) + "\n" + _page_prefix(safe_page, total_pages)
+        for idx, item in enumerate(items[start:end], start + 1):
+            price = int(item.get("price", 0) or 0)
+            stats = ["можно продать"]
+            if price:
+                stats.append(f"цена {price} руб.")
+            msg += _inventory_card(idx, item, "🧹", stats, default_weight=0.1)
+        msg += _screen_footer("осмотреть")
+    else:
+        msg = _screen_header("Инвентарь: хлам", player) + "\nПусто."
+
+    _send_inventory_screen(
+        vk,
+        user_id,
+        msg,
+        keyboard=_inventory_hud_keyboard("trash", safe_page, total_pages),
+        section="trash",
+        page=safe_page,
+    )
+
+
 def show_resources_shop(player, vk, user_id: int):
     """Показать ресурсы в магазине (гильзы)"""
     from infra import database as db
@@ -917,6 +976,7 @@ def show_all(player, vk, user_id: int, page: int = 0):
         + f"🛡️ Броня: {len(player.inventory.armor)}\n"
         + f"🎒 Рюкзаки: {len(player.inventory.backpacks)}\n"
         + f"🔮 Артефакты: {len(player.inventory.artifacts)} (экип: {len(player.equipped_artifacts)}/{player.artifact_slots})\n"
+        + f"🧹 Хлам: {len(getattr(player.inventory, 'trash', []) or [])}\n"
         + f"📦 Другое: {len(player.inventory.other)}\n"
         + "\n"
         + ui.section("Подсказка")
@@ -939,6 +999,7 @@ def show_inventory_section(player, vk, user_id: int, section: str, page: int = 0
         "armor": show_armor,
         "backpacks": show_backpacks,
         "artifacts": show_artifacts,
+        "trash": show_trash,
         "other": show_other,
         "all": show_all,
     }
@@ -1140,6 +1201,32 @@ def handle_sell_item(player, item_name: str, vk, user_id: int):
     context = "\n\nСкупка обновлена ниже." if success and shop_data.get("sell_all") else ""
     vk.messages.send(user_id=user_id, message=f"{msg}{context}", random_id=0)
     if success and shop_data.get("sell_all"):
+        show_trader_sell_all(player, vk, user_id, page=int(shop_data.get("page", 0) or 0))
+
+
+def handle_sell_all_trash(player, vk, user_id: int):
+    """Продать весь хлам в скупке Барыги одним действием."""
+    from handlers.quests import track_quest_shop_sell
+
+    shop_data = get_shop_cache_data(user_id)
+    merchant_id = shop_data.get("merchant") or database.NPC_MERCHANT_TRADER
+    result = database.sell_all_trash_transaction(
+        user_id,
+        sell_bonus_pct=player.sell_bonus,
+        merchant_id=merchant_id,
+    )
+
+    if result.get("success"):
+        track_quest_shop_sell(user_id, vk=vk)
+        player.money = int(result.get("remaining_money", player.money) or player.money)
+        player.inventory.reload()
+
+    msg = result.get("message") or "Не удалось продать хлам."
+    if result.get("success"):
+        msg += f"\nДенег: {player.money} руб.\n\nСкупка обновлена ниже."
+    vk.messages.send(user_id=user_id, message=msg, random_id=0)
+
+    if shop_data.get("sell_all"):
         show_trader_sell_all(player, vk, user_id, page=int(shop_data.get("page", 0) or 0))
 
 
@@ -1361,6 +1448,7 @@ def handle_drop_item(player, item_name: str, vk, user_id: int):
         player.inventory.artifacts +
         player.inventory.backpacks +
         player.inventory.shells_bags +
+        (getattr(player.inventory, "trash", []) or []) +
         player.inventory.other
     )
 
@@ -1466,6 +1554,8 @@ def handle_drop_item_by_index(player, index: int, vk, user_id: int):
         elif section == 'artifacts':
             equipped = [{"name": name, "category": "artifacts"} for name in player.equipped_artifacts]
             items = equipped + player.inventory.artifacts
+        elif section == 'trash':
+            items = getattr(player.inventory, "trash", []) or []
         elif section == 'other':
             items = player.inventory.other
         else:
@@ -1551,6 +1641,8 @@ def handle_drop_item_by_index(player, index: int, vk, user_id: int):
             show_backpacks(player, vk, user_id)
         elif section == 'artifacts':
             show_artifacts(player, vk, user_id)
+        elif section == 'trash':
+            show_trash(player, vk, user_id)
         else:
             show_other(player, vk, user_id)
 
@@ -1616,8 +1708,8 @@ def _get_shop_item_by_number_any(user_id: int, number: int, keys: tuple[str, ...
     return None, None
 
 
-def _equipped_item_names(player) -> set[str]:
-    equipped = {
+def _equipped_item_counts(player) -> Counter[str]:
+    names = [
         getattr(player, "equipped_weapon", None),
         getattr(player, "equipped_armor", None),
         getattr(player, "equipped_armor_head", None),
@@ -1627,16 +1719,17 @@ def _equipped_item_names(player) -> set[str]:
         getattr(player, "equipped_armor_feet", None),
         getattr(player, "equipped_backpack", None),
         getattr(player, "equipped_device", None),
-    }
-    equipped.update(getattr(player, "equipped_artifacts", []) or [])
-    return {str(name).strip() for name in equipped if name}
+    ]
+    names.extend(getattr(player, "equipped_artifacts", []) or [])
+    return Counter(str(name).strip() for name in names if name)
 
 
 def _is_sellable_shop_item(player, item: dict) -> bool:
     name = str((item or {}).get("name") or "").strip()
-    if not name or int((item or {}).get("quantity", 0) or 0) <= 0:
+    quantity = int((item or {}).get("quantity", 0) or 0)
+    if not name or quantity <= 0:
         return False
-    if name in _equipped_item_names(player):
+    if quantity <= _equipped_item_counts(player).get(name, 0):
         return False
     try:
         from game.gacha.event_items import is_gacha_event_item
@@ -2181,6 +2274,7 @@ def show_trader_sell_all(player, vk, user_id: int, page: int = 0):
             (getattr(player.inventory, "food", []) or []) +
             (getattr(player.inventory, "consumables", []) or []) +
             (getattr(player.inventory, "resources", []) or []) +
+            (getattr(player.inventory, "trash", []) or []) +
             (player.inventory.other or [])
         )
         sellables = [i for i in sellables if _is_sellable_shop_item(player, i)]

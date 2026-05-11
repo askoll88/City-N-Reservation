@@ -20,6 +20,7 @@ from game.constants import (
     LOCATION_DROP_BALANCE_RULES,
 )
 from game.stat_balance import (
+    early_enemy_detection_chance,
     luck_bleed_chance_bonus,
     luck_bleed_damage_bonus,
     luck_initiative_bonus,
@@ -44,6 +45,9 @@ PRECISE_ANOMALY_SHELL_COST = 3
 PRECISE_ANOMALY_CHANCE_MULT = 1.35
 COMBAT_DECOY_SHELL_COST = 2
 COMBAT_DECOY_DAMAGE_MULT = 0.5
+EARLY_DETECTION_INITIATIVE_BONUS = 4
+EARLY_DETECTION_PENDING_TTL = 180
+_early_enemy_state = {}  # {user_id: {"pending_id": str, "created_at": ts, "enemy": dict, ...}}
 
 
 def _send_combat_screen(vk, user_id: int, message: str, keyboard=None):
@@ -179,7 +183,6 @@ ANOMALY_GUARANTEE_FLAG = "research_no_anomaly_streak"
 # Без детектора можно "влететь" в аномалию и потерять ресурсы.
 ANOMALY_BLIND_MISSTEP_CHANCE = 10
 ANOMALY_BLIND_ITEM_LOSS_CHANCE = 45
-SAWDUST_SOUP_RESEARCH_DROP_CHANCE = 2  # 2% среди событий "предмет": очень редкий странный лут
 RESEARCH_ITEM_EVENT_WEIGHT_MULT = 1.65
 
 
@@ -616,17 +619,20 @@ def _build_research_modifiers_info(location_id: str, time_sec: int, user_id: int
         lines.append(f"• После выброса: 💎 +{artifact_bonus}% к шансу артефакта")
         lines.append(f"• После выброса: ☣️ шанс редкого врага {rare_enemy_bonus}%")
 
-    limited = get_active_limited_event()
+    limited = get_active_limited_event(location_id=location_id)
     if limited:
-        mods = get_limited_event_modifiers()
+        mods = get_limited_event_modifiers(location_id=location_id)
         find_bonus = int(round((mods.get("research_find_mult", 1.0) - 1.0) * 100))
         danger_bonus = int(round((mods.get("research_danger_mult", 1.0) - 1.0) * 100))
         art_bonus = int(round((mods.get("artifact_event_mult", 1.0) - 1.0) * 100))
         enemy_bonus = int(round((mods.get("enemy_event_mult", 1.0) - 1.0) * 100))
         mins_left = max(0, int(limited.get("seconds_left", 0)) // 60)
-        lines.append(f"• Глобальный ивент: {limited.get('name')} (ещё ~{mins_left} мин)")
         lines.append(
-            f"• Глобальный ивент: 🔍 {find_bonus:+d}% | ⚠️ {danger_bonus:+d}% | "
+            f"• Локальный ивент: {limited.get('name')} "
+            f"({limited.get('scope_name', 'сектор Зоны')}, ещё ~{mins_left} мин)"
+        )
+        lines.append(
+            f"• Локальный ивент: 🔍 {find_bonus:+d}% | ⚠️ {danger_bonus:+d}% | "
             f"💎 {art_bonus:+d}% | 👾 {enemy_bonus:+d}%"
         )
 
@@ -850,7 +856,7 @@ def _scale_enemy_for_fixed_level(
     }
 
 
-def _roll_initiative(player, enemy_speed: int) -> dict:
+def _roll_initiative(player, enemy_speed: int, player_bonus: int = 0) -> dict:
     """Бросок инициативы d20 + модификаторы."""
     player_perception = int(getattr(player, "effective_perception", getattr(player, "perception", 0)) or 0)
     player_luck = int(getattr(player, "effective_luck", getattr(player, "luck", 0)) or 0)
@@ -858,7 +864,7 @@ def _roll_initiative(player, enemy_speed: int) -> dict:
     player_roll = random.randint(1, 20)
     enemy_roll = random.randint(1, 20)
 
-    player_total = player_roll + player_perception // 2 + luck_initiative_bonus(player_luck)
+    player_total = player_roll + player_perception // 2 + luck_initiative_bonus(player_luck) + int(player_bonus or 0)
     enemy_total = enemy_roll + enemy_speed
 
     player_first = player_total >= enemy_total
@@ -869,7 +875,73 @@ def _roll_initiative(player, enemy_speed: int) -> dict:
         "player_total": player_total,
         "enemy_total": enemy_total,
         "player_first": player_first,
+        "player_bonus": int(player_bonus or 0),
     }
+
+
+def _roll_early_enemy_detection(player) -> dict:
+    perception = int(getattr(player, "effective_perception", getattr(player, "perception", 1)) or 1)
+    luck = int(getattr(player, "effective_luck", getattr(player, "luck", 1)) or 1)
+    chance = early_enemy_detection_chance(perception, luck)
+    roll = random.random()
+    return {
+        "perception": perception,
+        "luck": luck,
+        "chance": chance,
+        "roll": roll,
+        "detected": roll < chance,
+    }
+
+
+def _create_early_detection_keyboard(pending_id: str):
+    from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+
+    keyboard = VkKeyboard(one_time=False, inline=True)
+    keyboard.add_callback_button(
+        "Напасть",
+        color=VkKeyboardColor.POSITIVE,
+        payload={"command": "early_enemy", "action": "attack", "pending_id": pending_id},
+    )
+    keyboard.add_callback_button(
+        "Сбежать",
+        color=VkKeyboardColor.NEGATIVE,
+        payload={"command": "early_enemy", "action": "flee", "pending_id": pending_id},
+    )
+    return keyboard
+
+
+def _show_early_enemy_detection(player, vk, user_id: int, scaled_enemy: dict, enemy_stat_mult: float, active_limited: dict | None, detection: dict) -> bool:
+    pending_id = f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+    _early_enemy_state[user_id] = {
+        "pending_id": pending_id,
+        "created_at": time.time(),
+        "enemy": dict(scaled_enemy),
+        "enemy_stat_mult": float(enemy_stat_mult or 1.0),
+        "active_limited": dict(active_limited or {}),
+        "location_id": player.current_location_id,
+        "detection": dict(detection),
+    }
+    _hide_lower_keyboard_for_combat(vk, user_id)
+    chance_pct = detection["chance"] * 100.0
+    message = (
+        f"{ui.title('Ранний контакт')}\n\n"
+        f"Ты заметил движение раньше, чем оно стало засадой: {scaled_enemy['enemy_name']} ещё не вышел на удобную дистанцию.\n\n"
+        f"{ui.section('Угроза')}\n"
+        f"Опасность: L{scaled_enemy['enemy_level']} | Поведение: {scaled_enemy['enemy_role_label']}\n"
+        f"HP: {scaled_enemy['enemy_hp']} | Урон: {scaled_enemy['enemy_damage']}\n\n"
+        f"{ui.section('Обнаружение')}\n"
+        f"Восприятие: {detection['perception']} | Удача: {detection['luck']}\n"
+        f"Шанс раннего обнаружения: {chance_pct:.2f}%\n\n"
+        "Можно ударить первым по позиции или тихо обойти контакт. Если обойдёшь, противник не нападёт."
+    )
+    try_edit_or_send_ui(
+        vk,
+        user_id,
+        "early_enemy",
+        message,
+        keyboard=_create_early_detection_keyboard(pending_id).get_keyboard(),
+    )
+    return True
 
 
 def _create_hp_bar(current: int, max_val: int, bar_length: int = 10) -> str:
@@ -1392,7 +1464,7 @@ def _select_research_event_by_chance(
     loc_danger_mult = get_danger_mult(location_id) if location_id else 1.0
     loc_event_weights = get_event_weights(location_id) if location_id else {}
     loop_event_weights = get_region_loop_event_weights(user_id, location_id) if location_id else {}
-    limited_mods = get_limited_event_modifiers()
+    limited_mods = get_limited_event_modifiers(location_id=location_id)
     limited_find_mult = float(limited_mods.get("research_find_mult", 1.0) or 1.0)
     limited_danger_mult = float(limited_mods.get("research_danger_mult", 1.0) or 1.0)
     limited_artifact_mult = float(limited_mods.get("artifact_event_mult", 1.0) or 1.0)
@@ -2795,43 +2867,21 @@ def handle_explore(player, vk, user_id: int):
     show_explore_menu(player, vk, user_id)
 
 
-def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: bool = True):
-    """Спавн врага"""
+def _start_combat_with_scaled_enemy(
+    player,
+    vk,
+    user_id: int,
+    scaled_enemy: dict,
+    enemy_stat_mult: float,
+    active_limited: dict | None = None,
+    *,
+    initiative_bonus: int = 0,
+    opening_note: str | None = None,
+) -> bool:
+    """Создать состояние боя из уже рассчитанного врага."""
     _combat_state, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
-    from game.emission import is_emission_rare_enemy_bonus
-    from game.limited_events import get_limited_event_modifiers, get_active_limited_event
 
-    # Если указан тип врага - используем его, иначе - случайный для локации
-    if enemy_type:
-        # В приоритете враг нужного типа в ТЕКУЩЕЙ локации.
-        enemy = _get_enemy_by_type_for_location(player.current_location_id, enemy_type)
-        if not enemy:
-            enemy = enemies.get_enemy_by_type(enemy_type)
-    else:
-        enemy = enemies.get_enemy_for_location(player.current_location_id)
-        # Бонус aftermath: повышенный шанс встречи с редким/сильным мутантом.
-        if is_emission_rare_enemy_bonus():
-            loc_enemies = enemies.ENEMIES.get(player.current_location_id, [])
-            if loc_enemies:
-                enemy = max(loc_enemies, key=lambda e: (e.get("hp", 0), e.get("damage", 0)))
-
-    if not enemy:
-        return
-
-    scaled_enemy = _scale_enemy_for_player(
-        player,
-        enemy,
-        player.current_location_id,
-        allow_elite=allow_elite,
-    )
-    limited_mods = get_limited_event_modifiers()
-    enemy_stat_mult = max(0.7, float(limited_mods.get("enemy_stat_mult", 1.0) or 1.0))
-    if abs(enemy_stat_mult - 1.0) > 0.01:
-        scaled_enemy["enemy_hp"] = max(10, int(scaled_enemy["enemy_hp"] * enemy_stat_mult))
-        scaled_enemy["enemy_max_hp"] = scaled_enemy["enemy_hp"]
-        scaled_enemy["enemy_damage"] = max(1, int(scaled_enemy["enemy_damage"] * enemy_stat_mult))
-
-    initiative = _roll_initiative(player, scaled_enemy["enemy_speed"])
+    initiative = _roll_initiative(player, scaled_enemy["enemy_speed"], player_bonus=initiative_bonus)
     _hide_lower_keyboard_for_combat(vk, user_id)
 
     # Сохраняем состояние боя
@@ -2854,6 +2904,7 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
         'reward_mult': scaled_enemy['reward_mult'],
         'initiative_player': initiative['player_total'],
         'initiative_enemy': initiative['enemy_total'],
+        'initiative_bonus': initiative_bonus,
         'turn': 'player',
         'location_id': player.current_location_id,
     }
@@ -2878,6 +2929,8 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
         f"Ты: d20({initiative['player_roll']}) → {initiative['player_total']}\n"
         f"Враг: d20({initiative['enemy_roll']}) → {initiative['enemy_total']}\n"
     )
+    if opening_note:
+        message += f"{opening_note}\n"
 
     if not initiative["player_first"]:
         enemy_damage = _combat_state[user_id]['enemy_damage']
@@ -2924,7 +2977,6 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
     else:
         message += "\n✅ Ты среагировал быстрее и держишь первый ход.\n"
 
-    active_limited = get_active_limited_event()
     if active_limited and abs(enemy_stat_mult - 1.0) > 0.01:
         pct = int(round((enemy_stat_mult - 1.0) * 100))
         message += f"\n🌐 Ивент «{active_limited.get('name')}»: параметры врага {pct:+d}%\n"
@@ -2934,6 +2986,122 @@ def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: 
     keyboard = create_combat_keyboard(player, user_id)
 
     _send_combat_screen(vk, user_id, message, keyboard=keyboard.get_keyboard())
+    return True
+
+
+def _spawn_enemy(player, vk, user_id: int, enemy_type: str = None, allow_elite: bool = True, allow_early_detection: bool = True):
+    """Спавн врага"""
+    from game.emission import is_emission_rare_enemy_bonus
+    from game.limited_events import get_limited_event_modifiers, get_active_limited_event
+
+    # Если указан тип врага - используем его, иначе - случайный для локации
+    if enemy_type:
+        # В приоритете враг нужного типа в ТЕКУЩЕЙ локации.
+        enemy = _get_enemy_by_type_for_location(player.current_location_id, enemy_type)
+        if not enemy:
+            enemy = enemies.get_enemy_by_type(enemy_type)
+    else:
+        enemy = enemies.get_enemy_for_location(player.current_location_id)
+        # Бонус aftermath: повышенный шанс встречи с редким/сильным мутантом.
+        if is_emission_rare_enemy_bonus():
+            loc_enemies = enemies.ENEMIES.get(player.current_location_id, [])
+            if loc_enemies:
+                enemy = max(loc_enemies, key=lambda e: (e.get("hp", 0), e.get("damage", 0)))
+
+    if not enemy:
+        return False
+
+    scaled_enemy = _scale_enemy_for_player(
+        player,
+        enemy,
+        player.current_location_id,
+        allow_elite=allow_elite,
+    )
+    limited_mods = get_limited_event_modifiers(location_id=player.current_location_id)
+    enemy_stat_mult = max(0.7, float(limited_mods.get("enemy_stat_mult", 1.0) or 1.0))
+    if abs(enemy_stat_mult - 1.0) > 0.01:
+        scaled_enemy["enemy_hp"] = max(10, int(scaled_enemy["enemy_hp"] * enemy_stat_mult))
+        scaled_enemy["enemy_max_hp"] = scaled_enemy["enemy_hp"]
+        scaled_enemy["enemy_damage"] = max(1, int(scaled_enemy["enemy_damage"] * enemy_stat_mult))
+
+    active_limited = get_active_limited_event(location_id=player.current_location_id)
+    detection = _roll_early_enemy_detection(player)
+    if allow_early_detection and detection["detected"]:
+        _combat_log(
+            "enemy_early_detected",
+            user_id,
+            player,
+            scaled_enemy,
+            detection=detection,
+            enemy_stat_mult=enemy_stat_mult,
+        )
+        return _show_early_enemy_detection(player, vk, user_id, scaled_enemy, enemy_stat_mult, active_limited, detection)
+
+    return _start_combat_with_scaled_enemy(
+        player,
+        vk,
+        user_id,
+        scaled_enemy,
+        enemy_stat_mult,
+        active_limited,
+    )
+
+
+def handle_early_enemy_callback(player, vk, user_id: int, payload: dict) -> bool:
+    """Обработать выбор после раннего обнаружения врага."""
+    if payload.get("command") != "early_enemy":
+        return False
+
+    pending = _early_enemy_state.get(user_id)
+    pending_id = str(payload.get("pending_id") or "")
+    if not pending or pending.get("pending_id") != pending_id:
+        vk.messages.send(user_id=user_id, message="Контакт уже потерян.", random_id=0)
+        return True
+
+    if time.time() - float(pending.get("created_at", 0) or 0) > EARLY_DETECTION_PENDING_TTL:
+        _early_enemy_state.pop(user_id, None)
+        vk.messages.send(user_id=user_id, message="Следы ушли в шум Зоны. Контакт потерян.", random_id=0)
+        return True
+
+    action = str(payload.get("action") or "").strip().lower()
+    if action == "flee":
+        _combat_state, create_location_keyboard, VkKeyboard, VkKeyboardColor = _get_main_imports()
+        _early_enemy_state.pop(user_id, None)
+        _combat_log(
+            "enemy_early_avoided",
+            user_id,
+            player,
+            pending.get("enemy"),
+            detection=pending.get("detection"),
+        )
+        vk.messages.send(
+            user_id=user_id,
+            message="Ты обошёл контакт по дуге. Противник так и не понял, что его заметили.",
+            keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
+            random_id=0,
+        )
+        return True
+
+    if action != "attack":
+        vk.messages.send(user_id=user_id, message="Действие устарело.", random_id=0)
+        return True
+
+    _early_enemy_state.pop(user_id, None)
+    original_location = player.current_location_id
+    player.current_location_id = pending.get("location_id") or original_location
+    try:
+        return _start_combat_with_scaled_enemy(
+            player,
+            vk,
+            user_id,
+            pending["enemy"],
+            float(pending.get("enemy_stat_mult", 1.0) or 1.0),
+            pending.get("active_limited") or None,
+            initiative_bonus=EARLY_DETECTION_INITIATIVE_BONUS,
+            opening_note=f"Раннее обнаружение: +{EARLY_DETECTION_INITIATIVE_BONUS} к твоей инициативе.",
+        )
+    finally:
+        player.current_location_id = original_location
 
 
 def _build_dungeon_wave(player, user_id: int, dungeon_run: dict) -> tuple[dict | None, str | None]:
@@ -3038,28 +3206,6 @@ def _spawn_item(player, vk, user_id: int):
     _combat_state, create_location_keyboard, _, _ = _get_main_imports()
     from game.location_mechanics import get_location_loot_bias, get_location_loot_bias_chance
 
-    if random.randint(1, 100) <= SAWDUST_SOUP_RESEARCH_DROP_CHANCE:
-        soup = database.get_item_by_name("Суп с опилками")
-        if soup:
-            item_weight = soup.get('weight', 0.3)
-            current_weight = player.inventory.total_weight
-            if current_weight + item_weight <= player.max_weight:
-                database.add_item_to_inventory(user_id, soup['name'], 1)
-                player.inventory.reload()
-                vk.messages.send(
-                    user_id=user_id,
-                    message=(
-                        "🥫 СТРАННАЯ НАХОДКА\n\n"
-                        "В закопчённой жестянке обнаружился запас, который выглядит как шутка старого повара Зоны.\n\n"
-                        f"📦 Найдено: {soup['name']}\n"
-                        f"{soup.get('description', 'Описание на банке стёрто.')}\n"
-                        f"Вес: {item_weight}кг"
-                    ),
-                    keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
-                    random_id=0
-                )
-                return
-
     # Проверяем бонус локации
     bias_items = get_location_loot_bias(player.current_location_id)
     bias_chance = get_location_loot_bias_chance(player.current_location_id)
@@ -3133,11 +3279,11 @@ def _spawn_item(player, vk, user_id: int):
 
     lvl = max(1, int(getattr(player, "level", 1) or 1))
     if lvl <= 10:
-        categories = ['meds', 'consumables', 'food', 'other', 'trash', 'weapons', 'armor', 'artifacts']
-        weights = [10, 8, 6, 8, 42, 9, 7, 3]
+        categories = ['meds', 'consumables', 'food', 'other', 'resources', 'trash', 'weapons', 'armor', 'artifacts']
+        weights = [12, 10, 7, 8, 18, 8, 10, 8, 4]
     else:
-        categories = ['weapons', 'armor', 'artifacts', 'other', 'trash', 'meds', 'consumables', 'food']
-        weights = [11, 10, 9, 8, 44, 7, 6, 5]
+        categories = ['weapons', 'armor', 'artifacts', 'other', 'resources', 'trash', 'meds', 'consumables', 'food']
+        weights = [12, 11, 10, 8, 18, 7, 7, 6, 5]
 
     weighted_categories = list(zip(categories, weights))
     primary_category = random.choices(categories, weights=weights, k=1)[0]
@@ -3450,7 +3596,7 @@ def show_skills_in_combat(player, vk, user_id):
         _send_combat_screen(
             vk,
             user_id,
-            "⚡ У тебя нет класса!\n\nСначала получи класс у Наставника в Убежище.",
+            "⚡ У тебя нет класса!\n\nСначала получи класс у Инструктора классов в Убежище.",
             keyboard=create_combat_keyboard(player, user_id).get_keyboard(),
         )
         return
@@ -4530,7 +4676,7 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
     reward_mult = max(1.0, float(combat.get("reward_mult", 1.0)))
     if is_emission_aftermath_active():
         reward_mult *= max(1.0, float(getattr(config, "EMISSION_BONUS_COMBAT_REWARD_MULT", 1.0) or 1.0))
-    limited_mods = get_limited_event_modifiers()
+    limited_mods = get_limited_event_modifiers(location_id=combat.get("location_id"))
     event_reward_mult = max(0.5, float(limited_mods.get("combat_reward_mult", 1.0) or 1.0))
     reward_mult *= event_reward_mult
     base_xp = _scale_xp_reward(
@@ -4585,7 +4731,7 @@ def _handle_victory(player, combat, user_id: int, vk=None) -> str:
         message += f"\n{level_up}\n"
     if reward_mult > 1.0:
         message += f"⚖️ Множитель сложности: x{reward_mult:.2f}\n"
-    active_limited = get_active_limited_event()
+    active_limited = get_active_limited_event(location_id=combat.get("location_id"))
     if active_limited and abs(event_reward_mult - 1.0) > 0.01:
         message += f"🌐 Ивент «{active_limited.get('name')}»: награда x{event_reward_mult:.2f}\n"
     from game.gacha.service import grant_combat_shards

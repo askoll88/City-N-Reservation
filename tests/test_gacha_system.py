@@ -10,6 +10,7 @@ from game.gacha.event_items import (
     format_event_outfit_passive_stats,
     get_event_item_lore,
     get_event_outfit_passive_profile,
+    get_event_outfit_set_bonus,
     is_gacha_event_item,
     is_ssr_event_item,
 )
@@ -21,10 +22,13 @@ from game.gacha.ui import (
     format_history,
     format_rates,
     format_resonance_menu,
+    handle_resonance_command,
+    _send_pull_result,
 )
 from handlers.inventory import build_item_details
 from handlers.keyboards import create_location_keyboard
 from infra import database
+from game.item_pool import ITEMS_POOL
 from game.weapon_progression import calc_weapon_attack, normalize_weapon_rank
 
 
@@ -33,21 +37,100 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(banners.SINGLE_PULL_COST, 160)
         self.assertEqual(banners.TEN_PULL_COST, 1600)
         self.assertEqual(banners.BANNER_DURATION_DAYS, 20)
+        self.assertEqual(banners.BANNER_PHASES_PER_PATCH, 2)
+        self.assertEqual(banners.BANNER_PATCH_DURATION_DAYS, 40)
 
     def test_banner_time_left_is_formatted_to_seconds(self):
         self.assertEqual(service.format_seconds_left(2 * 86400 + 3 * 3600 + 4 * 60 + 5), "2д 03:04:05")
 
+    def test_banner_cycle_advances_two_patch_phases(self):
+        settings = {}
+        duration = banners.BANNER_DURATION_DAYS * 24 * 60 * 60
+
+        def get_setting(key, default=None):
+            return settings.get(key, default)
+
+        def set_setting(key, value):
+            settings[key] = value
+
+        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+             patch("game.gacha.service.database.set_game_setting", side_effect=set_setting):
+            first = service.ensure_banner_cycle(now_ts=1000)
+            second = service.ensure_banner_cycle(now_ts=1000 + duration + 10)
+            third = service.ensure_banner_cycle(now_ts=1000 + duration * 2 + 10)
+
+        self.assertEqual(first["phase_number"], 1)
+        self.assertEqual(second["phase_number"], 2)
+        self.assertEqual(third["phase_number"], 1)
+
+    def test_active_banner_snapshot_is_saved_and_reused(self):
+        settings = {}
+
+        def get_setting(key, default=None):
+            return settings.get(key, default)
+
+        def set_setting(key, value):
+            settings[key] = value
+
+        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+             patch("game.gacha.service.database.set_game_setting", side_effect=set_setting):
+            active = service.get_active_banners(now_ts=2000)
+            snapshot_key = next(key for key in settings if key.startswith(service.BANNER_SNAPSHOT_SETTING_PREFIX))
+            settings[snapshot_key] = json.dumps({
+                "weapon": {
+                    "id": "weapon",
+                    "name": "Сохранённый оружейный баннер",
+                    "featured_ssr": ["Нож «Осколок Разлома»"],
+                    "off_ssr": ["АК-74 «Резонанс»"],
+                    "sr_pool": [{"kind": "item", "name": "ПМ «Сбой»", "min_qty": 1, "max_qty": 1}],
+                    "r_pool": [{"kind": "item", "name": "Бинт", "min_qty": 1, "max_qty": 1}],
+                }
+            }, ensure_ascii=False)
+            reused = service.get_active_banners(now_ts=2000)
+
+        self.assertEqual(active["weapon"].featured_ssr, ("АК-74 «Резонанс»",))
+        self.assertEqual(reused["weapon"].name, "Сохранённый оружейный баннер")
+        self.assertEqual(reused["weapon"].featured_ssr, ("Нож «Осколок Разлома»",))
+        self.assertNotIn("АК-74 «Резонанс»", reused["weapon"].off_ssr)
+        self.assertIn("АКС-74 «Серый Контур»", reused["weapon"].off_ssr)
+        self.assertEqual(tuple(entry.name for entry in reused["weapon"].featured_sr), ("ПМ «Сбой»",))
+
+    def test_second_phase_reuses_existing_items_as_rateups(self):
+        phase = banners.build_phase_banners(1)
+
+        self.assertEqual(phase["weapon"].featured_ssr, ("Винторез «Тихий Сигнал»",))
+        self.assertNotIn("АК-74 «Резонанс»", phase["weapon"].off_ssr)
+        self.assertIn("АКС-74 «Серый Контур»", phase["weapon"].off_ssr)
+        self.assertEqual(phase["outfit"].featured_ssr, banners.RUPTURE_SEEKER_SET)
+        self.assertIn("Маска «Искатель Разлома»", phase["outfit"].featured_ssr)
+        self.assertNotIn("Плащ «Проводник Сигнала»", phase["outfit"].off_ssr)
+        self.assertIn("Шлем «Глухой Контур»", phase["outfit"].off_ssr)
+
+    def test_featured_ssr_exclusives_never_enter_offrate_pool(self):
+        for phase_index in range(len(banners.BANNER_PHASES)):
+            for banner in banners.build_phase_banners(phase_index).values():
+                self.assertTrue(set(banner.off_ssr).isdisjoint(banners.FEATURED_SSR_EXCLUSIVE_NAMES))
+                self.assertTrue(set(banner.off_ssr).isdisjoint(set(banner.featured_ssr)))
+
+    def test_outfit_banner_uses_full_set_rateup_and_lower_pity(self):
+        phase = banners.build_phase_banners(0)
+
+        self.assertEqual(phase["outfit"].featured_ssr, banners.SIGNAL_GUIDE_SET)
+        self.assertEqual(banners.get_ssr_hard_pity("outfit"), 60)
+        self.assertEqual(banners.get_ssr_soft_pity_start("outfit"), 45)
+        self.assertEqual(banners.get_ssr_hard_pity("weapon"), 80)
+
     def test_resonance_menu_shows_exact_banner_time_left(self):
         with patch("game.gacha.ui.get_signal_shards", return_value=160), \
-             patch("game.gacha.ui.get_banner_time_left", return_value={"formatted": "19д 23:59:58"}), \
+             patch("game.gacha.ui.get_banner_time_left", return_value={"formatted": "19д 23:59:58", "phase_number": 1, "phases_per_patch": 2}), \
              patch("game.gacha.ui.get_banner_state", return_value={
                  "pity_ssr": 0,
                  "pity_sr": 0,
                  "featured_guaranteed": False,
-             }):
+        }):
             menu = format_resonance_menu(777)
 
-        self.assertIn("До конца баннера: 19д 23:59:58", menu)
+        self.assertIn("До конца волны: 19д 23:59:58", menu)
 
     def test_resonance_main_keyboard_is_uncluttered_hud(self):
         keyboard = json.loads(create_resonance_keyboard().get_keyboard())
@@ -72,6 +155,17 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(second_row_labels, ["История оружия"])
         self.assertNotIn("Шансы", json.dumps(keyboard, ensure_ascii=False))
 
+    def test_resonance_banner_back_text_returns_to_menu(self):
+        class Player:
+            current_location_id = "убежище"
+            level = 1
+
+        with patch("game.gacha.ui.show_resonance_menu") as show_menu:
+            handled = handle_resonance_command(Player(), object(), 777, "Назад к резонансу")
+
+        self.assertTrue(handled)
+        show_menu.assert_called_once()
+
     def test_resonance_history_keyboard_has_hud_pagination_and_back(self):
         keyboard = json.loads(create_resonance_history_keyboard("weapon", page=0, total_pages=3).get_keyboard())
         page_payloads = [json.loads(button["action"]["payload"]) for button in keyboard["buttons"][0]]
@@ -95,15 +189,20 @@ class GachaSystemTest(unittest.TestCase):
 
     def test_resonance_rates_pages_present_banner_items(self):
         rateup, page, total = format_rates("weapon", 0)
-        offrate, off_page, _ = format_rates("weapon", 1)
-        details, details_page, _ = format_rates("weapon", 2)
+        sr_rateup, sr_page, _ = format_rates("weapon", 1)
+        offrate, off_page, _ = format_rates("weapon", 2)
+        details, details_page, _ = format_rates("weapon", 3)
 
-        self.assertEqual((page, off_page, details_page, total), (0, 1, 2, 3))
+        self.assertEqual((page, sr_page, off_page, details_page, total), (0, 1, 2, 3, 4))
         self.assertIn("RankUP SSR: АК-74 «Резонанс»", rateup)
         self.assertIn("Крит. шанс", rateup)
         self.assertIn("Rate-up при активном 50/50", rateup)
-        self.assertIn("Винторез «Тихий Сигнал»", offrate)
-        self.assertIn("Нож «Осколок Разлома»", offrate)
+        self.assertIn("Rate-up SR: ПМ «Сбой»", sr_rateup)
+        self.assertIn("SR средний шанс", sr_rateup)
+        self.assertIn("АКС-74 «Серый Контур»", offrate)
+        self.assertIn("СВД «Шум Предела»", offrate)
+        self.assertIn("SR RATE-UP", details)
+        self.assertIn("SR OFF-RATE", details)
         self.assertIn("SR ПУЛ", details)
         self.assertIn("R ПУЛ", details)
 
@@ -232,7 +331,15 @@ class GachaSystemTest(unittest.TestCase):
         for banner in banners.BANNERS.values():
             for entry in [*banner.r_pool, *banner.sr_pool]:
                 self.assertNotEqual(entry.kind, "shells")
-                self.assertNotEqual(entry.name.lower(), "гильзы")
+                if entry.kind == "item":
+                    self.assertNotEqual(entry.name.lower(), "гильзы")
+
+    def test_gacha_r_pool_contains_low_value_trash(self):
+        trash_names = {item[0] for item in ITEMS_POOL if item[1] == "trash"}
+
+        for banner in banners.BANNERS.values():
+            r_item_names = {entry.name for entry in banner.r_pool if entry.kind == "item"}
+            self.assertTrue(r_item_names & trash_names, banner.id)
 
     def test_ssr_event_items_have_lore_and_image_assets(self):
         self.assertTrue(is_ssr_event_item("АК-74 «Резонанс»"))
@@ -285,6 +392,13 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(gloves["stats"]["precise_anomaly_shell_discount"], 1)
         self.assertIn("Извлечение артефакта +8%", format_event_outfit_passive_stats(gloves["stats"]))
 
+    def test_full_signal_guide_set_bonus_exists(self):
+        bonuses = get_event_outfit_set_bonus(banners.SIGNAL_GUIDE_SET)
+
+        self.assertEqual(len(bonuses), 1)
+        self.assertEqual(bonuses[0]["name"], "Полный комплект: Проводник Сигнала")
+        self.assertEqual(bonuses[0]["stats"]["rare_find_chance"], 3)
+
     def test_ssr_outfit_inspection_shows_passive(self):
         details = build_item_details({
             "name": "Плащ «Проводник Сигнала»",
@@ -309,12 +423,33 @@ class GachaSystemTest(unittest.TestCase):
 
     def test_availability_requires_toggle_and_admin(self):
         with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
+             patch("game.gacha.service.database.is_user_admin", return_value=True):
+            self.assertTrue(service.is_resonance_available(777))
+
+        with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
              patch("game.gacha.service.database.is_user_admin", return_value=False):
             self.assertFalse(service.is_resonance_available(777))
 
-        with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
+        with patch("game.gacha.service.is_resonance_enabled", return_value=False), \
              patch("game.gacha.service.database.is_user_admin", return_value=True):
-            self.assertTrue(service.is_resonance_available(777))
+            self.assertFalse(service.is_resonance_available(777))
+
+    def test_public_launch_enables_resonance_once(self):
+        settings = {}
+
+        def get_setting(key, default=None):
+            return settings.get(key, default)
+
+        def set_setting(key, value):
+            settings[key] = value
+
+        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+             patch("game.gacha.service.database.set_game_setting", side_effect=set_setting), \
+             patch("game.gacha.service._now_ts", return_value=1000):
+            service.ensure_resonance_public_launch()
+
+        self.assertEqual(settings[banners.GACHA_ENABLED_SETTING], "1")
+        self.assertEqual(settings[service.PUBLIC_LAUNCH_SETTING], "1")
 
     def test_hard_pity_forces_ssr_and_spends_shards(self):
         flags = {
@@ -348,6 +483,14 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(result["state"]["pity_ssr"], 0)
         add_storage_mock.assert_called_once()
         add_inventory_mock.assert_not_called()
+
+    def test_non_admin_cannot_pull_resonance(self):
+        with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
+             patch("game.gacha.service.database.is_user_admin", return_value=False):
+            result = service.perform_pulls(777, "weapon", 1)
+
+        self.assertFalse(result["success"])
+        self.assertIn("только администраторам", result["message"])
 
     def test_duplicate_ssr_checks_storage_and_compensation_goes_to_signal_shards(self):
         reward = service.PullReward("SSR", "АК-74 «Резонанс»")
@@ -407,6 +550,88 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(result["shards_left"], 800)
         self.assertEqual(result["rewards"][0].name, "Осколки сигнала")
         self.assertEqual(result["rewards"][0].quantity, 800)
+
+    def test_sr_rateup_guarantee_after_offrate_sr(self):
+        state = {"pity_ssr": 0, "pity_sr": 0, "featured_sr_guaranteed": False}
+        with patch("game.gacha.service.random.random", return_value=0.9), \
+             patch("game.gacha.service.random.choice", side_effect=lambda seq: seq[0]):
+            first = service._roll_sr(banners.WEAPON_BANNER, state)
+
+        self.assertEqual(first.name, "ИЖ-27 «Глухой Отклик»")
+        self.assertTrue(first.sr_rateup_lost)
+        self.assertTrue(state["featured_sr_guaranteed"])
+
+        with patch("game.gacha.service.random.choice", side_effect=lambda seq: seq[0]):
+            second = service._roll_sr(banners.WEAPON_BANNER, state)
+
+        self.assertEqual(second.name, "ПМ «Сбой»")
+        self.assertTrue(second.sr_featured)
+        self.assertTrue(second.sr_guaranteed)
+        self.assertFalse(state["featured_sr_guaranteed"])
+
+    def test_outfit_featured_ssr_excludes_owned_set_pieces(self):
+        with patch("game.gacha.service._has_item", side_effect=lambda _vk_id, name: name == "Плащ «Проводник Сигнала»"):
+            candidates = service._owned_featured_candidates(777, banners.OUTFIT_BANNER)
+
+        self.assertNotIn("Плащ «Проводник Сигнала»", candidates)
+        self.assertIn("Маска «Проводник Сигнала»", candidates)
+        self.assertEqual(len(candidates), 3)
+
+    def test_outfit_featured_ssr_removed_from_same_ten_pull_candidates(self):
+        state = {
+            "pity_ssr": 1,
+            "pity_sr": 0,
+            "featured_guaranteed": True,
+            "featured_candidates": ("Плащ «Проводник Сигнала»", "Маска «Проводник Сигнала»"),
+        }
+
+        with patch("game.gacha.service.random.choice", side_effect=lambda seq: seq[0]):
+            first = service._roll_ssr(banners.OUTFIT_BANNER, state)
+            state["featured_guaranteed"] = True
+            second = service._roll_ssr(banners.OUTFIT_BANNER, state)
+
+        self.assertEqual(first.name, "Плащ «Проводник Сигнала»")
+        self.assertEqual(second.name, "Маска «Проводник Сигнала»")
+        self.assertEqual(state["featured_candidates"], ())
+
+    def test_ten_pull_sends_each_ssr_as_separate_showcase(self):
+        class Vk:
+            pass
+
+        sent = []
+        result = {
+            "success": True,
+            "banner": banners.WEAPON_BANNER,
+            "count": 10,
+            "cost": banners.TEN_PULL_COST,
+            "shards_left": 0,
+            "rewards": [
+                service.PullReward("R", "Бинт"),
+                service.PullReward("SSR", "АК-74 «Резонанс»", featured=True),
+                service.PullReward("SR", "ПМ «Сбой»"),
+                service.PullReward("SSR", "АКС-74 «Серый Контур»", fifty_fifty_lost=True),
+            ],
+            "state": {
+                "pity_ssr": 0,
+                "pity_sr": 3,
+                "featured_guaranteed": True,
+                "featured_sr_guaranteed": False,
+            },
+        }
+
+        with patch("game.gacha.ui.vk_messages.send", side_effect=lambda _vk, **kwargs: sent.append(kwargs)), \
+             patch("game.gacha.ui.get_banner_time_left", return_value={"formatted": "1д 00:00:00"}), \
+             patch("game.gacha.ui.upload_item_image", side_effect=lambda _vk, _user_id, item: f"photo:{item}"):
+            _send_pull_result(Vk(), 777, "weapon", result)
+
+        self.assertEqual(len(sent), 3)
+        self.assertIn("Откликов: x10", sent[0]["message"])
+        self.assertIsNone(sent[0].get("attachment"))
+        self.assertIn("1/2 из отклика x10", sent[1]["message"])
+        self.assertIn("АК-74 «Резонанс»", sent[1]["message"])
+        self.assertEqual(sent[1]["attachment"], "photo:АК-74 «Резонанс»")
+        self.assertIn("2/2 из отклика x10", sent[2]["message"])
+        self.assertIn("АКС-74 «Серый Контур»", sent[2]["message"])
 
     def test_daily_quest_shards_scale_but_stay_below_single_pull(self):
         with patch("game.gacha.service.add_signal_shards", return_value=500) as add_shards:

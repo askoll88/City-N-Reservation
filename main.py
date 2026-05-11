@@ -112,7 +112,12 @@ def _maybe_cleanup_inactive_states():
         now = time.monotonic()
         if (now - _last_state_cleanup_ts) < _STATE_CLEANUP_INTERVAL_SEC:
             return
-        removed = cleanup_inactive_states(max_idle_seconds=300)
+        try:
+            removed = cleanup_inactive_states(max_idle_seconds=300)
+        except Exception:
+            _last_state_cleanup_ts = now
+            logger.exception("Ошибка cleanup_inactive_states")
+            return
         _last_state_cleanup_ts = now
         if removed:
             logger.debug("cleanup_inactive_states: removed=%s", removed)
@@ -612,6 +617,11 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         # Продажа артефактов по номеру
         from handlers.inventory import get_shop_cache_data
         shop_data = get_shop_cache_data(user_id)
+        if item_name in {"весь хлам", "все хлам", "хлам"}:
+            from handlers.inventory import handle_sell_all_trash
+            handle_sell_all_trash(player, vk, user_id)
+            return True
+
         if 'sell_all' in shop_data and item_name.isdigit():
             if handle_sell_item_by_number(player, vk, user_id, item_name):
                 return True
@@ -919,24 +929,51 @@ def _process_message_event(event, vk):
         return
 
     lock = _get_user_lock(user_id)
-    with lock:
+    started = time.monotonic()
+    acquired = lock.acquire(timeout=max(0.0, float(config.BOT_USER_LOCK_TIMEOUT)))
+    if not acquired:
+        logger.warning("Пропуск message_new: user_id=%s lock busy > %.1fs", user_id, config.BOT_USER_LOCK_TIMEOUT)
+        try:
+            vk.messages.send(
+                user_id=user_id,
+                message="⏳ Предыдущее действие ещё обрабатывается. Попробуй через пару секунд.",
+                random_id=0,
+            )
+        except Exception:
+            logger.exception("Не удалось отправить busy-сообщение: user_id=%s", user_id)
+        return
+
+    try:
         try:
             if not is_in_combat(user_id):
                 invalidate_edit_targets(user_id)
             handle_message(event, vk)
         except Exception as e:
             _handle_message_error(event, vk, e)
+    finally:
+        elapsed = time.monotonic() - started
+        if elapsed >= float(config.BOT_SLOW_EVENT_LOG_SEC):
+            logger.warning("Медленная обработка message_new: user_id=%s elapsed=%.2fs", user_id, elapsed)
+        lock.release()
 
 
 def _process_callback_event(event, vk):
     _maybe_cleanup_inactive_states()
     user_id = getattr(event.obj, "user_id", 0)
     lock = _get_user_lock(user_id) if user_id else None
+    started = time.monotonic()
 
     try:
         if lock:
-            with lock:
+            acquired = lock.acquire(timeout=max(0.0, float(config.BOT_USER_LOCK_TIMEOUT)))
+            if not acquired:
+                logger.warning("Пропуск message_event: user_id=%s lock busy > %.1fs", user_id, config.BOT_USER_LOCK_TIMEOUT)
+                _answer_callback(event, vk, "Предыдущее действие ещё обрабатывается")
+                return
+            try:
                 _do_callback_processing(event, vk)
+            finally:
+                lock.release()
         else:
             _do_callback_processing(event, vk)
     except Exception:
@@ -952,6 +989,10 @@ def _process_callback_event(event, vk):
             )
         except Exception:
             logger.exception("Не удалось ответить на callback после ошибки")
+    finally:
+        elapsed = time.monotonic() - started
+        if elapsed >= float(config.BOT_SLOW_EVENT_LOG_SEC):
+            logger.warning("Медленная обработка message_event: user_id=%s elapsed=%.2fs", user_id, elapsed)
 
 
 def _answer_callback(event, vk, text: str | None, show_snackbar: bool = True):
@@ -1011,6 +1052,10 @@ def _do_callback_processing(event, vk):
             "inventory_back",
             "inventory_page",
             "shop_page",
+            "sell_all_trash",
+            "crafting_page",
+            "crafting_build",
+            "early_enemy",
             "storage_page",
             "resonance_back",
             "resonance_banner",
@@ -1047,6 +1092,23 @@ def _do_callback_processing(event, vk):
         player = get_player(user_id)
         from handlers.storage import handle_storage_callback
         handle_storage_callback(player, vk, user_id, payload)
+        return
+
+    if payload.get("command") == "tutorial_home":
+        _answer_callback(event, vk, "Разделы обучения")
+        from game.tutorial import show_tutorial_home
+        show_tutorial_home(vk, user_id)
+        return
+
+    if payload.get("command") == "tutorial_page":
+        _answer_callback(event, vk, "Обучение обновлено")
+        from game.tutorial import show_tutorial_section
+        section_id = str(payload.get("section") or "basics")
+        try:
+            page = int(payload.get("page", 0) or 0)
+        except (TypeError, ValueError):
+            page = 0
+        show_tutorial_section(vk, user_id, section_id, page)
         return
 
     if command.startswith("resonance_"):
@@ -1107,6 +1169,13 @@ def _do_callback_processing(event, vk):
         handle_shop_page_callback(player, vk, user_id, payload)
         return
 
+    if payload.get("command") == "sell_all_trash":
+        _answer_callback(event, vk, "Хлам продан")
+        player = get_player(user_id)
+        from handlers.inventory import handle_sell_all_trash
+        handle_sell_all_trash(player, vk, user_id)
+        return
+
     if payload.get("command") == "market_purchase":
         if not has_pending_purchase(user_id):
             _answer_callback(event, vk, "Покупка устарела")
@@ -1147,6 +1216,20 @@ def _do_callback_processing(event, vk):
         _answer_callback(event, vk, None, show_snackbar=False)
         player = get_player(user_id)
         handle_combat_commands(player, vk, user_id, action_text, action_text)
+        return
+
+    if payload.get("command") == "early_enemy":
+        _answer_callback(event, vk, None, show_snackbar=False)
+        player = get_player(user_id)
+        from handlers.combat import handle_early_enemy_callback
+        handle_early_enemy_callback(player, vk, user_id, payload)
+        return
+
+    if payload.get("command") in {"crafting_page", "crafting_build"}:
+        _answer_callback(event, vk, "Верстак обновлён")
+        player = get_player(user_id)
+        from handlers.crafting import handle_crafting_callback
+        handle_crafting_callback(player, vk, user_id, payload)
         return
 
     if payload.get("command") == "combat_skill":
@@ -1235,12 +1318,56 @@ def _event_worker(task_queue: "queue.Queue[tuple[str, object]]", vk):
     while True:
         kind, event = task_queue.get()
         try:
-            if kind == "message_new":
-                _process_message_event(event, vk)
-            elif kind == "message_event":
-                _process_callback_event(event, vk)
+            try:
+                if kind == "message_new":
+                    _process_message_event(event, vk)
+                elif kind == "message_event":
+                    _process_callback_event(event, vk)
+                else:
+                    logger.warning("Неизвестный тип события в очереди: %s", kind)
+            except Exception:
+                logger.exception("Критическая ошибка event-worker при обработке %s", kind)
         finally:
             task_queue.task_done()
+
+
+def _send_retired_trash_cashback_notifications(vk) -> None:
+    try:
+        notifications = database.cleanup_retired_trash_items_cashback()
+    except Exception:
+        logger.exception("Ошибка миграции retired trash cashback")
+        return
+
+    for row in notifications:
+        vk_id = int(row.get("vk_id") or 0)
+        if vk_id <= 0:
+            continue
+        details = list(row.get("details") or [])
+        details_text = "\n".join(
+            f"• {name} x{qty}: +{subtotal} руб."
+            for name, qty, subtotal in details[:8]
+        )
+        if len(details) > 8:
+            details_text += f"\n• ...ещё позиций: {len(details) - 8}"
+        try:
+            vk.messages.send(
+                user_id=vk_id,
+                message=(
+                    "🧹 ОБНОВЛЕНИЕ ИНВЕНТАРЯ\n\n"
+                    "Часть старого мусорного лута выведена из оборота, чтобы рюкзак не превращался "
+                    "в свалку мелочёвки.\n\n"
+                    f"Удалено предметов: {int(row.get('items_removed') or 0)}\n"
+                    f"Кешбэк: +{int(row.get('cashback') or 0)} руб.\n\n"
+                    f"{details_text}"
+                ),
+                random_id=0,
+            )
+        except Exception:
+            logger.warning(
+                "Не удалось отправить уведомление о retired trash cashback пользователю %s",
+                vk_id,
+                exc_info=True,
+            )
 
 
 # === Главная функция ===
@@ -1264,6 +1391,7 @@ def main():
 
     vk_session = vk_api.VkApi(token=TOKEN)
     vk = vk_session.get_api()
+    _send_retired_trash_cashback_notifications(vk)
     longpoll = VkBotLongPoll(vk_session, GROUP_ID)
     
     logger.info(

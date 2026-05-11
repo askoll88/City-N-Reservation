@@ -601,7 +601,11 @@ def handle_npc_selection(player, vk, user_id: int, text: str):
         'ученый': 'ученый',
         'барыга': 'барыга',
         'местный житель': 'местный житель',
+        'проводник': 'местный житель',
+        'старый проводник': 'местный житель',
         'наставник': 'наставник',
+        'инструктор': 'наставник',
+        'инструктор классов': 'наставник',
         'куратор рангов': 'ранговик',
         'ранговик': 'ранговик',
         'медик': 'медик',
@@ -646,10 +650,10 @@ def handle_class_commands(player, vk, user_id: int, text: str):
             user_id=user_id,
             message=(
                 "🎓КЛАСС ПЕРСОНАЖА\n\n"
-                "У тебя пока нет класса. Класс выбирается у Наставника и больше не зависит от оружия.\n\n"
+                "У тебя пока нет класса. Класс выбирается у Инструктора классов и больше не зависит от оружия.\n\n"
                 "Для получения класса:\n"
                 "1. Дойди до 10 уровня\n"
-                "2. Найди Наставника в Убежище\n"
+                "2. Найди Инструктора классов в Убежище\n"
                 "3. Выбери специализацию\n\n"
                 f"{format_all_classes()}\n"
                 "🚪 Путь: Дорога → Убежище"
@@ -673,7 +677,7 @@ def handle_class_commands(player, vk, user_id: int, text: str):
     if passive_status:
         msg += f"\n{passive_status}"
 
-    msg += "\n\nДля смены класса найди наставника в убежище."
+    msg += "\n\nДля смены класса найди Инструктора классов в убежище."
 
     vk.messages.send(
         user_id=user_id,
@@ -858,7 +862,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
             from handlers.npc import _handle_class_selection_menu
             return _handle_class_selection_menu(player, vk, user_id, npc_id)
 
-    if text == 'назад к наставнику':
+    if text in {'назад к наставнику', 'назад к инструктору'}:
         show_npc_dialog(player, vk, user_id, npc_id, None)
         return True
 

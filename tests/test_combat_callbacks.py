@@ -7,7 +7,10 @@ from handlers.combat import (
     ANOMALY_GUARANTEE_FLAG,
     ANOMALY_GUARANTEE_RESEARCHES,
     _apply_weapon_damage_bonus,
+    _create_early_detection_keyboard,
+    _early_enemy_state,
     _hide_lower_keyboard_for_combat,
+    _roll_initiative,
     _select_research_event_by_chance,
     _spawn_item,
     _will_continue_mutant_hunt,
@@ -16,6 +19,7 @@ from handlers.combat import (
     create_combat_keyboard,
     create_combat_inventory_keyboard,
     create_skills_keyboard,
+    handle_early_enemy_callback,
     handle_combat_shell_decoy,
     handle_explore_time,
     RESEARCH_EVENTS,
@@ -24,6 +28,7 @@ from infra.state_manager import (
     clear_combat_state,
     clear_research_state,
     invalidate_edit_targets,
+    is_in_combat,
     is_researching,
     set_combat_state,
     set_ui_message,
@@ -84,6 +89,60 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
         keyboard = json.loads(sent["keyboard"])
         self.assertFalse(keyboard["inline"])
         self.assertEqual(keyboard["buttons"], [])
+
+    def test_early_detection_keyboard_offers_attack_or_flee(self):
+        keyboard = json.loads(_create_early_detection_keyboard("contact-1").get_keyboard())
+        payloads = [json.loads(button["action"]["payload"]) for button in keyboard["buttons"][0]]
+
+        self.assertTrue(keyboard["inline"])
+        self.assertEqual(payloads[0], {"command": "early_enemy", "action": "attack", "pending_id": "contact-1"})
+        self.assertEqual(payloads[1], {"command": "early_enemy", "action": "flee", "pending_id": "contact-1"})
+
+    def test_early_detection_attack_adds_initiative_bonus_without_guarantee(self):
+        class Player:
+            effective_perception = 1
+            effective_luck = 1
+
+        with patch("handlers.combat.random.randint", side_effect=[1, 20]):
+            initiative = _roll_initiative(Player(), enemy_speed=10, player_bonus=4)
+
+        self.assertEqual(initiative["player_bonus"], 4)
+        self.assertFalse(initiative["player_first"])
+
+    def test_early_detection_flee_does_not_start_combat(self):
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 1
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        class Player:
+            current_location_id = "дорога_военная_часть"
+
+        _early_enemy_state[77] = {
+            "pending_id": "contact-1",
+            "created_at": 1_000_000_000,
+            "enemy": {"enemy_name": "Бандит"},
+            "detection": {"chance": 1 / 30},
+        }
+
+        with patch("handlers.combat.time.time", return_value=1_000_000_001):
+            handled = handle_early_enemy_callback(
+                Player(),
+                Vk(),
+                77,
+                {"command": "early_enemy", "action": "flee", "pending_id": "contact-1"},
+            )
+
+        self.assertTrue(handled)
+        self.assertNotIn(77, _early_enemy_state)
+        self.assertFalse(is_in_combat(77))
 
     def test_mutant_hunt_continuation_only_inside_forest_chain(self):
         self.assertTrue(_will_continue_mutant_hunt({"mutant_hunt": 1, "location_id": "зараженный_лес"}))
@@ -149,7 +208,7 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
                 self.messages = Messages()
 
         trash_item = {
-            "name": "Пустая банка",
+            "name": "Пустой фильтр",
             "category": "trash",
             "price": 1,
             "weight": 0.05,
@@ -163,8 +222,8 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
                 patch("handlers.combat.database.add_item_to_inventory", return_value=True) as add_item:
             _spawn_item(Player(), vk, 1)
 
-        add_item.assert_called_once_with(1, "Пустая банка", 1)
-        self.assertIn("Пустая банка", vk.messages.sent[0]["message"])
+        add_item.assert_called_once_with(1, "Пустой фильтр", 1)
+        self.assertIn("Пустой фильтр", vk.messages.sent[0]["message"])
 
     def test_anomaly_buttons_are_callbacks(self):
         keyboard = json.loads(create_anomaly_keyboard(shells=1).get_keyboard())
@@ -527,6 +586,42 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
             main._process_message_event(Event(), object())
 
         invalidate.assert_not_called()
+
+    def test_busy_user_lock_sends_message_and_skips_processing(self):
+        import main
+
+        class Obj:
+            message = {"from_id": 99077}
+
+        class Event:
+            obj = Obj()
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 1
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        lock = main._get_user_lock(99077)
+        self.assertTrue(lock.acquire(blocking=False))
+        vk = Vk()
+        try:
+            with patch.object(main.config, "BOT_USER_LOCK_TIMEOUT", 0.01), \
+                 patch.object(main, "_maybe_cleanup_inactive_states"), \
+                 patch.object(main, "handle_message") as handle_message:
+                main._process_message_event(Event(), vk)
+        finally:
+            lock.release()
+
+        handle_message.assert_not_called()
+        self.assertEqual(len(vk.messages.sent), 1)
+        self.assertIn("Предыдущее действие", vk.messages.sent[0]["message"])
 
     def test_research_start_replaces_lower_keyboard_with_research_controls(self):
         class Inventory:

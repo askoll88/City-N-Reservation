@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from game.stat_balance import rank_stat_cap
+from game.stat_balance import early_enemy_detection_chance, rank_stat_cap
 from game.weapon_dungeons import WAREHOUSE_17_THREATS
 from handlers.combat import _build_dungeon_wave, _scale_enemy_for_fixed_level, _scale_enemy_for_player
 from models.enemies import ENEMIES
@@ -52,6 +52,11 @@ class CombatBalanceScalingTest(unittest.TestCase):
         self.assertEqual(rank_stat_cap(1), 20)
         self.assertGreaterEqual(rank_stat_cap(16), 70)
         self.assertEqual(rank_stat_cap(24), 100)
+
+    def test_early_enemy_detection_is_rare_even_at_stat_cap(self):
+        self.assertEqual(early_enemy_detection_chance(1, 1), 0.0)
+        self.assertLess(early_enemy_detection_chance(20, 20), 0.01)
+        self.assertAlmostEqual(early_enemy_detection_chance(100, 100), 1 / 30, places=6)
 
     def test_warehouse17_high_threats_raise_final_wave_elite_chance(self):
         player = DummyPlayer(rank_tier=16)

@@ -141,7 +141,7 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
         if result is None or not result.get("success", False):
             vk.messages.send(
                 user_id=user_id,
-                message="👴 Местный житель:\n\n«Эй, я уже давал тебе набор! Не жадничай, сталкер. Иди в Зону — там добудешь всё сам.»",
+                message="🧭 Старый проводник:\n\n«Эй, я уже давал тебе набор. Не жадничай, сталкер. Иди в Зону — там добудешь всё сам.»",
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )
@@ -163,6 +163,13 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
             )
+        return True
+
+    if npc_id == "местный житель" and isinstance(next_stage, str) and next_stage.startswith("tutorial:"):
+        from game.tutorial import show_tutorial_section
+
+        section_id = next_stage.split(":", 1)[1]
+        show_tutorial_section(vk, user_id, section_id, page=0)
         return True
 
     # Обработка получения класса персонажа
@@ -811,14 +818,14 @@ def _handle_get_class(player, vk, user_id: int, npc_id: str):
 
 
 def _handle_class_selection_menu(player, vk, user_id: int, npc_id: str):
-    """Показать выбор специализаций у Наставника."""
+    """Показать выбор специализаций у инструктора."""
     from models.classes import format_all_classes
 
     if player.level < 10:
         vk.messages.send(
             user_id=user_id,
             message=(
-                "🎓Наставник:\n\n"
+                "🎓Инструктор классов:\n\n"
                 "«Ты ещё слишком сырой для специализации. Доживи до 10 уровня, тогда разговор будет предметным.»"
             ),
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
@@ -835,7 +842,7 @@ def _handle_class_selection_menu(player, vk, user_id: int, npc_id: str):
     vk.messages.send(
         user_id=user_id,
         message=(
-            "🎓Наставник:\n\n"
+            "🎓Инструктор классов:\n\n"
             "«Класс теперь не привязан к стволу. Оружие меняй под задачу, а специализация остаётся твоей школой выживания.»\n\n"
             f"{format_all_classes()}"
             f"{current}"
@@ -927,7 +934,7 @@ def _handle_class_preview(player, vk, user_id: int, npc_id: str, class_id: str):
     if player.level < 10:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«Сначала 10 уровень. До этого специализация только навредит: будешь копировать форму без понимания.»",
+            message="🎓Инструктор классов:\n\n«Сначала 10 уровень. До этого специализация только навредит: будешь копировать форму без понимания.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -937,7 +944,7 @@ def _handle_class_preview(player, vk, user_id: int, npc_id: str, class_id: str):
     if not selected:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«Такой школы у меня нет. Выбери нормальную специализацию из списка.»",
+            message="🎓Инструктор классов:\n\n«Такой школы у меня нет. Выбери нормальную специализацию из списка.»",
             keyboard=create_class_selection_keyboard().get_keyboard(),
             random_id=0
         )
@@ -947,7 +954,7 @@ def _handle_class_preview(player, vk, user_id: int, npc_id: str, class_id: str):
     vk.messages.send(
         user_id=user_id,
         message=(
-            "🎓Наставник:\n\n"
+            "🎓Инструктор классов:\n\n"
             "«Сначала слушай, потом решай. Класс меняет привычки, а не только строчку в досье.»\n\n"
             f"{_format_class_preview(player, class_id)}"
         ),
@@ -965,7 +972,7 @@ def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
     if player.level < 10:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«Сначала 10 уровень. До этого специализация только навредит: будешь копировать форму без понимания.»",
+            message="🎓Инструктор классов:\n\n«Сначала 10 уровень. До этого специализация только навредит: будешь копировать форму без понимания.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -975,7 +982,7 @@ def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
     if not selected:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«Такой школы у меня нет. Выбери нормальную специализацию из списка.»",
+            message="🎓Инструктор классов:\n\n«Такой школы у меня нет. Выбери нормальную специализацию из списка.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -985,7 +992,7 @@ def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
         set_dialog_state(user_id, npc_id, "menu")
         vk.messages.send(
             user_id=user_id,
-            message=f"🎓Наставник:\n\n«Ты уже идёшь школой {selected.name}. Тренируй её в поле, а не на кнопках.»",
+            message=f"🎓Инструктор классов:\n\n«Ты уже идёшь школой {selected.name}. Тренируй её в поле, а не на кнопках.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -997,7 +1004,7 @@ def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
         vk.messages.send(
             user_id=user_id,
             message=(
-                "🎓Наставник:\n\n"
+                "🎓Инструктор классов:\n\n"
                 f"«Переобучение на {selected.name} стоит {CLASS_CHANGE_COST:,} руб.\n\n"
                 f"У тебя есть {player.money:,} руб. Не хватает {CLASS_CHANGE_COST - player.money:,} руб.»"
             ),
@@ -1024,7 +1031,7 @@ def _handle_select_class(player, vk, user_id: int, npc_id: str, class_id: str):
     vk.messages.send(
         user_id=user_id,
         message=(
-            "🎓Наставник:\n\n"
+            "🎓Инструктор классов:\n\n"
             f"«Принято. Теперь твоя специализация — {selected.name}. "
             "Оружие выбирай под рейд, но навыки и пассивки останутся от выбранной школы.»\n\n"
             f"{payment_line}"
@@ -1043,7 +1050,7 @@ def _handle_show_class(player, vk, user_id: int, npc_id: str):
     if not player.player_class:
         vk.messages.send(
             user_id=user_id,
-            message="🎓Наставник:\n\n«У тебя ещё нет класса. Дойди до 10 уровня и выбери специализацию здесь, в Убежище.»",
+            message="🎓Инструктор классов:\n\n«У тебя ещё нет класса. Дойди до 10 уровня и выбери специализацию здесь, в Убежище.»",
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -1052,7 +1059,7 @@ def _handle_show_class(player, vk, user_id: int, npc_id: str):
     class_info = format_class_info(player.player_class, player.level)
     current_weapon = player.equipped_weapon or "нет"
 
-    msg = f"🎓Наставник:\n\n"
+    msg = f"🎓Инструктор классов:\n\n"
     msg += f"📌Твой текущий класс: {player.player_class.upper()}\n"
     msg += f"🔫Экипированное оружие: {current_weapon}\n"
     msg += f"⭐Твой уровень: {player.level}\n\n"

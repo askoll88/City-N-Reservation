@@ -302,15 +302,18 @@ def _send_location_overview(player, vk, user_id: int, location_id: str):
         if mutation_state.get("active"):
             parts.append(f"🌀 Мутация Зоны: находки +{int(mutation_state['bonus_find'] * 100)}%")
 
-        limited = get_active_limited_event()
+        limited = get_active_limited_event(location_id=location_id)
         if limited:
-            mods = get_limited_event_modifiers()
+            mods = get_limited_event_modifiers(location_id=location_id)
             find_bonus = int(round((float(mods.get("research_find_mult", 1.0) or 1.0) - 1.0) * 100))
             danger_bonus = int(round((float(mods.get("research_danger_mult", 1.0) or 1.0) - 1.0) * 100))
             art_bonus = int(round((float(mods.get("artifact_event_mult", 1.0) or 1.0) - 1.0) * 100))
             enemy_bonus = int(round((float(mods.get("enemy_event_mult", 1.0) or 1.0) - 1.0) * 100))
             mins_left = max(0, int(limited.get("seconds_left", 0) or 0) // 60)
-            parts.append(f"🌐 Ивент: {limited.get('name', 'Событие Зоны')} (ещё ~{mins_left} мин)")
+            parts.append(
+                f"🌐 Ивент: {limited.get('name', 'Событие Зоны')} "
+                f"({limited.get('scope_name', 'сектор Зоны')}, ещё ~{mins_left} мин)"
+            )
             parts.append(
                 f"🔍 Ивент {find_bonus:+d}% | ⚠️ Ивент {danger_bonus:+d}% | "
                 f"💎 Ивент {art_bonus:+d}% | 👾 Ивент {enemy_bonus:+d}%"

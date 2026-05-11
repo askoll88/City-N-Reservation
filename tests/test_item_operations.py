@@ -148,6 +148,23 @@ class ItemOperationsTest(unittest.TestCase):
         self.assertEqual(passive["travel_time_reduction_pct"], 7)
         self.assertEqual(player.find_chance, 23)
 
+    def test_full_event_outfit_set_bonus_applies(self):
+        player = Player.__new__(Player)
+        player.player_class = None
+        player.level = 1
+        player.equipped_armor = None
+        player.equipped_armor_head = "Маска «Проводник Сигнала»"
+        player.equipped_armor_body = "Плащ «Проводник Сигнала»"
+        player.equipped_armor_legs = None
+        player.equipped_armor_hands = "Перчатки «Проводник Сигнала»"
+        player.equipped_armor_feet = "Ботинки «Проводник Сигнала»"
+
+        passive = player._get_passive_bonuses()
+
+        self.assertEqual(passive["rare_find_chance"], 7)
+        self.assertEqual(passive["travel_time_reduction_pct"], 10)
+        self.assertEqual(passive["anomaly_bypass_chance"], 8)
+
     @patch("models.player.database.update_user_stats")
     @patch("models.player.database.get_artifact_bonuses", return_value={"energy": 20})
     @patch("models.player.database.get_user_by_vk")

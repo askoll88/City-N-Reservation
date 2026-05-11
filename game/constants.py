@@ -27,6 +27,7 @@ class InventorySection(Enum):
     ARMOR = "armor"
     BACKPACKS = "backpacks"
     ARTIFACTS = "artifacts"
+    TRASH = "trash"
     OTHER = "other"
 
 
@@ -78,6 +79,8 @@ COMMANDS = {
     'броня': 'inventory_section:armor',
     'рюкзаки': 'inventory_section:backpacks',
     'артефакты': 'inventory_section:artifacts',
+    'хлам': 'inventory_section:trash',
+    'мусор': 'inventory_section:trash',
     'другое': 'inventory_section:other',
     
     # Инвентарь - действия
@@ -163,11 +166,11 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "food": 6,
         "consumables": 10,
         "other": 8,
-        "trash": 34,
+        "trash": 8,
         "artifacts": 4,
         "rare_weapons": 4,
         "rare_armor": 3,
-        "resources": 4,
+        "resources": 18,
     },
     LocationType.WAREHOUSE_17.value: {
         "weapons": 6,
@@ -176,11 +179,11 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "food": 4,
         "consumables": 10,
         "other": 8,
-        "trash": 38,
+        "trash": 6,
         "artifacts": 0,
         "rare_weapons": 2,
         "rare_armor": 1,
-        "resources": 24,
+        "resources": 34,
     },
     LocationType.NII_ROAD.value: {
         "weapons": 10,
@@ -189,11 +192,11 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "food": 8,
         "consumables": 10,
         "other": 12,
-        "trash": 30,
+        "trash": 6,
         "artifacts": 12,
         "rare_weapons": 2,
         "rare_armor": 2,
-        "resources": 4,
+        "resources": 16,
     },
     LocationType.INFECTED_FOREST.value: {
         "weapons": 10,
@@ -202,11 +205,11 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "food": 8,
         "consumables": 12,
         "other": 8,
-        "trash": 35,
+        "trash": 8,
         "artifacts": 12,
         "rare_weapons": 3,
         "rare_armor": 2,
-        "resources": 6,
+        "resources": 16,
     },
     LocationType.MILITARY_BASE.value: {
         "weapons": 20,
@@ -215,11 +218,11 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "food": 5,
         "consumables": 10,
         "other": 8,
-        "trash": 24,
+        "trash": 5,
         "artifacts": 4,
         "rare_weapons": 6,
         "rare_armor": 5,
-        "resources": 6,
+        "resources": 18,
     },
     LocationType.NII_MAIN_BUILDING.value: {
         "weapons": 8,
@@ -228,11 +231,11 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "food": 6,
         "consumables": 12,
         "other": 14,
-        "trash": 24,
+        "trash": 5,
         "artifacts": 16,
         "rare_weapons": 2,
         "rare_armor": 2,
-        "resources": 6,
+        "resources": 16,
     },
     LocationType.INFECTED_FOREST_DEEP.value: {
         "weapons": 8,
@@ -241,11 +244,11 @@ ITEM_CATEGORY_DROP_CHANCES_BY_LOCATION = {
         "food": 7,
         "consumables": 12,
         "other": 8,
-        "trash": 28,
+        "trash": 6,
         "artifacts": 16,
         "rare_weapons": 3,
         "rare_armor": 2,
-        "resources": 10,
+        "resources": 18,
     },
 }
 
@@ -318,10 +321,10 @@ DANGEROUS_LOCATIONS = [
 
 # === NPC-локации ===
 NPC_LOCATIONS = {
-    'кпп': ['военный', 'ученый'],
-    'больница': ['медик'],
-    'убежище': ['местный житель', 'наставник', 'дозиметрист'],
-    'черный рынок': ['барыга'],
+    'кпп': ['Военный', 'Учёный'],
+    'больница': ['Медик'],
+    'убежище': ['Старый проводник', 'Инструктор классов', 'Дозиметрист'],
+    'черный рынок': ['Барыга'],
 }
 
 

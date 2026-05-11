@@ -1,7 +1,7 @@
 """
-Ограниченные глобальные ивенты.
+Ограниченные автоматические ивенты Зоны.
 
-Ивенты общие для всех игроков:
+Ивенты общие для всех игроков, но действуют в выбранном секторе:
 - планируются заранее;
 - анонсируются за N минут;
 - имеют окно активности;
@@ -20,15 +20,39 @@ from infra import config, database
 logger = logging.getLogger(__name__)
 
 _STATE_KEY = "limited_events_state_v1"
+_STATE_VERSION = 2
 _CACHE_TTL_SEC = 15.0
 _cache = {"at": 0.0, "state": None}
+
+
+EVENT_SCOPES = {
+    "military": {
+        "name": "военный сектор",
+        "location_ids": ["дорога_военная_часть", "военная_часть", "склад_17"],
+    },
+    "science": {
+        "name": "научная ветка",
+        "location_ids": ["дорога_нии", "главный_корпус_нии"],
+    },
+    "forest": {
+        "name": "заражённый лес",
+        "location_ids": ["дорога_зараженный_лес", "зараженный_лес"],
+    },
+}
+
+SEASONAL_EVENT_ROTATION = (
+    ("anomaly_surge", "predator_night"),
+    ("predator_night", "scavenger_window"),
+    ("scavenger_window", "anomaly_surge"),
+)
 
 
 # Каталог ограниченных ивентов.
 LIMITED_EVENTS = {
     "anomaly_surge": {
         "name": "Аномальный резонанс",
-        "duration_minutes": 120,
+        "duration_minutes": 60,
+        "scope_ids": ["science", "forest"],
         "announce": (
             "📢 Через 15 минут начнётся ивент «Аномальный резонанс».\n\n"
             "По Зоне идёт низкий гул, счётчики трещат, а воздух дрожит как над раскалённым металлом.\n"
@@ -61,7 +85,8 @@ LIMITED_EVENTS = {
     },
     "predator_night": {
         "name": "Час хищников",
-        "duration_minutes": 90,
+        "duration_minutes": 45,
+        "scope_ids": ["military", "forest"],
         "announce": (
             "📢 Через 15 минут начнётся ивент «Час хищников».\n\n"
             "Ночные посты докладывают о движении у дорог: стаи выходят из тёмных зон, одиночки собираются в группы.\n"
@@ -95,7 +120,8 @@ LIMITED_EVENTS = {
     },
     "scavenger_window": {
         "name": "Окно мародёров",
-        "duration_minutes": 120,
+        "duration_minutes": 60,
+        "scope_ids": ["military", "science", "forest"],
         "announce": (
             "📢 Через 15 минут начнётся ивент «Окно мародёров».\n\n"
             "После серии стычек в Зоне остаются брошенные тайники, снаряга и неприбранные схроны.\n"
@@ -134,25 +160,62 @@ def _now_ts() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
 
+def _seasonal_event_pool(now_ts: int | None = None) -> tuple[str, ...]:
+    now = datetime.fromtimestamp(int(now_ts or _now_ts()), tz=timezone.utc)
+    idx = now.isocalendar().week % len(SEASONAL_EVENT_ROTATION)
+    return tuple(event_id for event_id in SEASONAL_EVENT_ROTATION[idx] if event_id in LIMITED_EVENTS)
+
+
+def _scope_name(scope_id: str | None) -> str:
+    return str(EVENT_SCOPES.get(str(scope_id or ""), {}).get("name") or "сектор Зоны")
+
+
+def _scope_location_ids(scope_id: str | None) -> set[str]:
+    return set(EVENT_SCOPES.get(str(scope_id or ""), {}).get("location_ids") or [])
+
+
+def _event_scope_ids(event_id: str) -> tuple[str, ...]:
+    event = LIMITED_EVENTS.get(event_id) or {}
+    scope_ids = [str(v) for v in event.get("scope_ids", []) if str(v) in EVENT_SCOPES]
+    return tuple(scope_ids or EVENT_SCOPES.keys())
+
+
+def _is_event_active_for_location(state: dict, location_id: str | None) -> bool:
+    if not location_id:
+        return True
+    return str(location_id) in _scope_location_ids(state.get("active_scope_id"))
+
+
+def _format_scoped_message(message: str, scope_id: str | None) -> str:
+    return f"{message}\n\nЗатронутый сектор: {_scope_name(scope_id)}."
+
+
 def _default_state(now_ts: int | None = None) -> dict:
     now = int(now_ts or _now_ts())
-    nxt_id, nxt_ts = _schedule_next(now)
+    nxt_id, nxt_scope_id, nxt_ts = _schedule_next(now)
     return {
+        "schedule_version": _STATE_VERSION,
         "active_event_id": None,
+        "active_scope_id": None,
         "active_start_ts": 0,
         "active_end_ts": 0,
         "next_event_id": nxt_id,
+        "next_scope_id": nxt_scope_id,
         "next_start_ts": nxt_ts,
         "announce_sent": False,
     }
 
 
-def _schedule_next(now_ts: int) -> tuple[str, int]:
+def _schedule_next(now_ts: int, previous_event_id: str | None = None) -> tuple[str, str, int]:
     min_m = max(30, int(getattr(config, "LIMITED_EVENT_MIN_INTERVAL_MINUTES", 300) or 300))
     max_m = max(min_m, int(getattr(config, "LIMITED_EVENT_MAX_INTERVAL_MINUTES", 540) or 540))
     delay = random.randint(min_m, max_m) * 60
-    event_id = random.choice(list(LIMITED_EVENTS.keys()))
-    return event_id, now_ts + delay
+    pool = list(_seasonal_event_pool(now_ts) or tuple(LIMITED_EVENTS.keys()))
+    if previous_event_id and len(pool) > 1:
+        pool = [event_id for event_id in pool if event_id != previous_event_id] or pool
+    event_id = random.choice(pool)
+    scope_id = random.choice(list(_event_scope_ids(event_id)))
+    return event_id, scope_id, now_ts + delay
 
 
 def _load_state(force: bool = False) -> dict:
@@ -177,15 +240,42 @@ def _load_state(force: bool = False) -> dict:
         return state
 
     # Мягкая миграция/валидация
+    changed = False
+    if int(state.get("schedule_version") or 1) != _STATE_VERSION:
+        if not state.get("active_event_id"):
+            nxt_id, nxt_scope_id, nxt_ts = _schedule_next(_now_ts())
+            state["next_event_id"] = nxt_id
+            state["next_scope_id"] = nxt_scope_id
+            state["next_start_ts"] = nxt_ts
+            state["announce_sent"] = False
+        state["schedule_version"] = _STATE_VERSION
+        changed = True
     if state.get("next_event_id") not in LIMITED_EVENTS:
-        nxt_id, nxt_ts = _schedule_next(_now_ts())
+        nxt_id, nxt_scope_id, nxt_ts = _schedule_next(_now_ts())
+        state["schedule_version"] = _STATE_VERSION
         state["next_event_id"] = nxt_id
+        state["next_scope_id"] = nxt_scope_id
         state["next_start_ts"] = nxt_ts
         state["announce_sent"] = False
+        changed = True
+    if state.get("next_scope_id") not in EVENT_SCOPES:
+        next_id = str(state.get("next_event_id") or "")
+        state["next_scope_id"] = random.choice(list(_event_scope_ids(next_id)))
+        changed = True
     if state.get("active_event_id") and state.get("active_event_id") not in LIMITED_EVENTS:
         state["active_event_id"] = None
+        state["active_scope_id"] = None
         state["active_start_ts"] = 0
         state["active_end_ts"] = 0
+        changed = True
+    if state.get("active_event_id") and state.get("active_scope_id") not in EVENT_SCOPES:
+        active_id = str(state.get("active_event_id") or "")
+        state["active_scope_id"] = random.choice(list(_event_scope_ids(active_id)))
+        changed = True
+
+    if changed:
+        _save_state(state)
+        return state
 
     _cache["state"] = dict(state)
     _cache["at"] = now
@@ -227,14 +317,17 @@ def limited_events_tick(vk):
         if now_ts >= active_end_ts > 0:
             ev = LIMITED_EVENTS.get(active_id, {})
             end_msg = str(ev.get("end") or f"⏳ Ивент «{ev.get('name', active_id)}» завершён.")
-            _broadcast(vk, end_msg)
+            _broadcast(vk, _format_scoped_message(end_msg, state.get("active_scope_id")))
 
-            nxt_id, nxt_ts = _schedule_next(now_ts)
+            nxt_id, nxt_scope_id, nxt_ts = _schedule_next(now_ts, previous_event_id=str(active_id))
             state.update({
+                "schedule_version": _STATE_VERSION,
                 "active_event_id": None,
+                "active_scope_id": None,
                 "active_start_ts": 0,
                 "active_end_ts": 0,
                 "next_event_id": nxt_id,
+                "next_scope_id": nxt_scope_id,
                 "next_start_ts": nxt_ts,
                 "announce_sent": False,
             })
@@ -242,12 +335,19 @@ def limited_events_tick(vk):
         return
 
     next_id = str(state.get("next_event_id") or "")
+    next_scope_id = str(state.get("next_scope_id") or "")
     next_start_ts = int(state.get("next_start_ts") or 0)
     announce_sent = bool(state.get("announce_sent"))
     ev = LIMITED_EVENTS.get(next_id)
     if not ev:
-        nxt_id, nxt_ts = _schedule_next(now_ts)
-        state.update({"next_event_id": nxt_id, "next_start_ts": nxt_ts, "announce_sent": False})
+        nxt_id, nxt_scope_id, nxt_ts = _schedule_next(now_ts)
+        state.update({
+            "schedule_version": _STATE_VERSION,
+            "next_event_id": nxt_id,
+            "next_scope_id": nxt_scope_id,
+            "next_start_ts": nxt_ts,
+            "announce_sent": False,
+        })
         _save_state(state)
         return
 
@@ -255,23 +355,37 @@ def limited_events_tick(vk):
     if now_ts >= next_start_ts:
         duration_min = max(10, int(ev.get("duration_minutes") or 60))
         state.update({
+            "schedule_version": _STATE_VERSION,
             "active_event_id": next_id,
+            "active_scope_id": next_scope_id,
             "active_start_ts": now_ts,
             "active_end_ts": now_ts + duration_min * 60,
             "announce_sent": True,
         })
         _save_state(state)
-        _broadcast(vk, str(ev.get("start") or f"⚡ Старт ивента «{ev.get('name', next_id)}»."))
+        _broadcast(
+            vk,
+            _format_scoped_message(
+                str(ev.get("start") or f"⚡ Старт ивента «{ev.get('name', next_id)}»."),
+                next_scope_id,
+            ),
+        )
         return
 
     # Анонс (только пока старт ещё не наступил)
     if not announce_sent and now_ts >= (next_start_ts - announce_before_min * 60):
-        _broadcast(vk, str(ev.get("announce") or f"📢 Скоро начнётся ивент «{ev.get('name', next_id)}»."))
+        _broadcast(
+            vk,
+            _format_scoped_message(
+                str(ev.get("announce") or f"📢 Скоро начнётся ивент «{ev.get('name', next_id)}»."),
+                next_scope_id,
+            ),
+        )
         state["announce_sent"] = True
         _save_state(state)
 
 
-def get_active_limited_event() -> dict | None:
+def get_active_limited_event(location_id: str | None = None) -> dict | None:
     """Текущий активный ограниченный ивент или None."""
     if not bool(getattr(config, "LIMITED_EVENTS_ENABLED", True)):
         return None
@@ -283,6 +397,8 @@ def get_active_limited_event() -> dict | None:
     now_ts = _now_ts()
     if end_ts > 0 and now_ts >= end_ts:
         return None
+    if not _is_event_active_for_location(state, location_id):
+        return None
     event = LIMITED_EVENTS.get(active_id)
     if not event:
         return None
@@ -290,12 +406,15 @@ def get_active_limited_event() -> dict | None:
     return {
         "id": active_id,
         "name": str(event.get("name") or active_id),
+        "scope_id": str(state.get("active_scope_id") or ""),
+        "scope_name": _scope_name(state.get("active_scope_id")),
+        "location_ids": sorted(_scope_location_ids(state.get("active_scope_id"))),
         "seconds_left": left_sec,
         "mods": dict(event.get("mods") or {}),
     }
 
 
-def get_limited_event_modifiers() -> dict:
+def get_limited_event_modifiers(location_id: str | None = None) -> dict:
     """Актуальные множители ограниченного ивента (или 1.0 по умолчанию)."""
     base = {
         "research_find_mult": 1.0,
@@ -305,7 +424,7 @@ def get_limited_event_modifiers() -> dict:
         "enemy_stat_mult": 1.0,
         "combat_reward_mult": 1.0,
     }
-    active = get_active_limited_event()
+    active = get_active_limited_event(location_id=location_id)
     if not active:
         return base
     mods = active.get("mods") or {}
@@ -325,6 +444,7 @@ def get_limited_events_catalog() -> list[dict]:
             "id": event_id,
             "name": str(data.get("name") or event_id),
             "duration_minutes": int(data.get("duration_minutes") or 0),
+            "scope_ids": list(_event_scope_ids(event_id)),
         })
     return result
 
@@ -335,12 +455,18 @@ def get_limited_events_admin_status() -> dict:
     now_ts = _now_ts()
     out = {
         "now_ts": now_ts,
+        "schedule_version": int(state.get("schedule_version") or 1),
         "active_event_id": state.get("active_event_id"),
+        "active_scope_id": state.get("active_scope_id"),
+        "active_scope_name": _scope_name(state.get("active_scope_id")) if state.get("active_event_id") else "",
         "active_start_ts": int(state.get("active_start_ts") or 0),
         "active_end_ts": int(state.get("active_end_ts") or 0),
         "next_event_id": state.get("next_event_id"),
+        "next_scope_id": state.get("next_scope_id"),
+        "next_scope_name": _scope_name(state.get("next_scope_id")) if state.get("next_event_id") else "",
         "next_start_ts": int(state.get("next_start_ts") or 0),
         "announce_sent": bool(state.get("announce_sent")),
+        "seasonal_event_ids": list(_seasonal_event_pool(now_ts)),
     }
     if out["active_event_id"]:
         out["active_seconds_left"] = max(0, out["active_end_ts"] - now_ts)
@@ -366,13 +492,17 @@ def force_start_limited_event(event_id: str, vk=None) -> dict:
 
     duration_min = max(10, int(event.get("duration_minutes") or 60))
     end_ts = now_ts + duration_min * 60
-    nxt_id, nxt_ts = _schedule_next(end_ts)
+    scope_id = random.choice(list(_event_scope_ids(event_id)))
+    nxt_id, nxt_scope_id, nxt_ts = _schedule_next(end_ts, previous_event_id=event_id)
 
     state.update({
+        "schedule_version": _STATE_VERSION,
         "active_event_id": event_id,
+        "active_scope_id": scope_id,
         "active_start_ts": now_ts,
         "active_end_ts": end_ts,
         "next_event_id": nxt_id,
+        "next_scope_id": nxt_scope_id,
         "next_start_ts": nxt_ts,
         "announce_sent": True,
     })
@@ -383,6 +513,7 @@ def force_start_limited_event(event_id: str, vk=None) -> dict:
             vk,
             (
                 f"⚡ НАЧАЛСЯ ИВЕНТ: «{event.get('name', event_id)}»\n\n"
+                f"Затронутый сектор: {_scope_name(scope_id)}.\n"
                 f"Длительность: {duration_min} мин."
             ),
         )
@@ -391,6 +522,8 @@ def force_start_limited_event(event_id: str, vk=None) -> dict:
         "success": True,
         "event_id": event_id,
         "event_name": str(event.get("name") or event_id),
+        "scope_id": scope_id,
+        "scope_name": _scope_name(scope_id),
         "duration_minutes": duration_min,
         "ends_in_seconds": duration_min * 60,
     }
@@ -405,12 +538,15 @@ def force_stop_limited_event(vk=None) -> dict:
         return {"success": False, "message": "Сейчас нет активного ограниченного ивента."}
 
     active_name = str(LIMITED_EVENTS.get(active_id, {}).get("name") or active_id)
-    nxt_id, nxt_ts = _schedule_next(now_ts)
+    nxt_id, nxt_scope_id, nxt_ts = _schedule_next(now_ts, previous_event_id=active_id)
     state.update({
+        "schedule_version": _STATE_VERSION,
         "active_event_id": None,
+        "active_scope_id": None,
         "active_start_ts": 0,
         "active_end_ts": 0,
         "next_event_id": nxt_id,
+        "next_scope_id": nxt_scope_id,
         "next_start_ts": nxt_ts,
         "announce_sent": False,
     })
