@@ -128,20 +128,6 @@ def _crafting_keyboard(rows: list[tuple[int, dict, dict]], view: str, page: int,
         payload={"command": "crafting_page", "view": "blocked", "page": 0},
     )
 
-    if safe_view == "available" and rows:
-        for idx, recipe, _status in rows:
-            keyboard.add_line()
-            keyboard.add_callback_button(
-                f"Скрафтить {idx}",
-                color=VkKeyboardColor.POSITIVE,
-                payload={
-                    "command": "crafting_build",
-                    "recipe_id": recipe["id"],
-                    "view": safe_view,
-                    "page": page,
-                },
-            )
-
     keyboard.add_line()
     prev_page = (page - 1) % total_pages
     next_page = (page + 1) % total_pages
@@ -212,7 +198,7 @@ def show_crafting_menu(player, vk, user_id: int, view: str = "available", page: 
 
     lines.append("")
     lines.append(ui.section("Управление"))
-    lines.append("Внутри крафта используй inline-кнопки. Текстовые команды всё ещё работают: скрафтить <номер>.")
+    lines.append("Страницы и разделы — inline-кнопками. Крафт: скрафтить <номер>.")
 
     _send_crafting_screen(
         vk,

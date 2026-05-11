@@ -77,7 +77,7 @@ class CraftingSystemTest(unittest.TestCase):
         self.assertIn("ПМ", message)
         self.assertNotIn("АК-74", message)
 
-    def test_crafting_menu_splits_available_and_blocked_recipes_inline(self):
+    def test_crafting_menu_splits_available_and_blocked_recipes_with_compact_inline(self):
         class Player:
             current_location_id = "убежище"
             level = 1
@@ -107,10 +107,12 @@ class CraftingSystemTest(unittest.TestCase):
         self.assertIn("МОЖНО СКРАФТИТЬ", sent[0]["message"])
         self.assertIn("Полевой стим-пак", sent[0]["message"])
         self.assertIn("Готово сейчас: 1", sent[0]["message"])
+        self.assertIn("Крафт: скрафтить <номер>", sent[0]["message"])
         keyboard = json.loads(sent[0]["keyboard"])
         payloads = [json.loads(button["action"]["payload"]) for row in keyboard["buttons"] for button in row]
         self.assertIn({"command": "crafting_page", "view": "blocked", "page": 0}, payloads)
-        self.assertTrue(any(payload.get("command") == "crafting_build" for payload in payloads))
+        self.assertFalse(any(payload.get("command") == "crafting_build" for payload in payloads))
+        self.assertLessEqual(sum(len(row) for row in keyboard["buttons"]), 5)
 
     def test_crafting_blocked_page_shows_missing_reasons_without_build_buttons(self):
         class Player:
