@@ -4,6 +4,7 @@
 from __future__ import annotations
 from collections import Counter
 import threading
+import time
 
 from infra import database
 from infra.state_manager import get_ui_current_screen, set_ui_screen
@@ -14,6 +15,8 @@ from handlers.keyboards import create_inventory_hud_keyboard, create_inventory_k
 
 
 INVENTORY_PAGE_SIZE = 10
+LEGENDARY_DROP_CONFIRM_TTL_SEC = 90
+LEGENDARY_DROP_STATE_KEY = "legendary_drop_confirm"
 
 
 def _fmt_weight(item: dict, default: float = 1.0) -> str:
@@ -29,6 +32,66 @@ def _short_text(value: object, limit: int = 48) -> str:
 
 def _line(parts: list[str]) -> str:
     return " | ".join(part for part in parts if part)
+
+
+def _is_legendary_item(item: dict) -> bool:
+    rarity = str(item.get("item_rank") or item.get("rarity") or "").strip().lower()
+    return rarity == "legendary"
+
+
+def _clear_drop_confirmation(user_id: int) -> None:
+    try:
+        database.set_runtime_state(user_id, LEGENDARY_DROP_STATE_KEY, {})
+    except Exception:
+        pass
+
+
+def _drop_confirmation_matches(user_id: int, item_name: str) -> bool:
+    try:
+        state = database.get_runtime_state(user_id, LEGENDARY_DROP_STATE_KEY) or {}
+    except Exception:
+        return False
+    if not isinstance(state, dict):
+        return False
+    if str(state.get("item_name") or "").lower() != str(item_name or "").lower():
+        return False
+    expires_at = int(state.get("expires_at") or 0)
+    return expires_at >= int(time.time())
+
+
+def _require_legendary_drop_confirmation(item: dict, vk, user_id: int, keyboard) -> bool:
+    """Вернуть True, если выброс нужно остановить до подтверждения."""
+    item_name = str(item.get("name") or "")
+    if not _is_legendary_item(item):
+        _clear_drop_confirmation(user_id)
+        return False
+    if _drop_confirmation_matches(user_id, item_name):
+        _clear_drop_confirmation(user_id)
+        return False
+
+    expires_at = int(time.time()) + LEGENDARY_DROP_CONFIRM_TTL_SEC
+    try:
+        database.set_runtime_state(
+            user_id,
+            LEGENDARY_DROP_STATE_KEY,
+            {"item_name": item_name, "expires_at": expires_at},
+        )
+    except Exception:
+        pass
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "⚠️ Это легендарный предмет.\n\n"
+            f"Предмет: {item_name}\n"
+            "Выбросить его можно только после подтверждения.\n\n"
+            f"Напиши: подтвердить выброс\n"
+            f"Или повтори: выбросить {item_name}\n\n"
+            "Подтверждение действует 90 секунд."
+        ),
+        keyboard=keyboard,
+        random_id=0,
+    )
+    return True
 
 
 def _inventory_card(
@@ -1435,7 +1498,7 @@ def handle_use_item(player, item_name: str, vk, user_id: int):
     )
 
 
-def handle_drop_item(player, item_name: str, vk, user_id: int):
+def handle_drop_item(player, item_name: str, vk, user_id: int, *, force_confirmed: bool = False):
     """Выбросить предмет"""
     from main import create_inventory_keyboard
 
@@ -1520,8 +1583,17 @@ def handle_drop_item(player, item_name: str, vk, user_id: int):
         )
         return
 
+    if not force_confirmed and _require_legendary_drop_confirmation(
+        item,
+        vk,
+        user_id,
+        create_inventory_keyboard().get_keyboard(),
+    ):
+        return
+
     # Выбрасываем предмет
     result = database.drop_item_from_inventory(user_id, item['name'], 1)
+    _clear_drop_confirmation(user_id)
 
     player.inventory.reload()
 
@@ -1533,7 +1605,7 @@ def handle_drop_item(player, item_name: str, vk, user_id: int):
     )
 
 
-def handle_drop_item_by_index(player, index: int, vk, user_id: int):
+def handle_drop_item_by_index(player, index: int, vk, user_id: int, *, force_confirmed: bool = False):
     """Выбросить предмет по номеру в текущем разделе"""
     from main import create_inventory_keyboard
     import logging
@@ -1622,8 +1694,17 @@ def handle_drop_item_by_index(player, index: int, vk, user_id: int):
             )
             return
 
+        if not force_confirmed and _require_legendary_drop_confirmation(
+            item,
+            vk,
+            user_id,
+            create_inventory_keyboard().get_keyboard(),
+        ):
+            return
+
         # Выбрасываем предмет
         result = database.drop_item_from_inventory(user_id, item_name, 1)
+        _clear_drop_confirmation(user_id)
 
         logger.info(f"[DROP] result={result}")
 
@@ -1664,6 +1745,23 @@ def handle_drop_item_by_index(player, index: int, vk, user_id: int):
             message=f"❌ Ошибка при выбрасывании: {e}",
             random_id=0
         )
+
+
+def handle_confirm_drop(player, vk, user_id: int) -> bool:
+    """Подтвердить выброс легендарного предмета."""
+    try:
+        state = database.get_runtime_state(user_id, LEGENDARY_DROP_STATE_KEY) or {}
+    except Exception:
+        state = {}
+    if not isinstance(state, dict) or not state.get("item_name"):
+        vk.messages.send(user_id=user_id, message="Нет предмета, ожидающего подтверждения выброса.", random_id=0)
+        return True
+    if int(state.get("expires_at") or 0) < int(time.time()):
+        _clear_drop_confirmation(user_id)
+        vk.messages.send(user_id=user_id, message="Подтверждение выброса истекло. Повтори команду выброса.", random_id=0)
+        return True
+    handle_drop_item(player, str(state["item_name"]), vk, user_id, force_confirmed=True)
+    return True
 
 
 # === Магазин у военного на КПП ===

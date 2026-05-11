@@ -52,6 +52,7 @@ class DummyPlayer:
         self.inventory_section = None
         self.inventory = DummyInventory()
         self.equipped_weapon = "ПМ"
+        self.equipped_armor = None
         self.equipped_armor_head = None
         self.equipped_armor_body = "Куртка"
         self.equipped_armor_legs = None
@@ -131,6 +132,39 @@ class InventorySectionsTest(unittest.TestCase):
         self.fake_db.update_user_stats.assert_not_called()
         output = (self.vk.messages.sent or self.vk.messages.edited)[0]["message"]
         self.assertIn("ИНВЕНТАРЬ: ХЛАМ", output)
+
+    def test_legendary_drop_requires_confirmation(self):
+        self.player.inventory.other = [{"name": "АК-74 «Резонанс»", "quantity": 1, "weight": 3.2, "item_rank": "legendary"}]
+
+        with patch.object(self.inventory_module.database, "get_user_by_vk", return_value={}), \
+             patch.object(self.inventory_module.database, "get_runtime_state", return_value={}), \
+             patch.object(self.inventory_module.database, "set_runtime_state") as set_state, \
+             patch.object(self.inventory_module.database, "drop_item_from_inventory") as drop_item:
+            self.inventory_module.handle_drop_item(self.player, "АК-74 «Резонанс»", self.vk, user_id=1)
+
+        drop_item.assert_not_called()
+        set_state.assert_called()
+        self.assertIn("легендарный предмет", self.vk.messages.sent[-1]["message"])
+        self.assertIn("подтвердить выброс", self.vk.messages.sent[-1]["message"])
+
+    def test_legendary_drop_confirm_command_drops_pending_item(self):
+        self.player.inventory.other = [{"name": "АК-74 «Резонанс»", "quantity": 1, "weight": 3.2, "item_rank": "legendary"}]
+
+        with patch.object(self.inventory_module.database, "get_user_by_vk", return_value={}), \
+             patch.object(self.inventory_module.database, "get_runtime_state", return_value={
+                 "item_name": "АК-74 «Резонанс»",
+                 "expires_at": 9999999999,
+             }), \
+             patch.object(self.inventory_module.database, "set_runtime_state"), \
+             patch.object(self.inventory_module.database, "drop_item_from_inventory", return_value={
+                 "success": True,
+                 "message": "✅ Ты выбросил 1 шт. 'АК-74 «Резонанс»'",
+             }) as drop_item:
+            handled = self.inventory_module.handle_confirm_drop(self.player, self.vk, user_id=1)
+
+        self.assertTrue(handled)
+        drop_item.assert_called_once_with(1, "АК-74 «Резонанс»", 1)
+        self.assertIn("Ты выбросил", self.vk.messages.sent[-1]["message"])
 
     def test_handle_sell_all_trash_uses_single_database_transaction(self):
         self.inventory_module.database.NPC_MERCHANT_TRADER = "trader"
