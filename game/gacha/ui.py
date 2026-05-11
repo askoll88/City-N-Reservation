@@ -23,7 +23,7 @@ from .banners import (
     get_ssr_soft_pity_step,
 )
 from .service import get_banners, get_banner_state, is_resonance_available, perform_pulls
-from .service import get_banner_time_left
+from .service import get_banner_time_left, get_signal_shard_boost
 from .service import get_pull_history
 from .service import get_rate_disclosure
 from .service import (
@@ -258,6 +258,7 @@ def format_resonance_menu(vk_id: int) -> str:
     time_left = get_banner_time_left()
     wallet = get_exchange_wallet(vk_id)
     active_banners = get_banners()
+    shard_boost = get_signal_shard_boost()
     lines = [
         "▰ РЕЗОНАНС ЗОНЫ",
         "Приёмник ловит обрывки сигнала. Выбери баннер или посмотри шансы."
@@ -269,13 +270,17 @@ def format_resonance_menu(vk_id: int) -> str:
         f"🎟 Отклики: оружие {wallet['weapon_tickets']} | снаряжение {wallet['outfit_tickets']}",
         f"✦ Пыль: {wallet['dust']} | ✧ Знаки: {wallet['marks']}",
         f"Автосборка: {TICKET_SHARD_COST} осколков = 1 отклик при крутке",
+    ]
+    if shard_boost.get("active"):
+        lines.append(f"⚡ Окно осколков: +{shard_boost['bonus_percent']}% | осталось {shard_boost['formatted']}")
+    lines.extend([
         "",
         "• ОКНО",
         f"Фаза: {time_left.get('phase_number', 1)}/{time_left.get('phases_per_patch', 1)} | До конца волны: {time_left['formatted']}",
         f"Патч {BANNER_PATCH_DURATION_DAYS}д | волна {BANNER_DURATION_DAYS}д",
         "",
         "• БАННЕРЫ",
-    ]
+    ])
     if not active_banners:
         lines.append("Активных баннеров сейчас нет.")
     for banner in active_banners:
@@ -700,6 +705,10 @@ def _format_pull_result(result: dict) -> str:
             tags.append("проигрыш 50/50")
         if reward.duplicate:
             tags.append("дубликат")
+        if getattr(reward, "destination", "") == "storage_overweight":
+            tags.append("в шкаф из-за веса")
+        elif getattr(reward, "destination", "") == "failed":
+            tags.append("ошибка выдачи")
         qty = f" x{reward.quantity}" if reward.quantity != 1 else ""
         lines.append(f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} {reward.name}{qty}")
         if tags:
@@ -757,6 +766,16 @@ def _format_ssr_showcase(result: dict, reward, index: int, total: int) -> str:
         ])
     else:
         lines.extend(_format_item_presentation(source_name))
+        if getattr(reward, "destination", "") == "storage_overweight":
+            lines.extend([
+                "",
+                "Рюкзак перегружен: предмет отправлен в шкаф убежища.",
+            ])
+        elif getattr(reward, "destination", "") == "failed":
+            lines.extend([
+                "",
+                "Не удалось выдать предмет. Сообщи администрации.",
+            ])
         lines.extend([
             "",
             "Предмет отправлен в инвентарь.",

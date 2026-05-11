@@ -65,6 +65,8 @@ MARK_TICKET_PRICE = 5
 MONTHLY_DUST_TICKET_LIMIT = 5
 EVENT_SHARDS_DAILY_CAP = 80
 COMBAT_SHARDS_DAILY_CAP = 120
+WEEKLY_QUEST_SHARDS_TARGET = 5
+WEEKLY_QUEST_SHARDS_REWARD = 400
 RESONANCE_HISTORY_RUNTIME_KEY = "resonance_history"
 RESONANCE_HISTORY_LIMIT_PER_BANNER = 50
 PUBLIC_LAUNCH_SETTING = "resonance_public_launch_v1"
@@ -75,11 +77,18 @@ PUBLIC_LAUNCH_REWARD_SHARDS = TEN_PULL_COST
 BANNER_SNAPSHOT_SETTING_PREFIX = "resonance_banner_snapshot"
 ACTIVE_BANNER_RELEASE_SETTING = "resonance_active_banner_release"
 SCHEDULED_BANNER_RELEASE_SETTING = "resonance_scheduled_banner_release"
+SIGNAL_SHARD_BOOST_SETTING = "resonance_signal_shard_boost"
 logger = logging.getLogger(__name__)
 
 
 def _today_ordinal() -> int:
     return datetime.now(timezone.utc).toordinal()
+
+
+def _current_week_id(now: datetime | None = None) -> int:
+    current = now or datetime.now(timezone.utc)
+    iso = current.isocalendar()
+    return int(iso.year) * 100 + int(iso.week)
 
 
 @dataclass(frozen=True)
@@ -97,6 +106,7 @@ class PullReward:
     sr_guaranteed: bool = False
     sr_rateup_lost: bool = False
     pity_count: int = 0
+    destination: str = ""
 
 
 def is_resonance_enabled() -> bool:
@@ -392,6 +402,77 @@ def format_seconds_left(seconds: int) -> str:
     return f"{days}д {hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def get_signal_shard_boost(now_ts: int | None = None) -> dict:
+    """Текущее временное окно повышенного выпадения осколков."""
+    now = int(now_ts if now_ts is not None else _now_ts())
+    raw = database.get_game_setting(SIGNAL_SHARD_BOOST_SETTING, default="")
+    if not raw:
+        return {"active": False, "multiplier": 1.0, "bonus_percent": 0, "remaining_seconds": 0, "formatted": "0д 00:00:00"}
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("boost setting is not dict")
+    except Exception:
+        logger.warning("Не удалось прочитать окно буста осколков, настройка сброшена", exc_info=True)
+        database.set_game_setting(SIGNAL_SHARD_BOOST_SETTING, "")
+        return {"active": False, "multiplier": 1.0, "bonus_percent": 0, "remaining_seconds": 0, "formatted": "0д 00:00:00"}
+
+    multiplier = max(1.0, float(data.get("multiplier") or 1.0))
+    end_ts = int(data.get("end_ts") or 0)
+    if multiplier <= 1.0 or end_ts <= now:
+        database.set_game_setting(SIGNAL_SHARD_BOOST_SETTING, "")
+        return {"active": False, "multiplier": 1.0, "bonus_percent": 0, "remaining_seconds": 0, "formatted": "0д 00:00:00"}
+
+    remaining = max(0, end_ts - now)
+    return {
+        "active": True,
+        "name": str(data.get("name") or "Резонансный фон"),
+        "multiplier": multiplier,
+        "bonus_percent": int(round((multiplier - 1.0) * 100)),
+        "start_ts": int(data.get("start_ts") or 0),
+        "end_ts": end_ts,
+        "remaining_seconds": remaining,
+        "formatted": format_seconds_left(remaining),
+    }
+
+
+def set_signal_shard_boost(multiplier: float, duration_minutes: int, name: str | None = None) -> dict:
+    safe_multiplier = max(1.0, float(multiplier or 1.0))
+    safe_minutes = max(0, int(duration_minutes or 0))
+    if safe_multiplier <= 1.0 or safe_minutes <= 0:
+        database.set_game_setting(SIGNAL_SHARD_BOOST_SETTING, "")
+        return get_signal_shard_boost()
+    now = _now_ts()
+    payload = {
+        "name": str(name or "Резонансный фон")[:80],
+        "multiplier": safe_multiplier,
+        "start_ts": now,
+        "end_ts": now + safe_minutes * 60,
+    }
+    database.set_game_setting(SIGNAL_SHARD_BOOST_SETTING, json.dumps(payload, ensure_ascii=False))
+    return get_signal_shard_boost(now)
+
+
+def clear_signal_shard_boost() -> dict:
+    database.set_game_setting(SIGNAL_SHARD_BOOST_SETTING, "")
+    return get_signal_shard_boost()
+
+
+def _boost_signal_shard_amount(amount: int, boost: dict) -> int:
+    base = max(0, int(amount or 0))
+    if base <= 0 or not boost.get("active"):
+        return base
+    multiplier = max(1.0, float(boost.get("multiplier") or 1.0))
+    return max(base + 1, int(round(base * multiplier)))
+
+
+def _apply_signal_shard_boost(amount: int, cap: int = 0) -> tuple[int, int, dict]:
+    boost = get_signal_shard_boost()
+    boosted_amount = _boost_signal_shard_amount(amount, boost)
+    boosted_cap = _boost_signal_shard_amount(cap, boost) if int(cap or 0) > 0 else max(0, int(cap or 0))
+    return boosted_amount, boosted_cap, boost
+
+
 def get_banner_time_left() -> dict:
     cycle = ensure_banner_cycle()
     return {**cycle, "formatted": format_seconds_left(cycle["remaining_seconds"])}
@@ -628,8 +709,9 @@ def get_banner(banner_id: str) -> Banner | None:
 
 def add_signal_shards_capped(vk_id: int, amount: int, source: str, daily_cap: int) -> dict:
     """Начислить осколки с дневным лимитом по источнику."""
-    safe_amount = max(0, int(amount or 0))
-    safe_cap = max(0, int(daily_cap or 0))
+    base_amount = max(0, int(amount or 0))
+    base_cap = max(0, int(daily_cap or 0))
+    safe_amount, safe_cap, boost = _apply_signal_shard_boost(base_amount, base_cap)
     if safe_amount <= 0:
         return {"granted": 0, "balance": get_signal_shards(vk_id), "cap": safe_cap, "used": 0}
 
@@ -646,10 +728,17 @@ def add_signal_shards_capped(vk_id: int, amount: int, source: str, daily_cap: in
     if grant <= 0:
         return {"granted": 0, "balance": get_signal_shards(vk_id), "cap": safe_cap, "used": used}
 
-    balance = add_signal_shards(vk_id, grant, source=f"{key}_reward", details={"cap": safe_cap, "used_before": used})
+    details = {"cap": safe_cap, "used_before": used, "base_amount": base_amount, "base_cap": base_cap}
+    if boost.get("active"):
+        details["boost"] = {
+            "name": boost.get("name"),
+            "multiplier": boost.get("multiplier"),
+            "bonus_percent": boost.get("bonus_percent"),
+        }
+    balance = add_signal_shards(vk_id, grant, source=f"{key}_reward", details=details)
     database.set_user_flag(vk_id, day_flag, today)
     database.set_user_flag(vk_id, used_flag, used + grant)
-    return {"granted": grant, "balance": balance, "cap": safe_cap, "used": used + grant}
+    return {"granted": grant, "balance": balance, "cap": safe_cap, "used": used + grant, "boost": boost}
 
 
 def grant_daily_quest_shards(vk_id: int, streak: int) -> dict:
@@ -662,7 +751,72 @@ def grant_daily_quest_shards(vk_id: int, streak: int) -> dict:
         amount += 20
     if safe_streak >= 30:
         amount += 30
-    return {"granted": amount, "balance": add_signal_shards(vk_id, amount, source="daily_quest", details={"streak": safe_streak}), "cap": 0, "used": 0}
+    base_amount = amount
+    amount, _cap, boost = _apply_signal_shard_boost(base_amount, 0)
+    details = {"streak": safe_streak, "base_amount": base_amount}
+    if boost.get("active"):
+        details["boost"] = {
+            "name": boost.get("name"),
+            "multiplier": boost.get("multiplier"),
+            "bonus_percent": boost.get("bonus_percent"),
+        }
+    return {"granted": amount, "balance": add_signal_shards(vk_id, amount, source="daily_quest", details=details), "cap": 0, "used": 0, "boost": boost}
+
+
+def get_weekly_quest_shards_status(vk_id: int) -> dict:
+    week_id = _current_week_id()
+    stored_week = int(database.get_user_flag(vk_id, "resonance_weekly_quest_shards_week", 0) or 0)
+    if stored_week != week_id:
+        return {
+            "week_id": week_id,
+            "count": 0,
+            "target": WEEKLY_QUEST_SHARDS_TARGET,
+            "claimed": False,
+            "reward": WEEKLY_QUEST_SHARDS_REWARD,
+        }
+    return {
+        "week_id": week_id,
+        "count": max(0, int(database.get_user_flag(vk_id, "resonance_weekly_quest_shards_count", 0) or 0)),
+        "target": WEEKLY_QUEST_SHARDS_TARGET,
+        "claimed": bool(int(database.get_user_flag(vk_id, "resonance_weekly_quest_shards_claimed", 0) or 0)),
+        "reward": WEEKLY_QUEST_SHARDS_REWARD,
+    }
+
+
+def grant_weekly_quest_shards(vk_id: int) -> dict:
+    """Недельная цель: несколько забранных daily-наград за UTC-неделю."""
+    week_id = _current_week_id()
+    status = get_weekly_quest_shards_status(vk_id)
+    count = int(status.get("count", 0) or 0) + 1
+    database.set_user_flag(vk_id, "resonance_weekly_quest_shards_week", week_id)
+    database.set_user_flag(vk_id, "resonance_weekly_quest_shards_count", count)
+
+    if status.get("claimed"):
+        return {**status, "count": count, "granted": 0, "balance": get_signal_shards(vk_id)}
+    if count < WEEKLY_QUEST_SHARDS_TARGET:
+        return {**status, "count": count, "claimed": False, "granted": 0, "balance": get_signal_shards(vk_id)}
+
+    base_amount = WEEKLY_QUEST_SHARDS_REWARD
+    amount, _cap, boost = _apply_signal_shard_boost(base_amount, 0)
+    details = {"week_id": week_id, "count": count, "target": WEEKLY_QUEST_SHARDS_TARGET, "base_amount": base_amount}
+    if boost.get("active"):
+        details["boost"] = {
+            "name": boost.get("name"),
+            "multiplier": boost.get("multiplier"),
+            "bonus_percent": boost.get("bonus_percent"),
+        }
+    balance = add_signal_shards(vk_id, amount, source="weekly_quest", details=details)
+    database.set_user_flag(vk_id, "resonance_weekly_quest_shards_claimed", 1)
+    return {
+        "week_id": week_id,
+        "count": count,
+        "target": WEEKLY_QUEST_SHARDS_TARGET,
+        "claimed": True,
+        "reward": WEEKLY_QUEST_SHARDS_REWARD,
+        "granted": amount,
+        "balance": balance,
+        "boost": boost,
+    }
 
 
 def grant_event_shards(vk_id: int, event: dict, result: dict) -> dict:
@@ -928,6 +1082,35 @@ def _grant_item_to_inventory(vk_id: int, item_name: str, quantity: int = 1) -> b
     return bool(database.add_item_to_inventory(vk_id, item_name, quantity))
 
 
+def _inventory_weight(vk_id: int) -> float:
+    total = 0.0
+    for row in database.get_user_inventory(vk_id):
+        total += float(row.get("weight", 0) or 0) * int(row.get("quantity", 0) or 0)
+    return round(total, 3)
+
+
+def _item_weight(item_name: str, quantity: int = 1) -> float:
+    item = database.get_item_by_name(item_name) or {}
+    return round(float(item.get("weight", 0) or 0) * max(1, int(quantity or 1)), 3)
+
+
+def _can_fit_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+    user = database.get_user_by_vk(vk_id) or {}
+    max_weight = float(user.get("max_weight", 0) or 0)
+    if max_weight <= 0:
+        return True
+    return _inventory_weight(vk_id) + _item_weight(item_name, quantity) <= max_weight + 1e-6
+
+
+def _grant_item_to_inventory_or_storage(vk_id: int, item_name: str, quantity: int = 1) -> str:
+    """Выдать ценный предмет без наказания за перевес: рюкзак, иначе шкаф."""
+    if _can_fit_inventory(vk_id, item_name, quantity) and _grant_item_to_inventory(vk_id, item_name, quantity):
+        return "inventory"
+    if _grant_item_to_storage(vk_id, item_name, quantity):
+        return "storage_overweight"
+    return "failed"
+
+
 def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
     if reward.kind == "shells":
         ok, _ = database.add_shells(vk_id, reward.quantity)
@@ -954,10 +1137,11 @@ def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
         )
 
     if reward.rarity == "SSR" and reward.kind == "item":
-        _grant_item_to_inventory(vk_id, reward.name, reward.quantity)
+        destination = _grant_item_to_inventory_or_storage(vk_id, reward.name, reward.quantity)
+        return replace(reward, destination=destination)
     else:
         _grant_item_to_storage(vk_id, reward.name, reward.quantity)
-    return reward
+    return replace(reward, destination="storage")
 
 
 def _quantity(entry: RewardEntry) -> int:
@@ -1121,6 +1305,7 @@ def _record_pull_history(
             "quantity": int(reward.quantity),
             "duplicate": bool(reward.duplicate),
             "source_name": reward.source_name,
+            "destination": reward.destination,
             "featured": bool(reward.featured or reward.sr_featured),
             "guaranteed": bool(reward.guaranteed or reward.sr_guaranteed),
             "rateup_lost": bool(reward.fifty_fifty_lost or reward.sr_rateup_lost),

@@ -166,6 +166,7 @@ class GachaSystemTest(unittest.TestCase):
     def test_resonance_menu_shows_exact_banner_time_left(self):
         with patch("game.gacha.ui.get_exchange_wallet", return_value={"shards": 160, "dust": 0, "marks": 0, "weapon_tickets": 1, "outfit_tickets": 0}), \
              patch("game.gacha.ui.get_banner_time_left", return_value={"formatted": "19д 23:59:58", "phase_number": 1, "phases_per_patch": 2}), \
+             patch("game.gacha.ui.get_signal_shard_boost", return_value={"active": False}), \
              patch("game.gacha.ui.get_banner_state", return_value={
                  "pity_ssr": 0,
                  "pity_sr": 0,
@@ -611,14 +612,33 @@ class GachaSystemTest(unittest.TestCase):
         reward = service.PullReward("SSR", "АК-74 «Резонанс»")
         with patch("game.gacha.service.database.get_user_inventory", return_value=[]), \
              patch("game.gacha.service.database.get_user_storage", return_value=[]), \
-             patch("game.gacha.service.database.get_user_by_vk", return_value={}), \
+             patch("game.gacha.service.database.get_user_by_vk", return_value={"max_weight": 30}), \
+             patch("game.gacha.service.database.get_item_by_name", return_value={"weight": 3.2}), \
              patch("game.gacha.service.database.add_item_to_inventory", return_value=True) as add_inventory_mock, \
              patch("game.gacha.service.database.add_item_to_storage", return_value=True) as add_storage_mock:
             granted = service._grant_reward(777, reward)
 
         self.assertFalse(granted.duplicate)
+        self.assertEqual(granted.destination, "inventory")
         add_inventory_mock.assert_called_once_with(777, "АК-74 «Резонанс»", 1)
         add_storage_mock.assert_not_called()
+
+    def test_overweight_ssr_goes_to_storage_without_loss(self):
+        reward = service.PullReward("SSR", "АК-74 «Резонанс»")
+        with patch("game.gacha.service.database.get_user_inventory", return_value=[
+            {"name": "Металлолом", "quantity": 10, "weight": 1.0},
+        ]), \
+             patch("game.gacha.service.database.get_user_storage", return_value=[]), \
+             patch("game.gacha.service.database.get_user_by_vk", return_value={"max_weight": 12}), \
+             patch("game.gacha.service.database.get_item_by_name", return_value={"weight": 3.2}), \
+             patch("game.gacha.service.database.add_item_to_inventory", return_value=True) as add_inventory_mock, \
+             patch("game.gacha.service.database.add_item_to_storage", return_value=True) as add_storage_mock:
+            granted = service._grant_reward(777, reward)
+
+        self.assertFalse(granted.duplicate)
+        self.assertEqual(granted.destination, "storage_overweight")
+        add_inventory_mock.assert_not_called()
+        add_storage_mock.assert_called_once_with(777, "АК-74 «Резонанс»", 1)
 
     def test_public_player_reaches_pull_cost_check_without_admin_gate(self):
         with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
@@ -783,7 +803,8 @@ class GachaSystemTest(unittest.TestCase):
         self.assertIn("АКС-74 «Серый Контур»", sent[2]["message"])
 
     def test_daily_quest_shards_scale_but_stay_below_single_pull(self):
-        with patch("game.gacha.service.add_signal_shards", return_value=500) as add_shards:
+        with patch("game.gacha.service.get_signal_shard_boost", return_value={"active": False}), \
+             patch("game.gacha.service.add_signal_shards", return_value=500) as add_shards:
             reward = service.grant_daily_quest_shards(777, streak=7)
 
         self.assertEqual(reward["granted"], 84)
@@ -810,13 +831,101 @@ class GachaSystemTest(unittest.TestCase):
         def set_flag(_vk_id, name, value):
             flags[name] = value
 
-        with patch("game.gacha.service.database.get_user_flag", side_effect=get_flag), \
+        with patch("game.gacha.service.get_signal_shard_boost", return_value={"active": False}), \
+             patch("game.gacha.service.database.get_user_flag", side_effect=get_flag), \
              patch("game.gacha.service.database.set_user_flag", side_effect=set_flag):
             reward = service.add_signal_shards_capped(777, 20, "event", 80)
 
         self.assertEqual(reward["granted"], 5)
         self.assertEqual(flags[banners.SIGNAL_SHARDS_FLAG], 1005)
         self.assertEqual(flags["resonance_event_shards_used"], 80)
+
+    def test_signal_shard_boost_increases_daily_quest_reward(self):
+        boost = {"active": True, "name": "Тест", "multiplier": 2.0, "bonus_percent": 100}
+        with patch("game.gacha.service.get_signal_shard_boost", return_value=boost), \
+             patch("game.gacha.service.add_signal_shards", return_value=500) as add_shards:
+            reward = service.grant_daily_quest_shards(777, streak=7)
+
+        self.assertEqual(reward["granted"], 168)
+        add_shards.assert_called_once()
+        self.assertEqual(add_shards.call_args.args[:2], (777, 168))
+        self.assertEqual(add_shards.call_args.kwargs["details"]["base_amount"], 84)
+        self.assertEqual(add_shards.call_args.kwargs["details"]["boost"]["bonus_percent"], 100)
+
+    def test_weekly_quest_shards_pay_after_five_daily_claims(self):
+        flags = {
+            "resonance_weekly_quest_shards_week": service._current_week_id(),
+            "resonance_weekly_quest_shards_count": 4,
+            "resonance_weekly_quest_shards_claimed": 0,
+        }
+
+        def get_flag(_vk_id, name, default=0):
+            return flags.get(name, default)
+
+        def set_flag(_vk_id, name, value):
+            flags[name] = value
+
+        with patch("game.gacha.service.get_signal_shard_boost", return_value={"active": False}), \
+             patch("game.gacha.service.database.get_user_flag", side_effect=get_flag), \
+             patch("game.gacha.service.database.set_user_flag", side_effect=set_flag), \
+             patch("game.gacha.service.add_signal_shards", return_value=1400) as add_shards:
+            reward = service.grant_weekly_quest_shards(777)
+
+        self.assertEqual(reward["count"], 5)
+        self.assertEqual(reward["granted"], 400)
+        self.assertTrue(reward["claimed"])
+        self.assertEqual(flags["resonance_weekly_quest_shards_claimed"], 1)
+        add_shards.assert_called_once()
+        self.assertEqual(add_shards.call_args.args[:2], (777, 400))
+        self.assertEqual(add_shards.call_args.kwargs["source"], "weekly_quest")
+
+    def test_weekly_quest_shards_do_not_pay_before_goal(self):
+        flags = {
+            "resonance_weekly_quest_shards_week": service._current_week_id(),
+            "resonance_weekly_quest_shards_count": 2,
+            "resonance_weekly_quest_shards_claimed": 0,
+        }
+
+        def get_flag(_vk_id, name, default=0):
+            return flags.get(name, default)
+
+        def set_flag(_vk_id, name, value):
+            flags[name] = value
+
+        with patch("game.gacha.service.database.get_user_flag", side_effect=get_flag), \
+             patch("game.gacha.service.database.set_user_flag", side_effect=set_flag), \
+             patch("game.gacha.service.get_signal_shards", return_value=1000), \
+             patch("game.gacha.service.add_signal_shards") as add_shards:
+            reward = service.grant_weekly_quest_shards(777)
+
+        self.assertEqual(reward["count"], 3)
+        self.assertEqual(reward["granted"], 0)
+        self.assertFalse(reward["claimed"])
+        add_shards.assert_not_called()
+
+    def test_signal_shard_boost_scales_capped_rewards_and_cap(self):
+        flags = {
+            "resonance_event_shards_day": service._today_ordinal(),
+            "resonance_event_shards_used": 75,
+            banners.SIGNAL_SHARDS_FLAG: 1000,
+        }
+        boost = {"active": True, "name": "Тест", "multiplier": 2.0, "bonus_percent": 100}
+
+        def get_flag(_vk_id, name, default=0):
+            return flags.get(name, default)
+
+        def set_flag(_vk_id, name, value):
+            flags[name] = value
+
+        with patch("game.gacha.service.get_signal_shard_boost", return_value=boost), \
+             patch("game.gacha.service.database.get_user_flag", side_effect=get_flag), \
+             patch("game.gacha.service.database.set_user_flag", side_effect=set_flag):
+            reward = service.add_signal_shards_capped(777, 20, "event", 80)
+
+        self.assertEqual(reward["granted"], 40)
+        self.assertEqual(reward["cap"], 160)
+        self.assertEqual(flags[banners.SIGNAL_SHARDS_FLAG], 1040)
+        self.assertEqual(flags["resonance_event_shards_used"], 115)
 
     def test_event_shards_reward_positive_event_result(self):
         with patch("game.gacha.service.add_signal_shards_capped", return_value={"granted": 16, "balance": 16, "cap": 80, "used": 16}) as capped:

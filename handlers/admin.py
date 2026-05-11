@@ -234,7 +234,8 @@ def _show_category(vk, user_id: int, category: str):
                  "• админ гача баннеры\n"
                  "• админ гача баннер старт <release_id>\n"
                  "• админ гача баннер отложить <release_id> <YYYY-MM-DD HH:MM>\n"
-                 "• админ гача осколки <vk_id> <кол-во>\n",
+                 "• админ гача осколки <vk_id> <кол-во>\n"
+                 "• админ гача осколки буст <множитель> <минуты> [название]\n",
         "help": "📖 СПРАВКА АДМИНА\n\nВсе команды начинаются с админ:\n"
                 "• админ пользователи [поиск] — список/поиск\n"
                 "• админ профиль <vk_id> — профиль\n"
@@ -251,6 +252,7 @@ def _show_category(vk, user_id: int, category: str):
                 "• админ маркет on|off\n"
                 "• админ гача on|off\n"
                 "• админ гача осколки <vk_id> <кол-во>\n"
+                "• админ гача осколки буст <множитель> <минуты> [название]\n"
                 "• админ лоты [active|sold|cancelled|expired|all]\n"
                 "• админ снять лот <id>\n"
                 "• админ квесты <vk_id>\n"
@@ -518,9 +520,15 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         set_resonance_enabled(False)
         _send(vk, user_id, "⛔ Резонанс Зоны отключён.", create_admin_gacha_keyboard()); return True
     if text == "📊 гача статус":
-        from game.gacha.service import is_resonance_enabled
+        from game.gacha.service import get_signal_shard_boost, is_resonance_enabled
         status = "включён" if is_resonance_enabled() else "отключён"
-        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: все игроки.", create_admin_gacha_keyboard()); return True
+        boost = get_signal_shard_boost()
+        boost_line = (
+            f"\n⚡ Окно осколков: +{boost['bonus_percent']}%, осталось {boost['formatted']}"
+            if boost.get("active") else
+            "\n⚡ Окно осколков: выключено"
+        )
+        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: все игроки.{boost_line}", create_admin_gacha_keyboard()); return True
     if text == "📈 гача статистика":
         from game.gacha.service import get_current_banner_stats
         data = get_current_banner_stats()
@@ -570,9 +578,15 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
 
     m = re.match(r"^админ:?\s+гача\s+статус$", text)
     if m:
-        from game.gacha.service import is_resonance_enabled
+        from game.gacha.service import get_signal_shard_boost, is_resonance_enabled
         status = "включён" if is_resonance_enabled() else "отключён"
-        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: все игроки.", create_admin_gacha_keyboard()); return True
+        boost = get_signal_shard_boost()
+        boost_line = (
+            f"\n⚡ Окно осколков: +{boost['bonus_percent']}%, осталось {boost['formatted']}"
+            if boost.get("active") else
+            "\n⚡ Окно осколков: выключено"
+        )
+        _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: все игроки.{boost_line}", create_admin_gacha_keyboard()); return True
 
     m = re.match(r"^админ:?\s+гача\s+(баннеры|банеры|релизы)$", text)
     if m:
@@ -662,6 +676,33 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                 f"• Средний выкрут до SSR: {avg}",
             ])
         _send(vk, user_id, "\n".join(lines), create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ:?\s+гача\s+осколки\s+буст\s+(off|выкл|0)$", text)
+    if m:
+        from game.gacha.service import clear_signal_shard_boost
+        clear_signal_shard_boost()
+        _send(vk, user_id, "✅ Окно повышенных осколков выключено.", create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ:?\s+гача\s+осколки\s+буст\s+(\d+(?:[.,]\d+)?)\s+(\d+)(?:\s+(.+))?$", text)
+    if m:
+        from game.gacha.service import set_signal_shard_boost
+        multiplier = float(m.group(1).replace(",", "."))
+        duration_minutes = int(m.group(2))
+        name = (m.group(3) or "").strip() or None
+        boost = set_signal_shard_boost(multiplier, duration_minutes, name)
+        if not boost.get("active"):
+            _send(vk, user_id, "❌ Укажи множитель больше 1 и длительность больше 0 минут.", create_admin_gacha_keyboard()); return True
+        _send(
+            vk,
+            user_id,
+            (
+                f"✅ Окно повышенных осколков включено: +{boost['bonus_percent']}%\n"
+                f"Название: {boost.get('name')}\n"
+                f"Осталось: {boost['formatted']}"
+            ),
+            create_admin_gacha_keyboard(),
+        )
+        return True
 
     m = re.match(r"^админ\s+гача\s+осколки\s+(\d+)\s+(-?\d+)$", text)
     if m:

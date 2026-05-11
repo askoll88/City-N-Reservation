@@ -342,13 +342,21 @@ def _get_streak_title(streak: int) -> str:
     return title
 
 
-def format_daily_quests_header(quests: list, progresses: dict, streak: int) -> str:
+def format_daily_quests_header(quests: list, progresses: dict, streak: int, user_id: int | None = None) -> str:
     today = _today_key()
     title = _get_streak_title(streak)
 
     msg = "📋 ЕЖЕДНЕВНЫЕ ЗАДАНИЯ\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"📅 {today} | 🔥 Серия: {streak} дн. | 🏅 {title}\n\n"
+    if user_id is not None:
+        try:
+            from game.gacha.service import get_weekly_quest_shards_status
+            weekly = get_weekly_quest_shards_status(user_id)
+            status = "получено" if weekly.get("claimed") else f"{weekly.get('count', 0)}/{weekly.get('target', 5)}"
+            msg += f"⚡ Недельная цель Резонанса: {status} | награда {weekly.get('reward', 400)} осколков\n\n"
+        except Exception:
+            pass
 
     for i, quest in enumerate(quests, 1):
         qid = quest["id"]

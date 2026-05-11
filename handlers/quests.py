@@ -135,7 +135,7 @@ def handle_daily_quests_command(player, vk, user_id: int, text: str) -> bool:
     page = aliases[text_lower]
     if page == 2:
         quests, progress, streak = database.reset_daily_quests_if_needed(user_id)
-        msg = format_daily_quests_header(quests, progress, streak)
+        msg = format_daily_quests_header(quests, progress, streak, user_id=user_id)
     elif page == 1:
         msg = _format_story_quests_page(user_id, completed=True)
     else:
@@ -205,14 +205,22 @@ def handle_claim_rewards(player, vk, user_id: int, text: str) -> bool:
         return True
 
     # Успешная награда
-    from game.gacha.service import grant_daily_quest_shards
+    from game.gacha.service import grant_daily_quest_shards, grant_weekly_quest_shards
 
     shard_reward = grant_daily_quest_shards(user_id, int(result.get("new_streak", 1) or 1))
+    weekly_shard_reward = grant_weekly_quest_shards(user_id)
     msg = "🎉 НАГРАДА ПОЛУЧЕНА!\n\n"
     msg += f"⭐ Опыт: +{result['xp']:,} XP\n"
     msg += f"💰 Деньги: +{result['money']:,} руб.\n"
     if shard_reward.get("granted", 0) > 0:
         msg += f"💠 Осколки сигнала: +{shard_reward['granted']}\n"
+    if weekly_shard_reward.get("granted", 0) > 0:
+        msg += f"⚡ Недельная цель Резонанса: +{weekly_shard_reward['granted']} осколков\n"
+    else:
+        msg += (
+            f"⚡ Недельная цель Резонанса: "
+            f"{weekly_shard_reward.get('count', 0)}/{weekly_shard_reward.get('target', 5)}\n"
+        )
 
     if result.get("bonus_items"):
         msg += "\n🎁 Бонусные предметы:\n"
