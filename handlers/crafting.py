@@ -42,12 +42,17 @@ def _inventory_quantities(user_id: int) -> dict[str, int]:
         if not name:
             continue
         quantities[name] = quantities.get(name, 0) + int(item.get("quantity", 0) or 0)
+    try:
+        from game.gacha.service import get_signal_shards
+        quantities["Осколки сигнала"] = get_signal_shards(user_id)
+    except Exception:
+        quantities.setdefault("Осколки сигнала", 0)
     return quantities
 
 
 def _recipe_status(recipe: dict, craft_level: int, quantities: dict[str, int]) -> dict:
     missing = []
-    for name, required_qty in recipe["ingredients"]:
+    for name, required_qty in [*recipe.get("ingredients", []), *recipe.get("currency_ingredients", [])]:
         have_qty = int(quantities.get(name, 0) or 0)
         if have_qty < int(required_qty):
             missing.append((name, have_qty, int(required_qty)))
@@ -91,7 +96,7 @@ def _find_recipe_by_id(recipe_id: str) -> dict | None:
 def _format_recipe_card(idx: int, recipe: dict, status: dict, *, available_view: bool) -> str:
     result_name, result_qty = recipe["result"]
     ingredients = []
-    for name, required_qty in recipe["ingredients"]:
+    for name, required_qty in [*recipe.get("ingredients", []), *recipe.get("currency_ingredients", [])]:
         ingredients.append(f"{name} x{required_qty}")
     lines = [
         f"{idx}. {recipe['name']}",
@@ -349,12 +354,16 @@ def craft_recipe(player, vk, user_id: int, target: str, *, refresh_view: str | N
         return
 
     result_name, result_qty = recipe["result"]
-    tx = database.craft_item_transaction(
-        vk_id=user_id,
-        ingredients=recipe["ingredients"],
-        result_item_name=result_name,
-        result_quantity=result_qty,
-    )
+    if recipe.get("resonance_ticket_banner"):
+        from game.gacha.service import convert_signal_shards_to_tickets
+        tx = convert_signal_shards_to_tickets(user_id, str(recipe["resonance_ticket_banner"]), int(result_qty))
+    else:
+        tx = database.craft_item_transaction(
+            vk_id=user_id,
+            ingredients=recipe["ingredients"],
+            result_item_name=result_name,
+            result_quantity=result_qty,
+        )
     if not tx.get("success"):
         vk.messages.send(
             user_id=user_id,
@@ -369,7 +378,10 @@ def craft_recipe(player, vk, user_id: int, target: str, *, refresh_view: str | N
     if gain["new_level"] > gain["old_level"]:
         level_up_msg = f"\n🎯 Навык крафта повышен: {gain['old_level']} -> {gain['new_level']}"
 
-    ingredients_text = ", ".join(f"{name} x{qty}" for name, qty in recipe["ingredients"])
+    ingredients_text = ", ".join(
+        f"{name} x{qty}"
+        for name, qty in [*recipe.get("ingredients", []), *recipe.get("currency_ingredients", [])]
+    )
     vk.messages.send(
         user_id=user_id,
         message=(

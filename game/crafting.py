@@ -27,6 +27,28 @@ CRAFTING_LEVEL_THRESHOLDS = {
 # Рецепты только из актуального пула предметов.
 CRAFT_RECIPES: list[dict[str, Any]] = [
     {
+        "id": "resonance_weapon_ticket",
+        "name": "Оружейный отклик",
+        "ingredients": [],
+        "currency_ingredients": [("Осколки сигнала", 160)],
+        "result": ("Оружейный отклик", 1),
+        "required_level": 1,
+        "xp_gain": 10,
+        "description": "Один запечатанный отклик для оружейного Резонанса",
+        "resonance_ticket_banner": "weapon",
+    },
+    {
+        "id": "resonance_outfit_ticket",
+        "name": "Отклик снаряжения",
+        "ingredients": [],
+        "currency_ingredients": [("Осколки сигнала", 160)],
+        "result": ("Отклик снаряжения", 1),
+        "required_level": 1,
+        "xp_gain": 10,
+        "description": "Один запечатанный отклик для Резонанса снаряжения",
+        "resonance_ticket_banner": "outfit",
+    },
+    {
         "id": "stim_pack",
         "name": "Полевой стим-пак",
         "ingredients": [("Бинт", 1), ("Энергетик", 1)],
