@@ -136,6 +136,75 @@ def _fmt_ts_msk(ts: int) -> str:
     return datetime.fromtimestamp(int(ts), tz=timezone.utc).astimezone(MSK_TZ).strftime("%H:%M:%S")
 
 
+def _fmt_dt_msk(ts: int) -> str:
+    if not ts:
+        return "-"
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc).astimezone(MSK_TZ).strftime("%Y-%m-%d %H:%M:%S МСК")
+
+
+def _parse_msk_datetime(raw: str) -> int | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    if re.fullmatch(r"\d{10}", value):
+        return int(value)
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M"):
+        try:
+            dt = datetime.strptime(value, pattern).replace(tzinfo=MSK_TZ)
+            return int(dt.astimezone(timezone.utc).timestamp())
+        except ValueError:
+            continue
+    return None
+
+
+def _format_gacha_banner_admin_status() -> str:
+    from game.gacha.service import get_banner_release_admin_status
+
+    data = get_banner_release_admin_status()
+    cycle = data["cycle"]
+    active = data.get("active") or {}
+    scheduled = data.get("scheduled")
+    lines = [
+        "🗓️ БАННЕРЫ РЕЗОНАНСА",
+        "",
+        "Активный релиз:",
+        f"• ID: {active.get('id') or '-'}",
+        f"• Название: {active.get('name') or '-'}",
+        f"• Волна: {cycle.get('phase_number', 1)}/{cycle.get('phases_per_patch', 2)}",
+        f"• Старт: {_fmt_dt_msk(cycle.get('start_ts', 0))}",
+        f"• Конец: {_fmt_dt_msk(cycle.get('end_ts', 0))}",
+        f"• Осталось: {cycle.get('formatted', '-')}",
+        "",
+        "Отложенный старт:",
+    ]
+    if scheduled:
+        lines.extend([
+            f"• ID: {scheduled.get('release_id')}",
+            f"• Название: {scheduled.get('release_name')}",
+            f"• Старт: {_fmt_dt_msk(scheduled.get('start_ts', 0))}",
+        ])
+    else:
+        lines.append("• Нет")
+    lines.extend([
+        "",
+        "Готовые релизы:",
+    ])
+    for release in data.get("available") or []:
+        lines.extend([
+            f"• {release['id']} — {release['name']}",
+            f"  Фаза 1: {release['weapon']} / {release['outfit']}",
+            f"  Фаза 2: {release.get('weapon_phase_2') or '-'} / {release.get('outfit_phase_2') or '-'}",
+        ])
+    lines.extend([
+        "",
+        "Команды:",
+        "• админ гача баннер старт <release_id>",
+        "• админ гача баннер отложить <release_id> <YYYY-MM-DD HH:MM>",
+        "• админ гача баннер отмена",
+    ])
+    return "\n".join(lines)
+
+
 def _show_main_menu(vk, user_id: int):
     _clear_admin_menu(user_id)
     _send(vk, user_id, "🛠️ АДМИН-ПАНЕЛЬ\n\nВыбери категорию:", create_admin_keyboard())
@@ -162,6 +231,9 @@ def _show_category(vk, user_id: int, category: str):
         "gacha": "🌀 РЕЗОНАНС ЗОНЫ\n\nГлобальное управление доступом:\n"
                  "• админ гача on|off\n"
                  "• админ гача статус\n"
+                 "• админ гача баннеры\n"
+                 "• админ гача баннер старт <release_id>\n"
+                 "• админ гача баннер отложить <release_id> <YYYY-MM-DD HH:MM>\n"
                  "• админ гача осколки <vk_id> <кол-во>\n",
         "help": "📖 СПРАВКА АДМИНА\n\nВсе команды начинаются с админ:\n"
                 "• админ пользователи [поиск] — список/поиск\n"
@@ -482,6 +554,8 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
                 f"• Средний выкрут до SSR: {avg}",
             ])
         _send(vk, user_id, "\n".join(lines), create_admin_gacha_keyboard()); return True
+    if text == "🗓️ баннеры":
+        _send(vk, user_id, _format_gacha_banner_admin_status(), create_admin_gacha_keyboard()); return True
     if text == "💠 выдать осколки":
         _send(vk, user_id, "Введи:\nадмин гача осколки <vk_id> <кол-во>", create_admin_gacha_keyboard()); return True
 
@@ -499,6 +573,60 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         from game.gacha.service import is_resonance_enabled
         status = "включён" if is_resonance_enabled() else "отключён"
         _send(vk, user_id, f"🌀 Резонанс Зоны: {status}\nДоступ: все игроки.", create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ:?\s+гача\s+(баннеры|банеры|релизы)$", text)
+    if m:
+        _send(vk, user_id, _format_gacha_banner_admin_status(), create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ:?\s+гача\s+банн?ер\s+старт\s+([\w\-]+)$", text)
+    if m:
+        from game.gacha.service import activate_banner_release
+        result = activate_banner_release(m.group(1))
+        if result.get("success"):
+            message = (
+                f"✅ Релиз баннеров включён: {result.get('release_name')}\n"
+                f"ID: {result.get('release_id')}\n"
+                f"Старт: {_fmt_dt_msk(result.get('start_ts', 0))}\n"
+                f"Конец: {_fmt_dt_msk(result.get('end_ts', 0))}"
+            )
+        else:
+            message = f"❌ {result.get('message', 'Не удалось включить релиз баннеров.')}"
+        _send(vk, user_id, message, create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ:?\s+гача\s+банн?ер\s+отложить\s+([\w\-]+)\s+(.+)$", text)
+    if m:
+        from game.gacha.service import schedule_banner_release
+        release_id = m.group(1)
+        start_ts = _parse_msk_datetime(m.group(2))
+        if not start_ts:
+            _send(
+                vk,
+                user_id,
+                "❌ Не понял время старта.\nФормат: админ гача баннер отложить <release_id> <YYYY-MM-DD HH:MM>",
+                create_admin_gacha_keyboard(),
+            )
+            return True
+        result = schedule_banner_release(release_id, start_ts)
+        if result.get("success"):
+            message = (
+                f"✅ Отложенный старт баннеров сохранён: {result.get('release_name')}\n"
+                f"ID: {result.get('release_id')}\n"
+                f"Старт: {_fmt_dt_msk(result.get('start_ts', 0))}"
+            )
+        else:
+            message = f"❌ {result.get('message', 'Не удалось поставить релиз в расписание.')}"
+        _send(vk, user_id, message, create_admin_gacha_keyboard()); return True
+
+    m = re.match(r"^админ:?\s+гача\s+банн?ер\s+(отмена|cancel)$", text)
+    if m:
+        from game.gacha.service import cancel_scheduled_banner_release
+        result = cancel_scheduled_banner_release()
+        message = (
+            f"✅ Отложенный старт отменён: {result.get('release_id')} ({_fmt_dt_msk(result.get('start_ts', 0))})."
+            if result.get("cancelled") else
+            "ℹ️ Отложенного старта баннеров не было."
+        )
+        _send(vk, user_id, message, create_admin_gacha_keyboard()); return True
 
     m = re.match(r"^админ:?\s+гача\s+(статистика|стата|stats)$", text)
     if m:

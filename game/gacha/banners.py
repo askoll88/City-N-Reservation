@@ -87,113 +87,82 @@ class Banner:
     r_pool: tuple[RewardEntry, ...]
 
 
-WEAPON_BANNER = Banner(
-    id="weapon",
-    name="Оружейный резонанс",
-    featured_ssr=("АК-74 «Резонанс»",),
-    off_ssr=WEAPON_OFFRATE_SSR_POOL,
-    featured_sr=(
-        RewardEntry("item", "ПМ «Сбой»"),
-        RewardEntry("item", "Модуль резонанса оружия"),
-    ),
-    off_sr=(
-        RewardEntry("item", "ИЖ-27 «Глухой Отклик»"),
-    ),
-    sr_pool=(
-        RewardEntry("item", "ПМ «Сбой»"),
-        RewardEntry("item", "ИЖ-27 «Глухой Отклик»"),
-        RewardEntry("item", "Модуль резонанса оружия"),
-    ),
-    r_pool=(
-        RewardEntry("item", "Бинт", 1, 2),
-        RewardEntry("item", "Аптечка", 1, 1),
-        RewardEntry("item", "Металлолом", 2, 5),
-        RewardEntry("item", "Медная проволока", 1, 3),
-        RewardEntry("item", "Аномальный шлак", 1, 2),
-        RewardEntry("item", "Комок ржавой стружки", 2, 6),
-        RewardEntry("item", "Почерневшая батарейка", 1, 3),
-        RewardEntry("item", "Пыльный предохранитель", 1, 3),
-    ),
-)
+def _reward_entry(value) -> RewardEntry:
+    if isinstance(value, RewardEntry):
+        return value
+    if isinstance(value, dict):
+        return RewardEntry(
+            kind=str(value.get("kind") or "item"),
+            name=str(value.get("name") or ""),
+            min_qty=max(1, int(value.get("min_qty", 1) or 1)),
+            max_qty=max(1, int(value.get("max_qty", value.get("min_qty", 1)) or 1)),
+        )
+    if isinstance(value, (tuple, list)):
+        name = str(value[0] if len(value) > 0 else "")
+        min_qty = max(1, int(value[1] if len(value) > 1 else 1))
+        max_qty = max(1, int(value[2] if len(value) > 2 else min_qty))
+        return RewardEntry("item", name, min_qty, max_qty)
+    return RewardEntry("item", str(value or ""))
 
-OUTFIT_BANNER = Banner(
-    id="outfit",
-    name="Резонанс снаряжения",
-    featured_ssr=SIGNAL_GUIDE_SET,
-    off_ssr=OUTFIT_OFFRATE_SSR_POOL,
-    featured_sr=(
-        RewardEntry("item", "Куртка «Глухой эфир»"),
-        RewardEntry("item", "Ткань с резонансной пропиткой"),
-    ),
-    off_sr=(
-        RewardEntry("item", "Маска «Пыль эфира»"),
-        RewardEntry("item", "Перчатки «Сухой контакт»"),
-        RewardEntry("item", "Ботинки «Тихий шаг»"),
-    ),
-    sr_pool=(
-        RewardEntry("item", "Куртка «Глухой эфир»"),
-        RewardEntry("item", "Маска «Пыль эфира»"),
-        RewardEntry("item", "Перчатки «Сухой контакт»"),
-        RewardEntry("item", "Ботинки «Тихий шаг»"),
-        RewardEntry("item", "Ткань с резонансной пропиткой"),
-    ),
-    r_pool=(
-        RewardEntry("item", "Бинт", 1, 2),
-        RewardEntry("item", "Аптечка", 1, 1),
-        RewardEntry("item", "Ветошь", 2, 5),
-        RewardEntry("item", "Стеклянная тара", 1, 3),
-        RewardEntry("item", "Старые документы", 1, 3),
-        RewardEntry("item", "Провонявший бинт", 2, 6),
-        RewardEntry("item", "Пустой фильтр", 1, 4),
-        RewardEntry("item", "Слипшийся блокнот", 1, 3),
-    ),
-)
+
+def _reward_entries(values) -> tuple[RewardEntry, ...]:
+    return tuple(_reward_entry(value) for value in values or ())
+
+
+def _banner_from_config(banner_id: str, config: dict) -> Banner:
+    return Banner(
+        id=str(banner_id),
+        name=str(config.get("name") or banner_id),
+        featured_ssr=tuple(str(item) for item in config.get("featured_ssr", []) if item),
+        off_ssr=tuple(str(item) for item in config.get("off_ssr", []) if item),
+        featured_sr=_reward_entries(config.get("featured_sr", [])),
+        off_sr=_reward_entries(config.get("off_sr", [])),
+        sr_pool=_reward_entries(config.get("sr_pool", [])),
+        r_pool=_reward_entries(config.get("r_pool", [])),
+    )
+
+
+def _phase_from_config(phase: dict) -> dict[str, Banner]:
+    return {
+        "weapon": _banner_from_config("weapon", phase.get("weapon", {})),
+        "outfit": _banner_from_config("outfit", phase.get("outfit", {})),
+    }
+
+
+def _release_from_config(release_id: str, config: dict) -> dict:
+    phases = tuple(_phase_from_config(phase) for phase in config.get("phases", []))
+    return {
+        "id": str(release_id),
+        "name": str(config.get("name") or release_id),
+        "patch": int(config.get("patch", 0) or 0),
+        "phases": phases,
+    }
+
+
+from .banner_releases import RESONANCE_RELEASES
+
+
+BANNER_RELEASES: dict[str, dict] = {
+    release_id: _release_from_config(release_id, release)
+    for release_id, release in RESONANCE_RELEASES.items()
+}
+
+BANNER_PHASES: tuple[dict[str, Banner], ...] = tuple(BANNER_RELEASES["patch_1"]["phases"])
+WEAPON_BANNER = BANNER_PHASES[0]["weapon"]
+OUTFIT_BANNER = BANNER_PHASES[0]["outfit"]
 
 BANNERS = {
     WEAPON_BANNER.id: WEAPON_BANNER,
     OUTFIT_BANNER.id: OUTFIT_BANNER,
 }
 
-BANNER_PHASES: tuple[dict[str, Banner], ...] = (
-    {
-        "weapon": WEAPON_BANNER,
-        "outfit": OUTFIT_BANNER,
-    },
-    {
-        "weapon": Banner(
-            id="weapon",
-            name="Оружейный резонанс: тихий сигнал",
-            featured_ssr=("Винторез «Тихий Сигнал»",),
-            off_ssr=WEAPON_OFFRATE_SSR_POOL,
-            featured_sr=(
-                RewardEntry("item", "ИЖ-27 «Глухой Отклик»"),
-                RewardEntry("item", "Модуль резонанса оружия"),
-            ),
-            off_sr=(
-                RewardEntry("item", "ПМ «Сбой»"),
-            ),
-            sr_pool=WEAPON_BANNER.sr_pool,
-            r_pool=WEAPON_BANNER.r_pool,
-        ),
-        "outfit": Banner(
-            id="outfit",
-            name="Резонанс снаряжения: искатель разлома",
-            featured_ssr=RUPTURE_SEEKER_SET,
-            off_ssr=OUTFIT_OFFRATE_SSR_POOL,
-            featured_sr=(
-                RewardEntry("item", "Маска «Пыль эфира»"),
-                RewardEntry("item", "Ткань с резонансной пропиткой"),
-            ),
-            off_sr=(
-                RewardEntry("item", "Куртка «Глухой эфир»"),
-                RewardEntry("item", "Перчатки «Сухой контакт»"),
-                RewardEntry("item", "Ботинки «Тихий шаг»"),
-            ),
-            sr_pool=OUTFIT_BANNER.sr_pool,
-            r_pool=OUTFIT_BANNER.r_pool,
-        ),
-    },
-)
+
+def list_banner_releases() -> tuple[dict, ...]:
+    return tuple(BANNER_RELEASES.values())
+
+
+def get_banner_release(release_id: str) -> dict | None:
+    return BANNER_RELEASES.get(str(release_id or "").strip().lower())
 
 
 def get_banner(banner_id: str) -> Banner | None:

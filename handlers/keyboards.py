@@ -1034,6 +1034,7 @@ def create_admin_gacha_keyboard():
     keyboard.add_button("💠 Выдать осколки", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("📈 Гача статистика", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("🗓️ Баннеры", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("⬅️ Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard

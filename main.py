@@ -1435,6 +1435,19 @@ def main():
     vk_session = vk_api.VkApi(token=TOKEN)
     vk = vk_session.get_api()
     _send_retired_trash_cashback_notifications(vk)
+    try:
+        from game.gacha.service import send_resonance_launch_notice_once
+        result = send_resonance_launch_notice_once(vk)
+        if not result.get("skipped"):
+            logger.info(
+                "Оповещение о запуске Резонанса обработано: sent=%s errors=%s rewarded=%s reward_errors=%s",
+                result.get("sent", 0),
+                result.get("errors", 0),
+                result.get("rewarded", 0),
+                result.get("reward_errors", 0),
+            )
+    except Exception:
+        logger.exception("Ошибка отправки оповещения о запуске Резонанса")
     longpoll = VkBotLongPoll(vk_session, GROUP_ID)
     
     logger.info(

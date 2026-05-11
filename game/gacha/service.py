@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -34,9 +35,11 @@ from .banners import (
     banner_from_dict,
     banner_to_dict,
     build_phase_banners,
+    get_banner_release,
     get_ssr_hard_pity,
     get_ssr_soft_pity_start,
     get_ssr_soft_pity_step,
+    list_banner_releases,
 )
 from .event_items import is_gacha_event_item
 
@@ -65,7 +68,14 @@ COMBAT_SHARDS_DAILY_CAP = 120
 RESONANCE_HISTORY_RUNTIME_KEY = "resonance_history"
 RESONANCE_HISTORY_LIMIT_PER_BANNER = 50
 PUBLIC_LAUNCH_SETTING = "resonance_public_launch_v1"
+PUBLIC_LAUNCH_NOTICE_SETTING = "resonance_public_launch_notice_v2"
+PUBLIC_LAUNCH_REWARD_SETTING = "resonance_public_launch_reward_v1"
+PUBLIC_LAUNCH_REWARD_STATE_KEY = "resonance_public_launch_reward_v1"
+PUBLIC_LAUNCH_REWARD_SHARDS = TEN_PULL_COST
 BANNER_SNAPSHOT_SETTING_PREFIX = "resonance_banner_snapshot"
+ACTIVE_BANNER_RELEASE_SETTING = "resonance_active_banner_release"
+SCHEDULED_BANNER_RELEASE_SETTING = "resonance_scheduled_banner_release"
+logger = logging.getLogger(__name__)
 
 
 def _today_ordinal() -> int:
@@ -113,8 +123,87 @@ def ensure_resonance_public_launch() -> None:
     ensure_banner_cycle()
 
 
+def format_resonance_launch_notice() -> str:
+    return (
+        "📡 ГОРОДСКОЕ ОПОВЕЩЕНИЕ\n\n"
+        "После последнего сдвига фона старый приёмный блок в Убежище вышел на устойчивую частоту.\n"
+        "Техники считают, что Зона начала отдавать остаточные слепки вещей, застрявших в её шуме: "
+        "оружие, броню и снаряжение.\n\n"
+        "Самовольный запуск оборудования вне экранированных помещений запрещён. "
+        "Для работы с сигналом используйте только стабилизированный узел Убежища.\n\n"
+        "Для допуска к приёмнику требуются запечатанные отклики. Их можно собрать из осколков сигнала "
+        "в мастерской или приобрести у Барыги на Чёрном рынке, если товар есть в его резонансной коробке.\n\n"
+        "Первым сталкерам города выдан аварийный резерв: 1600 осколков сигнала на проверку узла. "
+        "Резерв зачислен поверх уже найденных осколков.\n\n"
+        "Доступ к узлу открыт через раздел Убежища: Резонанс."
+    )
+
+
+def _grant_public_launch_reward_once(vk_id: int) -> bool:
+    state = database.get_runtime_state(vk_id, PUBLIC_LAUNCH_REWARD_STATE_KEY) or {}
+    if state.get("granted"):
+        return False
+
+    balance = add_signal_shards(
+        vk_id,
+        PUBLIC_LAUNCH_REWARD_SHARDS,
+        source="public_resonance_launch",
+        details={"amount": PUBLIC_LAUNCH_REWARD_SHARDS, "notice": PUBLIC_LAUNCH_NOTICE_SETTING},
+    )
+    database.set_runtime_state(
+        vk_id,
+        PUBLIC_LAUNCH_REWARD_STATE_KEY,
+        {"granted": True, "amount": PUBLIC_LAUNCH_REWARD_SHARDS, "balance": balance},
+    )
+    return True
+
+
+def send_resonance_launch_notice_once(vk) -> dict:
+    """Отправить городское оповещение о запуске Резонанса один раз."""
+    if not is_resonance_enabled():
+        return {"sent": 0, "errors": 0, "rewarded": 0, "reward_errors": 0, "skipped": True}
+
+    notice_sent = str(database.get_game_setting(PUBLIC_LAUNCH_NOTICE_SETTING, default="0")) == "1"
+    reward_done = str(database.get_game_setting(PUBLIC_LAUNCH_REWARD_SETTING, default="0")) == "1"
+    if notice_sent and reward_done:
+        return {"sent": 0, "errors": 0, "rewarded": 0, "reward_errors": 0, "skipped": True}
+
+    players = list(database.get_all_active_players())
+    message = format_resonance_launch_notice()
+    sent = 0
+    errors = 0
+    rewarded = 0
+    reward_errors = 0
+    for row in players:
+        vk_id = int(row.get("vk_id") or 0)
+        if vk_id <= 0:
+            continue
+        if not reward_done:
+            try:
+                if _grant_public_launch_reward_once(vk_id):
+                    rewarded += 1
+            except Exception:
+                reward_errors += 1
+                logger.warning("Не удалось выдать стартовый резерв Резонанса игроку %s", vk_id, exc_info=True)
+                continue
+        if notice_sent:
+            continue
+        try:
+            vk.messages.send(user_id=vk_id, message=message, random_id=0)
+            sent += 1
+        except Exception:
+            errors += 1
+            logger.warning("Не удалось отправить оповещение о запуске Резонанса игроку %s", vk_id, exc_info=True)
+
+    if not reward_done and reward_errors == 0:
+        database.set_game_setting(PUBLIC_LAUNCH_REWARD_SETTING, "1")
+    if not notice_sent:
+        database.set_game_setting(PUBLIC_LAUNCH_NOTICE_SETTING, "1")
+    return {"sent": sent, "errors": errors, "rewarded": rewarded, "reward_errors": reward_errors, "skipped": False}
+
+
 def is_resonance_available(vk_id: int) -> bool:
-    return is_resonance_enabled() and database.is_user_admin(vk_id)
+    return is_resonance_enabled()
 
 
 def get_signal_shards(vk_id: int) -> int:
@@ -263,31 +352,35 @@ def ensure_banner_cycle(now_ts: int | None = None) -> dict:
     """Получить текущую фазу баннеров и создать её при необходимости."""
     now = int(now_ts if now_ts is not None else _now_ts())
     duration = max(1, int(BANNER_DURATION_DAYS) * 24 * 60 * 60)
+    phases_per_patch = max(1, int(BANNER_PHASES_PER_PATCH))
+    patch_duration = duration * phases_per_patch
+    try:
+        apply_due_scheduled_banner_release(now)
+    except Exception:
+        logger.warning("Не удалось применить отложенный релиз баннеров", exc_info=True)
     stored = int(database.get_game_setting(BANNER_CYCLE_START_SETTING, default="0") or 0)
-    rotation_index = int(database.get_game_setting(BANNER_ROTATION_INDEX_SETTING, default="0") or 0)
     if stored <= 0:
         stored = now
         database.set_game_setting(BANNER_CYCLE_START_SETTING, str(stored))
-        rotation_index = 0
-        database.set_game_setting(BANNER_ROTATION_INDEX_SETTING, str(rotation_index))
-    if now >= stored + duration:
-        passed = (now - stored) // duration
-        stored = stored + passed * duration
-        rotation_index += passed
-        database.set_game_setting(BANNER_CYCLE_START_SETTING, str(stored))
-        database.set_game_setting(BANNER_ROTATION_INDEX_SETTING, str(rotation_index))
-    end_ts = stored + duration
-    phase_index = rotation_index % max(1, int(BANNER_PHASES_PER_PATCH))
+        database.set_game_setting(BANNER_ROTATION_INDEX_SETTING, "0")
+    elapsed = max(0, now - stored)
+    expired = elapsed >= patch_duration
+    phase_index = min(phases_per_patch - 1, elapsed // duration) if not expired else phases_per_patch - 1
+    phase_start = stored + phase_index * duration
+    end_ts = phase_start + duration
     return {
-        "start_ts": stored,
+        "patch_start_ts": stored,
+        "patch_end_ts": stored + patch_duration,
+        "start_ts": phase_start,
         "end_ts": end_ts,
-        "remaining_seconds": max(0, end_ts - now),
+        "remaining_seconds": 0 if expired else max(0, end_ts - now),
         "duration_seconds": duration,
-        "rotation_index": rotation_index,
-        "phase_index": phase_index,
+        "rotation_index": int(phase_index),
+        "phase_index": int(phase_index),
         "phase_number": phase_index + 1,
-        "phases_per_patch": max(1, int(BANNER_PHASES_PER_PATCH)),
+        "phases_per_patch": phases_per_patch,
         "patch_duration_days": int(BANNER_PATCH_DURATION_DAYS),
+        "expired": expired,
     }
 
 
@@ -306,6 +399,79 @@ def get_banner_time_left() -> dict:
 
 def _snapshot_key(cycle_start_ts: int) -> str:
     return f"{BANNER_SNAPSHOT_SETTING_PREFIX}_{int(cycle_start_ts)}"
+
+
+def _release_to_banners(release: dict | None, phase_index: int = 0) -> dict[str, Banner]:
+    if not release:
+        return {}
+    phases = release.get("phases") or ()
+    if phases:
+        safe_index = max(0, min(len(phases) - 1, int(phase_index or 0)))
+        banners = phases[safe_index]
+    else:
+        banners = release.get("banners") or {}
+    return {str(key): value for key, value in banners.items() if isinstance(value, Banner)}
+
+
+def _banner_release_summary(release: dict) -> dict:
+    phases = release.get("phases") or ()
+    first = _release_to_banners(release, 0)
+    second = _release_to_banners(release, 1) if len(phases) > 1 else {}
+    return {
+        "id": release.get("id"),
+        "name": release.get("name"),
+        "patch": int(release.get("patch", 0) or 0),
+        "phase": 0,
+        "phases": len(phases) or 1,
+        "weapon": first.get("weapon").name if first.get("weapon") else "-",
+        "outfit": first.get("outfit").name if first.get("outfit") else "-",
+        "weapon_phase_2": second.get("weapon").name if second.get("weapon") else "-",
+        "outfit_phase_2": second.get("outfit").name if second.get("outfit") else "-",
+    }
+
+
+def get_available_banner_releases() -> list[dict]:
+    """Вернуть подготовленные в коде релизы баннеров для админки."""
+    return [_banner_release_summary(release) for release in list_banner_releases()]
+
+
+def _get_scheduled_banner_release() -> dict | None:
+    raw = database.get_game_setting(SCHEDULED_BANNER_RELEASE_SETTING, default="")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    release_id = str(data.get("release_id") or "").strip().lower()
+    start_ts = int(data.get("start_ts", 0) or 0)
+    if not release_id or start_ts <= 0:
+        return None
+    release = get_banner_release(release_id)
+    if not release:
+        return None
+    return {
+        "release_id": release_id,
+        "release_name": release.get("name") or release_id,
+        "start_ts": start_ts,
+    }
+
+
+def get_banner_release_admin_status(now_ts: int | None = None) -> dict:
+    """Короткий статус ручной ротации баннеров."""
+    raw_cycle = ensure_banner_cycle(now_ts=now_ts)
+    cycle = {**raw_cycle, "formatted": format_seconds_left(raw_cycle["remaining_seconds"])}
+    active_id = str(database.get_game_setting(ACTIVE_BANNER_RELEASE_SETTING, default="") or "")
+    active_release = get_banner_release(active_id)
+    scheduled = _get_scheduled_banner_release()
+    return {
+        "cycle": cycle,
+        "active": _banner_release_summary(active_release) if active_release else {"id": active_id or "-", "name": active_id or "Снапшот текущего цикла"},
+        "scheduled": scheduled,
+        "available": get_available_banner_releases(),
+    }
 
 
 def _serialize_banners(banners: dict[str, Banner]) -> str:
@@ -336,6 +502,88 @@ def _deserialize_banners(raw: str | None) -> dict[str, Banner]:
     return result
 
 
+def activate_banner_release(release_id: str, start_ts: int | None = None) -> dict:
+    """Включить подготовленный патч баннеров как новый активный цикл."""
+    safe_id = str(release_id or "").strip().lower()
+    release = get_banner_release(safe_id)
+    if not release:
+        return {"success": False, "message": f"Неизвестный релиз баннеров: {release_id}"}
+    phases = release.get("phases") or ()
+    if len(phases) < max(1, int(BANNER_PHASES_PER_PATCH)):
+        return {"success": False, "message": "Релиз патча должен содержать две фазы баннеров."}
+    first_phase = _release_to_banners(release, 0)
+    if set(first_phase) != {"weapon", "outfit"}:
+        return {"success": False, "message": "Каждая фаза релиза должна содержать ровно два баннера: weapon и outfit."}
+
+    cycle_start = int(start_ts if start_ts is not None else _now_ts())
+    database.set_game_setting(BANNER_CYCLE_START_SETTING, str(cycle_start))
+    database.set_game_setting(BANNER_ROTATION_INDEX_SETTING, "0")
+    database.set_game_setting(ACTIVE_BANNER_RELEASE_SETTING, safe_id)
+    duration = max(1, int(BANNER_DURATION_DAYS) * 24 * 60 * 60)
+    for index in range(max(1, int(BANNER_PHASES_PER_PATCH))):
+        phase_banners = _release_to_banners(release, index)
+        if set(phase_banners) != {"weapon", "outfit"}:
+            return {"success": False, "message": f"Фаза {index + 1} релиза должна содержать weapon и outfit."}
+        phase_start = cycle_start + index * duration
+        database.set_game_setting(_snapshot_key(phase_start), _serialize_banners(phase_banners))
+        database.set_gacha_banner_snapshots(
+            phase_start,
+            {banner_id: banner_to_dict(banner) for banner_id, banner in phase_banners.items()},
+        )
+    return {
+        "success": True,
+        "release_id": safe_id,
+        "release_name": release.get("name") or safe_id,
+        "start_ts": cycle_start,
+        "end_ts": cycle_start + duration * max(1, int(BANNER_PHASES_PER_PATCH)),
+        "banners": [_banner_release_summary(release)],
+    }
+
+
+def schedule_banner_release(release_id: str, start_ts: int) -> dict:
+    """Поставить подготовленный релиз баннеров на отложенный старт."""
+    safe_id = str(release_id or "").strip().lower()
+    release = get_banner_release(safe_id)
+    if not release:
+        return {"success": False, "message": f"Неизвестный релиз баннеров: {release_id}"}
+    safe_start = int(start_ts or 0)
+    if safe_start <= 0:
+        return {"success": False, "message": "Нужно указать корректное время старта."}
+    payload = {"release_id": safe_id, "start_ts": safe_start}
+    database.set_game_setting(SCHEDULED_BANNER_RELEASE_SETTING, json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return {
+        "success": True,
+        "release_id": safe_id,
+        "release_name": release.get("name") or safe_id,
+        "start_ts": safe_start,
+    }
+
+
+def cancel_scheduled_banner_release() -> dict:
+    scheduled = _get_scheduled_banner_release()
+    database.set_game_setting(SCHEDULED_BANNER_RELEASE_SETTING, "")
+    return {
+        "success": True,
+        "cancelled": bool(scheduled),
+        "release_id": scheduled.get("release_id") if scheduled else "",
+        "start_ts": scheduled.get("start_ts") if scheduled else 0,
+    }
+
+
+def apply_due_scheduled_banner_release(now_ts: int | None = None) -> dict:
+    now = int(now_ts if now_ts is not None else _now_ts())
+    scheduled = _get_scheduled_banner_release()
+    if not scheduled:
+        return {"success": False, "applied": False, "message": "Отложенного релиза нет."}
+    if now < int(scheduled["start_ts"]):
+        return {"success": True, "applied": False, **scheduled}
+    result = activate_banner_release(scheduled["release_id"], start_ts=scheduled["start_ts"])
+    if result.get("success"):
+        database.set_game_setting(SCHEDULED_BANNER_RELEASE_SETTING, "")
+        return {"success": True, "applied": True, **scheduled}
+    return {"success": False, "applied": False, "message": result.get("message", "Не удалось включить релиз."), **scheduled}
+
+
 def get_active_banners(now_ts: int | None = None) -> dict[str, Banner]:
     """
     Вернуть сохранённый пул текущей фазы.
@@ -345,6 +593,8 @@ def get_active_banners(now_ts: int | None = None) -> dict[str, Banner]:
     смогут вернуться в следующих фазах.
     """
     cycle = ensure_banner_cycle(now_ts=now_ts)
+    if cycle.get("expired"):
+        return {}
     key = _snapshot_key(cycle["start_ts"])
     snapshot_payload = database.get_gacha_banner_snapshots(cycle["start_ts"])
     banners = _deserialize_banners(json.dumps(snapshot_payload, ensure_ascii=False) if snapshot_payload else None)
@@ -360,7 +610,9 @@ def get_active_banners(now_ts: int | None = None) -> dict[str, Banner]:
         )
         return banners
 
-    banners = build_phase_banners(cycle["phase_index"])
+    active_id = str(database.get_game_setting(ACTIVE_BANNER_RELEASE_SETTING, default="") or "").strip().lower()
+    active_release = get_banner_release(active_id)
+    banners = _release_to_banners(active_release, cycle["phase_index"]) if active_release else build_phase_banners(cycle["phase_index"])
     serialized = _serialize_banners(banners)
     database.set_gacha_banner_snapshots(
         cycle["start_ts"],
@@ -808,8 +1060,6 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
         return {"success": False, "message": "Можно сделать только 1 или 10 откликов."}
     if not is_resonance_enabled():
         return {"success": False, "message": "Резонанс Зоны сейчас отключён."}
-    if not database.is_user_admin(vk_id):
-        return {"success": False, "message": "Резонанс Зоны пока доступен только администраторам."}
 
     ticket_spend = _ensure_pull_tickets(vk_id, banner.id, count)
     if not ticket_spend.get("success"):

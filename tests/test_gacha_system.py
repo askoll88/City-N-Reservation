@@ -43,7 +43,7 @@ class GachaSystemTest(unittest.TestCase):
     def test_banner_time_left_is_formatted_to_seconds(self):
         self.assertEqual(service.format_seconds_left(2 * 86400 + 3 * 3600 + 4 * 60 + 5), "2д 03:04:05")
 
-    def test_banner_cycle_advances_two_patch_phases(self):
+    def test_banner_cycle_auto_switches_second_phase_then_expires(self):
         settings = {}
         duration = banners.BANNER_DURATION_DAYS * 24 * 60 * 60
 
@@ -62,8 +62,47 @@ class GachaSystemTest(unittest.TestCase):
             third = service.ensure_banner_cycle(now_ts=1000 + duration * 2 + 10)
 
         self.assertEqual(first["phase_number"], 1)
+        self.assertFalse(first["expired"])
         self.assertEqual(second["phase_number"], 2)
-        self.assertEqual(third["phase_number"], 1)
+        self.assertFalse(second["expired"])
+        self.assertEqual(third["phase_number"], 2)
+        self.assertTrue(third["expired"])
+
+    def test_scheduled_banner_release_applies_exact_snapshot(self):
+        settings = {
+            service.SCHEDULED_BANNER_RELEASE_SETTING: json.dumps({
+                "release_id": "patch_1",
+                "start_ts": 2000,
+            }),
+        }
+        snapshots = {}
+
+        def get_setting(key, default=None):
+            return settings.get(key, default)
+
+        def set_setting(key, value):
+            settings[key] = value
+
+        def set_snapshots(cycle_start_ts, payload):
+            snapshots[cycle_start_ts] = payload
+
+        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+             patch("game.gacha.service.database.set_game_setting", side_effect=set_setting), \
+             patch("game.gacha.service.database.set_gacha_banner_snapshots", side_effect=set_snapshots), \
+             patch("game.gacha.service.database.get_gacha_banner_snapshots", side_effect=lambda ts: snapshots.get(ts, {})):
+            cycle = service.ensure_banner_cycle(now_ts=2001)
+            active = service.get_active_banners(now_ts=2001)
+            second_phase = service.get_active_banners(now_ts=2000 + banners.BANNER_DURATION_DAYS * 24 * 60 * 60 + 1)
+            expired = service.get_active_banners(now_ts=2000 + banners.BANNER_PATCH_DURATION_DAYS * 24 * 60 * 60 + 1)
+
+        self.assertEqual(cycle["start_ts"], 2000)
+        self.assertEqual(settings[service.ACTIVE_BANNER_RELEASE_SETTING], "patch_1")
+        self.assertEqual(settings[service.SCHEDULED_BANNER_RELEASE_SETTING], "")
+        self.assertEqual(active["weapon"].featured_ssr, ("АК-74 «Резонанс»",))
+        self.assertEqual(active["outfit"].featured_ssr, banners.SIGNAL_GUIDE_SET)
+        self.assertEqual(second_phase["weapon"].featured_ssr, ("Винторез «Тихий Сигнал»",))
+        self.assertEqual(second_phase["outfit"].featured_ssr, banners.RUPTURE_SEEKER_SET)
+        self.assertEqual(expired, {})
 
     def test_active_banner_snapshot_is_saved_and_reused(self):
         settings = {}
@@ -148,6 +187,16 @@ class GachaSystemTest(unittest.TestCase):
         self.assertNotIn("Собрать", payload)
         self.assertNotIn("История резонанса", payload)
         self.assertNotIn('"label": "Резонанс Зоны"', payload)
+
+    def test_resonance_main_keyboard_hides_banners_when_patch_expired(self):
+        keyboard = json.loads(create_resonance_keyboard(active=False).get_keyboard())
+        payload = json.dumps(keyboard, ensure_ascii=False)
+
+        self.assertFalse(keyboard["inline"])
+        self.assertNotIn("Резонанс оружия", payload)
+        self.assertNotIn("Резонанс снаряжения", payload)
+        self.assertNotIn("Шансы оружия", payload)
+        self.assertIn("Назад", payload)
 
     def test_resonance_banner_keyboard_moves_pull_buttons_inside_banner(self):
         keyboard = json.loads(create_resonance_banner_keyboard("weapon").get_keyboard())
@@ -429,17 +478,11 @@ class GachaSystemTest(unittest.TestCase):
         payload = create_location_keyboard("убежище").get_keyboard()
         self.assertIn("Резонанс Зоны", payload)
 
-    def test_availability_requires_toggle_and_admin(self):
-        with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
-             patch("game.gacha.service.database.is_user_admin", return_value=True):
+    def test_availability_requires_only_global_toggle(self):
+        with patch("game.gacha.service.is_resonance_enabled", return_value=True):
             self.assertTrue(service.is_resonance_available(777))
 
-        with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
-             patch("game.gacha.service.database.is_user_admin", return_value=False):
-            self.assertFalse(service.is_resonance_available(777))
-
-        with patch("game.gacha.service.is_resonance_enabled", return_value=False), \
-             patch("game.gacha.service.database.is_user_admin", return_value=True):
+        with patch("game.gacha.service.is_resonance_enabled", return_value=False):
             self.assertFalse(service.is_resonance_available(777))
 
     def test_public_launch_enables_resonance_once(self):
@@ -458,6 +501,66 @@ class GachaSystemTest(unittest.TestCase):
 
         self.assertEqual(settings[banners.GACHA_ENABLED_SETTING], "1")
         self.assertEqual(settings[service.PUBLIC_LAUNCH_SETTING], "1")
+
+    def test_resonance_launch_notice_is_lore_short_and_once(self):
+        settings = {}
+
+        def get_setting(key, default=None):
+            return settings.get(key, default)
+
+        def set_setting(key, value):
+            settings[key] = value
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return len(self.sent)
+
+        class Vk:
+            def __init__(self):
+                self.messages = Messages()
+
+        vk = Vk()
+        runtime = {}
+
+        def get_runtime(vk_id, key):
+            return runtime.get((vk_id, key))
+
+        def set_runtime(vk_id, key, payload):
+            runtime[(vk_id, key)] = payload
+
+        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+             patch("game.gacha.service.database.set_game_setting", side_effect=set_setting), \
+             patch("game.gacha.service.database.get_runtime_state", side_effect=get_runtime), \
+             patch("game.gacha.service.database.set_runtime_state", side_effect=set_runtime), \
+             patch("game.gacha.service.add_signal_shards", side_effect=[1760, 1600]) as add_shards, \
+             patch("game.gacha.service.database.get_all_active_players", return_value=[{"vk_id": 10}, {"vk_id": 20}]):
+            result = service.send_resonance_launch_notice_once(vk)
+            second = service.send_resonance_launch_notice_once(vk)
+
+        self.assertEqual(result, {"sent": 2, "errors": 0, "rewarded": 2, "reward_errors": 0, "skipped": False})
+        self.assertEqual(second, {"sent": 0, "errors": 0, "rewarded": 0, "reward_errors": 0, "skipped": True})
+        self.assertEqual(settings[service.PUBLIC_LAUNCH_NOTICE_SETTING], "1")
+        self.assertEqual(settings[service.PUBLIC_LAUNCH_REWARD_SETTING], "1")
+        add_shards.assert_has_calls([
+            call(10, service.PUBLIC_LAUNCH_REWARD_SHARDS, source="public_resonance_launch", details={"amount": service.PUBLIC_LAUNCH_REWARD_SHARDS, "notice": service.PUBLIC_LAUNCH_NOTICE_SETTING}),
+            call(20, service.PUBLIC_LAUNCH_REWARD_SHARDS, source="public_resonance_launch", details={"amount": service.PUBLIC_LAUNCH_REWARD_SHARDS, "notice": service.PUBLIC_LAUNCH_NOTICE_SETTING}),
+        ])
+        self.assertEqual(len(vk.messages.sent), 2)
+        message = vk.messages.sent[0]["message"]
+        self.assertIn("ГОРОДСКОЕ ОПОВЕЩЕНИЕ", message)
+        self.assertIn("сдвига фона", message)
+        self.assertIn("остаточные слепки вещей", message)
+        self.assertIn("самовольный запуск", message.lower())
+        self.assertIn("запечатанные отклики", message)
+        self.assertIn("осколков сигнала", message)
+        self.assertIn("Барыги на Чёрном рынке", message)
+        self.assertIn("1600 осколков сигнала", message)
+        self.assertIn("поверх уже найденных", message)
+        self.assertIn("Убежища: Резонанс", message)
 
     def test_hard_pity_forces_ssr_and_spends_shards(self):
         flags = {
@@ -511,13 +614,15 @@ class GachaSystemTest(unittest.TestCase):
         add_inventory_mock.assert_called_once_with(777, "АК-74 «Резонанс»", 1)
         add_storage_mock.assert_not_called()
 
-    def test_non_admin_cannot_pull_resonance(self):
+    def test_public_player_reaches_pull_cost_check_without_admin_gate(self):
         with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
-             patch("game.gacha.service.database.is_user_admin", return_value=False):
+             patch("game.gacha.service.database.is_user_admin", return_value=False), \
+             patch("game.gacha.service.get_banner", return_value=banners.WEAPON_BANNER), \
+             patch("game.gacha.service._ensure_pull_tickets", return_value={"success": False, "message": "Не хватает откликов."}):
             result = service.perform_pulls(777, "weapon", 1)
 
         self.assertFalse(result["success"])
-        self.assertIn("только администраторам", result["message"])
+        self.assertIn("Не хватает откликов", result["message"])
 
     def test_duplicate_ssr_checks_storage_and_compensation_goes_to_signal_shards(self):
         reward = service.PullReward("SSR", "АК-74 «Резонанс»")

@@ -63,14 +63,15 @@ def _add_callback_button(keyboard: VkKeyboard, label: str, *, command: str, colo
     keyboard.add_callback_button(label, color=color, payload={"command": command, **payload})
 
 
-def create_resonance_keyboard() -> VkKeyboard:
+def create_resonance_keyboard(active: bool = True) -> VkKeyboard:
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Резонанс оружия", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Резонанс снаряжения", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_line()
-    keyboard.add_button("Шансы оружия", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("Шансы снаряжения", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_line()
+    if active:
+        keyboard.add_button("Резонанс оружия", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Резонанс снаряжения", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+        keyboard.add_button("Шансы оружия", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Шансы снаряжения", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
@@ -220,9 +221,12 @@ def _set_bonus_lines(featured_ssr: tuple[str, ...]) -> list[str]:
 def format_resonance_menu(vk_id: int) -> str:
     time_left = get_banner_time_left()
     wallet = get_exchange_wallet(vk_id)
+    active_banners = get_banners()
     lines = [
         "▰ РЕЗОНАНС ЗОНЫ",
-        "Приёмник ловит обрывки сигнала. Выбери баннер или посмотри шансы.",
+        "Приёмник ловит обрывки сигнала. Выбери баннер или посмотри шансы."
+        if active_banners else
+        "Приёмник ушёл в глухой фон. Новые сигналы появятся после запуска следующего резонансного окна.",
         "",
         "• РЕСУРС",
         f"💠 Осколки сигнала: {wallet['shards']}",
@@ -236,7 +240,9 @@ def format_resonance_menu(vk_id: int) -> str:
         "",
         "• БАННЕРЫ",
     ]
-    for banner in get_banners():
+    if not active_banners:
+        lines.append("Активных баннеров сейчас нет.")
+    for banner in active_banners:
         state = get_banner_state(vk_id, banner.id)
         guarantee = "rate-up гарантирован" if state.get("featured_guaranteed") else "50/50 активен"
         sr_guarantee = "SR rate-up гарантирован" if state.get("featured_sr_guaranteed") else "SR 50/50 активен"
@@ -251,12 +257,13 @@ def format_resonance_menu(vk_id: int) -> str:
             f"Гарант: {guarantee}",
             f"SR-гарант: {sr_guarantee}",
         ])
-    lines.extend([
-        "",
-        "• ДЕЙСТВИЯ",
-        "Резонанс оружия — к оружейному баннеру",
-        "Резонанс снаряжения — к баннеру комплекта",
-    ])
+    if active_banners:
+        lines.extend([
+            "",
+            "• ДЕЙСТВИЯ",
+            "Резонанс оружия — к оружейному баннеру",
+            "Резонанс снаряжения — к баннеру комплекта",
+        ])
     return "\n".join(lines)
 
 
@@ -756,11 +763,14 @@ def show_resonance_menu(player, vk, user_id: int) -> None:
             create_location_keyboard(player.current_location_id, player.level),
         )
         return
-    _show_hud(vk, user_id, format_resonance_menu(user_id), create_resonance_keyboard(), screen="menu")
+    active = bool(get_banners())
+    _show_hud(vk, user_id, format_resonance_menu(user_id), create_resonance_keyboard(active), screen="menu")
 
 
 def show_banner_menu(vk, user_id: int, banner_id: str) -> None:
-    _show_hud(vk, user_id, format_banner_menu(user_id, banner_id), create_resonance_banner_keyboard(banner_id), screen=f"banner:{banner_id}")
+    message = format_banner_menu(user_id, banner_id)
+    keyboard = create_resonance_banner_keyboard(banner_id) if next((item for item in get_banners() if item.id == banner_id), None) else create_resonance_keyboard(False)
+    _show_hud(vk, user_id, message, keyboard, screen=f"banner:{banner_id}")
 
 
 def show_rates(vk, user_id: int, banner_id: str | None = None, page: int = 0) -> None:
