@@ -773,7 +773,8 @@ class GachaSystemTest(unittest.TestCase):
             _send_pull_result(Vk(), 777, "weapon", result)
 
         self.assertEqual(len(sent), 3)
-        self.assertIn("Откликов: x10", sent[0]["message"])
+        self.assertIn("Оружейный резонанс x10", sent[0]["message"])
+        self.assertIn("• ПРИНЯТЫЕ СИГНАЛЫ", sent[0]["message"])
         self.assertIsNone(sent[0].get("attachment"))
         self.assertIn("1/2 из отклика x10", sent[1]["message"])
         self.assertIn("АК-74 «Резонанс»", sent[1]["message"])

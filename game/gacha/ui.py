@@ -200,6 +200,42 @@ def _featured_line(items: tuple[str, ...]) -> str:
     return ", ".join(items)
 
 
+def _quoted_part(value: str) -> str | None:
+    if "«" not in value or "»" not in value:
+        return None
+    return value.split("«", 1)[1].split("»", 1)[0].strip() or None
+
+
+def _featured_summary(items: tuple[str, ...]) -> str:
+    if not items:
+        return "-"
+    if len(items) == 1:
+        return items[0]
+    quoted_names = {_quoted_part(item) for item in items}
+    if len(quoted_names) == 1 and None not in quoted_names:
+        set_name = next(iter(quoted_names))
+        return f"комплект «{set_name}» ({len(items)} предмета)"
+    return _featured_line(items)
+
+
+def _pity_status_icon(current: int, total: int, *, guaranteed: bool = False, soft_start: int | None = None) -> str:
+    current = max(0, int(current or 0))
+    total = max(1, int(total or 1))
+    if guaranteed:
+        return "🛡️"
+    if current >= total - 1:
+        return "🔥"
+    if soft_start is not None and current >= int(soft_start):
+        return "🟠"
+    if current / total >= 0.5:
+        return "🟡"
+    return "🟢"
+
+
+def _guarantee_short(guaranteed: bool) -> str:
+    return "rate-up гарант" if guaranteed else "50/50"
+
+
 def _reward_names(entries) -> tuple[str, ...]:
     return tuple(entry.name for entry in entries or ())
 
@@ -228,15 +264,15 @@ def format_resonance_menu(vk_id: int) -> str:
         if active_banners else
         "Приёмник ушёл в глухой фон. Новые сигналы появятся после запуска следующего резонансного окна.",
         "",
-        "• РЕСУРС",
-        f"💠 Осколки сигнала: {wallet['shards']}",
-        f"🎟 Оружейный отклик: {wallet['weapon_tickets']} | Отклик снаряжения: {wallet['outfit_tickets']}",
-        f"Автоконверт при крутке: {TICKET_SHARD_COST} осколков -> 1 отклик",
-        f"x1: 1 отклик | x10: 10 откликов",
-        f"✦ {RESONANCE_DUST_NAME}: {wallet['dust']} | ✧ {RESONANCE_MARKS_NAME}: {wallet['marks']}",
-        f"Фаза баннера: {time_left.get('phase_number', 1)}/{time_left.get('phases_per_patch', 1)}",
-        f"Патч: {BANNER_PATCH_DURATION_DAYS} дней, волна: {BANNER_DURATION_DAYS} дней",
-        f"До конца волны: {time_left['formatted']}",
+        "• РЕСУРСЫ",
+        f"💠 Осколки: {wallet['shards']}",
+        f"🎟 Отклики: оружие {wallet['weapon_tickets']} | снаряжение {wallet['outfit_tickets']}",
+        f"✦ Пыль: {wallet['dust']} | ✧ Знаки: {wallet['marks']}",
+        f"Автосборка: {TICKET_SHARD_COST} осколков = 1 отклик при крутке",
+        "",
+        "• ОКНО",
+        f"Фаза: {time_left.get('phase_number', 1)}/{time_left.get('phases_per_patch', 1)} | До конца волны: {time_left['formatted']}",
+        f"Патч {BANNER_PATCH_DURATION_DAYS}д | волна {BANNER_DURATION_DAYS}д",
         "",
         "• БАННЕРЫ",
     ]
@@ -244,18 +280,22 @@ def format_resonance_menu(vk_id: int) -> str:
         lines.append("Активных баннеров сейчас нет.")
     for banner in active_banners:
         state = get_banner_state(vk_id, banner.id)
-        guarantee = "rate-up гарантирован" if state.get("featured_guaranteed") else "50/50 активен"
-        sr_guarantee = "SR rate-up гарантирован" if state.get("featured_sr_guaranteed") else "SR 50/50 активен"
+        ssr_guaranteed = bool(state.get("featured_guaranteed"))
+        sr_guaranteed = bool(state.get("featured_sr_guaranteed"))
         ssr_hard_pity = get_ssr_hard_pity(banner.id)
+        ssr_icon = _pity_status_icon(
+            state["pity_ssr"],
+            ssr_hard_pity,
+            guaranteed=ssr_guaranteed,
+            soft_start=get_ssr_soft_pity_start(banner.id),
+        )
+        sr_icon = _pity_status_icon(state["pity_sr"], SR_HARD_PITY, guaranteed=sr_guaranteed)
         lines.extend([
             "",
             f"◆ {banner.name.upper()}",
-            f"До конца волны: {time_left['formatted']}",
-            f"Rate-up SSR: {_featured_line(banner.featured_ssr)}",
-            f"SSR {_bar(state['pity_ssr'], ssr_hard_pity)} {state['pity_ssr']}/{ssr_hard_pity}",
-            f"SR  {_bar(state['pity_sr'], SR_HARD_PITY)} {state['pity_sr']}/{SR_HARD_PITY}",
-            f"Гарант: {guarantee}",
-            f"SR-гарант: {sr_guarantee}",
+            f"Rate-up SSR: {_featured_summary(banner.featured_ssr)}",
+            f"SSR {ssr_icon} {_bar(state['pity_ssr'], ssr_hard_pity)} {state['pity_ssr']}/{ssr_hard_pity} | {_guarantee_short(ssr_guaranteed)}",
+            f"SR  {sr_icon} {_bar(state['pity_sr'], SR_HARD_PITY)} {state['pity_sr']}/{SR_HARD_PITY} | {_guarantee_short(sr_guaranteed)}",
         ])
     if active_banners:
         lines.extend([
@@ -634,24 +674,22 @@ def _format_pull_result(result: dict) -> str:
     rewards = result["rewards"]
     best_rarity = "SSR" if any(r.rarity == "SSR" for r in rewards) else "SR" if any(r.rarity == "SR" for r in rewards) else "R"
     best_title = RARITY_VIEW[best_rarity]["title"]
+    ticket_name = result.get("ticket") or "Отклик"
     lines = [
         f"▰ {best_title}",
-        f"{result['banner'].name} | Откликов: x{result['count']}",
-        f"Потрачено: {result['cost']} предметов '{result.get('ticket') or 'Отклик'}'",
-        f"Откликов осталось: {result.get('tickets_left', 0)} | Осколки: {result['shards_left']}",
-        "SSR попадают в инвентарь. Остальные предметы отправлены в шкаф убежища. Дубли SSR конвертируются в осколки.",
+        f"{result['banner'].name} x{result['count']}",
+        f"Потрачено: {ticket_name} x{result['cost']}",
+        f"Осталось: откликов {result.get('tickets_left', 0)} | осколков {result['shards_left']}",
         "",
-        "• РАСШИФРОВКА СИГНАЛА",
+        "• ПРИНЯТЫЕ СИГНАЛЫ",
     ]
     if int(result.get("converted_tickets", 0) or 0) > 0:
-        lines.insert(3, f"Автоконверт: +{int(result.get('converted_tickets', 0) or 0)} откл. из осколков")
+        lines.insert(3, f"Автосборка: +{int(result.get('converted_tickets', 0) or 0)} откл. из осколков")
     for idx, reward in enumerate(rewards, 1):
         if reward.duplicate and reward.kind == "currency":
             source = reward.source_name or "SSR предмет"
-            lines.append(
-                f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} — {source} "
-                f"(дубликат -> +{reward.quantity} осколков сигнала)"
-            )
+            lines.append(f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} {source}")
+            lines.append(f"   дубликат -> +{reward.quantity} осколков сигнала")
             continue
         tags = []
         if reward.featured or reward.sr_featured:
@@ -662,29 +700,30 @@ def _format_pull_result(result: dict) -> str:
             tags.append("проигрыш 50/50")
         if reward.duplicate:
             tags.append("дубликат")
-        suffix = f" ({', '.join(tags)})" if tags else ""
         qty = f" x{reward.quantity}" if reward.quantity != 1 else ""
-        lines.append(f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} — {reward.name}{qty}{suffix}")
+        lines.append(f"{idx}. {_rarity_icon(reward.rarity)} {reward.rarity} {reward.name}{qty}")
+        if tags:
+            lines.append(f"   {', '.join(tags)}")
     state = result["state"]
     time_left = get_banner_time_left()
-    guarantee = "следующий SSR гарантированно rate-up" if state.get("featured_guaranteed") else "50/50 активен"
-    sr_guarantee = "следующий SR гарантированно rate-up" if state.get("featured_sr_guaranteed") else "SR 50/50 активен"
+    guarantee = "rate-up гарантирован" if state.get("featured_guaranteed") else "50/50 активен"
+    sr_guarantee = "rate-up гарантирован" if state.get("featured_sr_guaranteed") else "50/50 активен"
     ssr_hard_pity = get_ssr_hard_pity(result["banner"].id)
     lines.extend([
         "",
-        "• ОБМЕННАЯ ВАЛЮТА",
+        "• БОНУС ЗА ОТКЛИК",
     ])
     exchange = result.get("exchange_reward") or {}
     lines.extend([
-        f"✦ {RESONANCE_DUST_NAME}: +{int(exchange.get('dust', 0) or 0)} | баланс {int(exchange.get('dust_balance', 0) or 0)}",
-        f"✧ {RESONANCE_MARKS_NAME}: +{int(exchange.get('marks', 0) or 0)} | баланс {int(exchange.get('marks_balance', 0) or 0)}",
+        f"Пыль: +{int(exchange.get('dust', 0) or 0)} | баланс {int(exchange.get('dust_balance', 0) or 0)}",
+        f"Знаки: +{int(exchange.get('marks', 0) or 0)} | баланс {int(exchange.get('marks_balance', 0) or 0)}",
         "",
-        "• СОСТОЯНИЕ БАННЕРА",
-        f"SSR {_bar(state['pity_ssr'], ssr_hard_pity)} {state['pity_ssr']}/{ssr_hard_pity}",
-        f"SR  {_bar(state['pity_sr'], SR_HARD_PITY)} {state['pity_sr']}/{SR_HARD_PITY}",
-        f"Гарант: {guarantee}",
-        f"SR-гарант: {sr_guarantee}",
-        f"До конца баннера: {time_left['formatted']}",
+        "• ГАРАНТЫ",
+        f"SSR: {state['pity_ssr']}/{ssr_hard_pity}",
+        f"SR: {state['pity_sr']}/{SR_HARD_PITY}",
+        f"Следующий SSR: {guarantee}",
+        f"Следующий SR: {sr_guarantee}",
+        f"До конца: {time_left['formatted']}",
     ])
     return "\n".join(lines)
 
