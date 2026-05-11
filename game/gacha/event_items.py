@@ -122,9 +122,6 @@ SSR_ITEM_IMAGES = {
     "АК-74 «Резонанс»": "patch_1/phase_1/ak74_resonance.png",
     "Винторез «Тихий Сигнал»": "patch_1/phase_2/vintorez_silent_signal.png",
     "Нож «Осколок Разлома»": "patch_1/reserve/fracture_shard_knife.png",
-    "АКС-74 «Серый Контур»": "patch_1/phase_1/ak74_resonance.png",
-    "СВД «Шум Предела»": "patch_1/phase_2/vintorez_silent_signal.png",
-    "Клинок «Немой Разлом»": "patch_1/reserve/fracture_shard_knife.png",
     "Плащ «Проводник Сигнала»": "patch_1/phase_1/signal_guide_cloak.png",
     "Маска «Проводник Сигнала»": "patch_1/phase_1/signal_guide_mask.png",
     "Перчатки «Проводник Сигнала»": "patch_1/phase_1/signal_guide_gloves.png",
@@ -133,9 +130,6 @@ SSR_ITEM_IMAGES = {
     "Маска «Искатель Разлома»": "patch_1/phase_2/rupture_seeker_mask.png",
     "Перчатки «Искатель Разлома»": "patch_1/phase_2/rupture_seeker_gloves.png",
     "Ботинки «Искатель Разлома»": "patch_1/phase_2/rupture_seeker_boots.png",
-    "Шлем «Глухой Контур»": "patch_1/phase_1/signal_guide_mask.png",
-    "Перчатки «Эхоизоляция»": "patch_1/phase_1/signal_guide_gloves.png",
-    "Ботинки «Серый Маршрут»": "patch_1/phase_1/signal_guide_boots.png",
 }
 
 SSR_EVENT_ITEM_NAMES = set(SSR_ITEM_LORE)

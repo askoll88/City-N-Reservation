@@ -405,6 +405,12 @@ class GachaSystemTest(unittest.TestCase):
         self.assertIsNotNone(image_path)
         self.assertTrue(image_path.exists())
 
+    def test_offrate_ssr_without_own_art_does_not_reuse_rateup_image(self):
+        self.assertTrue(is_ssr_event_item("АКС-74 «Серый Контур»"))
+        self.assertIsNone(get_item_image_path("АКС-74 «Серый Контур»"))
+        self.assertIsNone(get_item_image_path("СВД «Шум Предела»"))
+        self.assertIsNone(get_item_image_path("Шлем «Глухой Контур»"))
+
     def test_ssr_inspection_marks_exclusive(self):
         details = build_item_details({
             "name": "АК-74 «Резонанс»",
