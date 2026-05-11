@@ -610,6 +610,7 @@ def handle_npc_selection(player, vk, user_id: int, text: str):
         'ранговик': 'ранговик',
         'медик': 'медик',
         'дозиметрист': 'дозиметрист',
+        'лесник': 'лесник',
     }
     
     npc_id = npc_map.get(text)
@@ -875,7 +876,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         handle_npc_back(player, vk, user_id)
         return True
     
-    if npc_id in {"военный", "ученый", "медик", "дозиметрист", "местный житель", "наставник", "ранговик"} and text in {"купить", "продать", "оружие", "броня", "лекарства", "энергетики"}:
+    if npc_id in {"военный", "ученый", "медик", "дозиметрист", "местный житель", "наставник", "ранговик", "лесник"} and text in {"купить", "продать", "оружие", "броня", "лекарства", "энергетики"}:
         vk.messages.send(
             user_id=user_id,
             message="🕴️ Купля/продажа доступна только у Барыги.",

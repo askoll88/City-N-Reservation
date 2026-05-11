@@ -205,6 +205,17 @@ LOCATION_METADATA: dict[str, dict[str, Any]] = {
         "activities": ["research", "combat", "hunt", "trophy"],
         "loot_profile": "deep_forest",
     },
+    "заимка_лесника": {
+        "region": "forest",
+        "type": "safehouse",
+        "level_min": 8,
+        "level_max": 18,
+        "danger": "low",
+        "tags": ["forest", "npc", "hunting", "trophy", "quest"],
+        "requires": {},
+        "activities": ["talk", "hunting_unlock", "trophy_sell"],
+        "loot_profile": None,
+    },
 }
 
 

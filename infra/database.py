@@ -2613,6 +2613,81 @@ def sell_all_trash_transaction(vk_id: int, sell_bonus_pct: int = 0, merchant_id:
     }
 
 
+FORESTER_TROPHY_PRICES = {
+    "Ломоть мяса": 160,
+    "Шкура волка": 220,
+    "Кость снорка": 170,
+    "Коготь кровососа": 260,
+    "Лисий хвост": 190,
+    "Медвежий жир": 320,
+    "Клык мутанта": 240,
+}
+
+
+def sell_forester_trophies_transaction(vk_id: int) -> dict:
+    """Атомарно продать Леснику все лесные трофеи из инвентаря игрока."""
+    trophy_names = tuple(FORESTER_TROPHY_PRICES.keys())
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден.", "sold": [], "total": 0}
+
+        cursor.execute(
+            """
+            SELECT ui.item_id, ui.quantity, i.name
+            FROM user_inventory ui
+            JOIN items i ON ui.item_id = i.id
+            WHERE ui.user_id = %s AND i.name = ANY(%s)
+            FOR UPDATE
+            """,
+            (user["id"], list(trophy_names)),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return {"success": False, "message": "У тебя нет трофеев, которые интересны Леснику.", "sold": [], "total": 0}
+
+        sold = []
+        total = 0
+        for row in rows:
+            quantity = max(0, int(row.get("quantity") or 0))
+            if quantity <= 0:
+                continue
+            name = str(row["name"])
+            unit_price = int(FORESTER_TROPHY_PRICES.get(name, 0) or 0)
+            if unit_price <= 0:
+                continue
+            amount = unit_price * quantity
+            total += amount
+            sold.append({"name": name, "quantity": quantity, "unit_price": unit_price, "amount": amount})
+            cursor.execute(
+                "DELETE FROM user_inventory WHERE user_id = %s AND item_id = %s",
+                (user["id"], row["item_id"]),
+            )
+
+        if total <= 0 or not sold:
+            return {"success": False, "message": "Трофеи нашлись, но Лесник за них ничего не предлагает.", "sold": [], "total": 0}
+
+        cursor.execute(
+            """
+            UPDATE users
+            SET money = money + %s
+            WHERE id = %s
+            RETURNING money
+            """,
+            (total, user["id"]),
+        )
+        new_balance = int(cursor.fetchone()["money"])
+
+    return {
+        "success": True,
+        "message": f"Лесник забрал трофеи за {total} руб.",
+        "sold": sold,
+        "total": total,
+        "remaining_money": new_balance,
+    }
+
+
 def _get_inventory_quantity_tx(cursor, user_id: int, item_name: str) -> tuple[int, int | None]:
     cursor.execute(
         """

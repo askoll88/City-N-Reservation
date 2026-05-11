@@ -672,6 +672,10 @@ def _grant_item_to_storage(vk_id: int, item_name: str, quantity: int = 1) -> boo
     return bool(database.add_item_to_storage(vk_id, item_name, quantity))
 
 
+def _grant_item_to_inventory(vk_id: int, item_name: str, quantity: int = 1) -> bool:
+    return bool(database.add_item_to_inventory(vk_id, item_name, quantity))
+
+
 def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
     if reward.kind == "shells":
         ok, _ = database.add_shells(vk_id, reward.quantity)
@@ -697,7 +701,10 @@ def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
             source_name=reward.name,
         )
 
-    _grant_item_to_storage(vk_id, reward.name, reward.quantity)
+    if reward.rarity == "SSR" and reward.kind == "item":
+        _grant_item_to_inventory(vk_id, reward.name, reward.quantity)
+    else:
+        _grant_item_to_storage(vk_id, reward.name, reward.quantity)
     return reward
 
 

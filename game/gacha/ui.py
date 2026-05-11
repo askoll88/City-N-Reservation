@@ -638,7 +638,7 @@ def _format_pull_result(result: dict) -> str:
         f"{result['banner'].name} | Откликов: x{result['count']}",
         f"Потрачено: {result['cost']} предметов '{result.get('ticket') or 'Отклик'}'",
         f"Откликов осталось: {result.get('tickets_left', 0)} | Осколки: {result['shards_left']}",
-        "Предметы отправлены в шкаф убежища. Дубли SSR конвертируются в осколки.",
+        "SSR попадают в инвентарь. Остальные предметы отправлены в шкаф убежища. Дубли SSR конвертируются в осколки.",
         "",
         "• РАСШИФРОВКА СИГНАЛА",
     ]
@@ -717,10 +717,10 @@ def _format_ssr_showcase(result: dict, reward, index: int, total: int) -> str:
         ])
     else:
         lines.extend(_format_item_presentation(source_name))
-    lines.extend([
-        "",
-        "Предмет отправлен в шкаф убежища.",
-    ])
+        lines.extend([
+            "",
+            "Предмет отправлен в инвентарь.",
+        ])
     return "\n".join(lines)
 
 

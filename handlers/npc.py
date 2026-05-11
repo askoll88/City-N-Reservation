@@ -47,6 +47,8 @@ MEDIC_SUPPLY_ENERGY = 20
 DOSIMETER_FORECAST_BASIC_COST = 12000
 DOSIMETER_FORECAST_ADVANCED_COST = 35000
 MSK_TZ = timezone(timedelta(hours=3))
+FORESTER_HUNTING_UNLOCK_FLAG = "forest_hunting_unlocked"
+FORESTER_HUNTING_UNLOCK_LEVEL = 10
 
 
 def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None):
@@ -247,7 +249,96 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
         show_market_menu(player, vk, user_id)
         return True
 
+    if npc_id == "лесник" and dialog_id == "метки":
+        return _handle_forester_unlock_hunting(player, vk, user_id, npc_id)
+
+    if npc_id == "лесник" and dialog_id == "сдатьтрофеи":
+        return _handle_forester_sell_trophies(player, vk, user_id, npc_id)
+
     return False
+
+
+def _handle_forester_unlock_hunting(player, vk, user_id: int, npc_id: str):
+    """Открыть игроку будущую механику охотничьих мест через Лесника."""
+    unlocked = int(database.get_user_flag(user_id, FORESTER_HUNTING_UNLOCK_FLAG, 0) or 0) == 1
+    if unlocked:
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🌲Лесник:\n\n"
+                "Метки у тебя уже есть. Дальше дело не в бумаге, а в ногах и тишине.\n\n"
+                "Когда охотничьи места откроются на карте, иди по меткам от заимки или из заражённого леса."
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    if int(player.level) < FORESTER_HUNTING_UNLOCK_LEVEL:
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🌲Лесник:\n\n"
+                f"Рано тебе по звериным тропам. Нужен хотя бы {FORESTER_HUNTING_UNLOCK_LEVEL} уровень.\n"
+                f"Сейчас у тебя: {int(player.level)}.\n\n"
+                "Сначала научись возвращаться из леса без чужой крови на подошвах."
+            ),
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    database.set_user_flag(user_id, FORESTER_HUNTING_UNLOCK_FLAG, 1)
+    database.set_user_flag(user_id, "quest:forester_first_marks", 1)
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🌲Лесник:\n\n"
+            "Он достаёт из жестяной коробки три потёртые бирки с насечками и кладёт тебе в ладонь.\n\n"
+            "«Первая метка — где зверь ходит. Вторая — где он ест. Третья — где он ждёт дурака. "
+            "Не перепутай порядок.»\n\n"
+            "✅ Открыт доступ к охотничьим тропам лесной ветки.\n"
+            "Пока сами охотничьи места не вынесены отдельной локацией, Лесник уже будет принимать трофеи."
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def _handle_forester_sell_trophies(player, vk, user_id: int, npc_id: str):
+    """Сдать все лесные трофеи Леснику."""
+    result = database.sell_forester_trophies_transaction(user_id)
+    if not result.get("success"):
+        vk.messages.send(
+            user_id=user_id,
+            message=f"🌲Лесник:\n\n{result.get('message', 'Нечего принимать.')}",
+            keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    invalidate_player_cache(user_id)
+    player.money = int(result.get("remaining_money", player.money) or player.money)
+    sold_lines = [
+        f"• {row['name']} x{row['quantity']} — {row['amount']} руб."
+        for row in result.get("sold", [])
+    ]
+    from handlers.quests import track_quest_shop_sell
+    track_quest_shop_sell(user_id, vk=vk)
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🌲Лесник:\n\n"
+            "Он перебирает трофеи молча, откладывая плохое в сторону, хорошее — на чистую мешковину.\n\n"
+            f"{chr(10).join(sold_lines)}\n\n"
+            f"Итого: {int(result.get('total', 0) or 0)} руб.\n"
+            f"Денег сейчас: {player.money} руб."
+        ),
+        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        random_id=0
+    )
+    return True
 
 
 def _handle_trader_slot_info(player, vk, user_id: int, npc_id: str):

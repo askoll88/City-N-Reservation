@@ -31,6 +31,7 @@ INNER_TO_ROAD_LOCATION = {
     "склад_17": "Дорога на военную часть",
     "главный_корпус_нии": "Дорога на НИИ",
     "зараженный_лес": "Дорога на зараженный лес",
+    "заимка_лесника": "Дорога на зараженный лес",
 }
 
 
@@ -226,6 +227,10 @@ def create_location_keyboard(location_id: str, player_level: int = None):
             keyboard.add_button("Склад 17", color=VkKeyboardColor.POSITIVE)
             keyboard.add_line()
             keyboard.add_button("Военная часть", color=VkKeyboardColor.PRIMARY)
+        elif location_id == "дорога_зараженный_лес":
+            keyboard.add_button("Зараженный лес", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+            keyboard.add_button("Заимка лесника", color=VkKeyboardColor.PRIMARY)
         elif location_id in ROAD_TO_INNER_LOCATION:
             label, color = ROAD_TO_INNER_LOCATION[location_id]
             keyboard.add_button(label, color=color)
@@ -235,6 +240,13 @@ def create_location_keyboard(location_id: str, player_level: int = None):
             keyboard.add_button(INNER_TO_ROAD_LOCATION[location_id], color=VkKeyboardColor.NEGATIVE)
         else:
             keyboard.add_button("В КПП", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        _add_meta_row(keyboard)
+
+    # --- Заимка лесника ---
+    elif location_id == "заимка_лесника":
+        keyboard.add_button("Поговорить", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Дорога на зараженный лес", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()
         _add_meta_row(keyboard)
 

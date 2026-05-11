@@ -1,6 +1,6 @@
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from game.gacha import banners, service
 from game.gacha.assets import get_item_image_path
@@ -491,8 +491,24 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(result["converted_tickets"], 1)
         self.assertEqual(result["rewards"][0].rarity, "SSR")
         self.assertEqual(result["state"]["pity_ssr"], 0)
-        add_storage_mock.assert_called_once()
-        add_inventory_mock.assert_called_once_with(777, "Оружейный отклик", 1)
+        add_storage_mock.assert_not_called()
+        add_inventory_mock.assert_has_calls([
+            call(777, "Оружейный отклик", 1),
+            call(777, "АК-74 «Резонанс»", 1),
+        ])
+
+    def test_non_duplicate_ssr_goes_to_inventory(self):
+        reward = service.PullReward("SSR", "АК-74 «Резонанс»")
+        with patch("game.gacha.service.database.get_user_inventory", return_value=[]), \
+             patch("game.gacha.service.database.get_user_storage", return_value=[]), \
+             patch("game.gacha.service.database.get_user_by_vk", return_value={}), \
+             patch("game.gacha.service.database.add_item_to_inventory", return_value=True) as add_inventory_mock, \
+             patch("game.gacha.service.database.add_item_to_storage", return_value=True) as add_storage_mock:
+            granted = service._grant_reward(777, reward)
+
+        self.assertFalse(granted.duplicate)
+        add_inventory_mock.assert_called_once_with(777, "АК-74 «Резонанс»", 1)
+        add_storage_mock.assert_not_called()
 
     def test_non_admin_cannot_pull_resonance(self):
         with patch("game.gacha.service.is_resonance_enabled", return_value=True), \

@@ -19,6 +19,7 @@ class LocationType(Enum):
     WAREHOUSE_17 = "склад_17"
     NII_MAIN_BUILDING = "главный_корпус_нии"
     INFECTED_FOREST_DEEP = "зараженный_лес"
+    FORESTER_HUT = "заимка_лесника"
 
 
 # === Разделы инвентаря ===
@@ -69,6 +70,9 @@ COMMANDS = {
     'оружейный бункер': 'location:склад_17',
     'главный корпус нии': 'location:главный_корпус_нии',
     'зараженный лес': 'location:зараженный_лес',
+    'заимка лесника': 'location:заимка_лесника',
+    'заимка': 'location:заимка_лесника',
+    'лесник': 'location:заимка_лесника',
     
     # Статус
     'статус': 'status',
@@ -316,6 +320,7 @@ DANGEROUS_LOCATIONS = [
     LocationType.NII_MAIN_BUILDING.value,
     LocationType.INFECTED_FOREST.value,
     LocationType.INFECTED_FOREST_DEEP.value,
+    LocationType.FORESTER_HUT.value,
 ]
 
 
@@ -325,6 +330,7 @@ NPC_LOCATIONS = {
     'больница': ['Медик'],
     'убежище': ['Старый проводник', 'Инструктор классов', 'Дозиметрист'],
     'черный рынок': ['Барыга'],
+    'заимка_лесника': ['Лесник'],
 }
 
 
