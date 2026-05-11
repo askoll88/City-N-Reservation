@@ -414,6 +414,83 @@ def init_db():
             )
         """)
 
+        # -- gacha ---------------------------------------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gacha_currency_balances (
+                user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                currency   VARCHAR(40) NOT NULL,
+                balance    INTEGER     NOT NULL DEFAULT 0 CHECK (balance >= 0),
+                updated_at TIMESTAMP   NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, currency)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gacha_currency_ledger (
+                id            BIGSERIAL PRIMARY KEY,
+                user_id       INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                currency      VARCHAR(40) NOT NULL,
+                delta         INTEGER     NOT NULL,
+                balance_after INTEGER     NOT NULL,
+                source        VARCHAR(60) NOT NULL,
+                details_json  TEXT        NOT NULL DEFAULT '{}',
+                created_at    TIMESTAMP   NOT NULL DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gacha_user_state (
+                user_id                 INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                banner_id               VARCHAR(40) NOT NULL,
+                pity_ssr                INTEGER     NOT NULL DEFAULT 0,
+                pity_sr                 INTEGER     NOT NULL DEFAULT 0,
+                featured_guaranteed     BOOLEAN     NOT NULL DEFAULT FALSE,
+                featured_sr_guaranteed  BOOLEAN     NOT NULL DEFAULT FALSE,
+                updated_at              TIMESTAMP   NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, banner_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gacha_pull_history (
+                id             BIGSERIAL PRIMARY KEY,
+                user_id        INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                banner_id      VARCHAR(40) NOT NULL,
+                banner_name    VARCHAR(120) NOT NULL,
+                pull_count     INTEGER     NOT NULL,
+                cost           INTEGER     NOT NULL,
+                shards_after   INTEGER     NOT NULL,
+                best_rarity    VARCHAR(10) NOT NULL,
+                rewards_json   TEXT        NOT NULL,
+                created_at     TIMESTAMP   NOT NULL DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gacha_banner_snapshots (
+                cycle_start_ts BIGINT      NOT NULL,
+                banner_id      VARCHAR(40) NOT NULL,
+                payload_json   TEXT        NOT NULL,
+                created_at     TIMESTAMP   NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (cycle_start_ts, banner_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gacha_banner_stats (
+                cycle_start_ts             BIGINT      NOT NULL,
+                banner_id                  VARCHAR(40) NOT NULL,
+                pulls                      INTEGER     NOT NULL DEFAULT 0,
+                ssr_total                  INTEGER     NOT NULL DEFAULT 0,
+                rateup_ssr                 INTEGER     NOT NULL DEFAULT 0,
+                fifty_fifty_losses         INTEGER     NOT NULL DEFAULT 0,
+                guaranteed_rateup          INTEGER     NOT NULL DEFAULT 0,
+                sr_total                   INTEGER     NOT NULL DEFAULT 0,
+                rateup_sr                  INTEGER     NOT NULL DEFAULT 0,
+                sr_rateup_losses           INTEGER     NOT NULL DEFAULT 0,
+                guaranteed_rateup_sr       INTEGER     NOT NULL DEFAULT 0,
+                pity_sum                   INTEGER     NOT NULL DEFAULT 0,
+                pity_count                 INTEGER     NOT NULL DEFAULT 0,
+                updated_at                 TIMESTAMP   NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (cycle_start_ts, banner_id)
+            )
+        """)
+
         # -- Индексы --------------------------------------------------------
         for ddl in [
             "CREATE INDEX IF NOT EXISTS idx_users_vk_id          ON users(vk_id)",
@@ -431,6 +508,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_market_trx_seller      ON market_transactions(seller_vk_id)",
             "CREATE INDEX IF NOT EXISTS idx_npc_shop_stock_merchant_period ON npc_shop_stock(merchant_id, period_key)",
             "CREATE INDEX IF NOT EXISTS idx_user_runtime_state_key  ON user_runtime_state(state_key)",
+            "CREATE INDEX IF NOT EXISTS idx_gacha_ledger_user_currency ON gacha_currency_ledger(user_id, currency, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_gacha_pull_history_user_banner ON gacha_pull_history(user_id, banner_id, created_at DESC)",
         ]:
             cursor.execute(ddl)
 
@@ -4415,6 +4494,420 @@ def increment_user_flag(vk_id: int, flag_name: str, delta: int = 1) -> int:
         )
         row = cursor.fetchone()
         return int(row["value"] if row else 0)
+
+
+def _json_dumps_safe(payload: dict | list | None) -> str:
+    try:
+        return json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        logger.exception("Не удалось сериализовать JSON payload")
+        return "{}"
+
+
+def get_gacha_currency_balance(vk_id: int, currency: str, legacy_flag: str | None = None) -> int:
+    safe_currency = str(currency or "").strip().lower()
+    if not safe_currency:
+        return 0
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if not user:
+                if legacy_flag:
+                    return max(0, int(get_user_flag(vk_id, legacy_flag, 0) or 0))
+                return 0
+            user_id = int(user["id"])
+            cursor.execute(
+                "SELECT balance FROM gacha_currency_balances WHERE user_id = %s AND currency = %s",
+                (user_id, safe_currency),
+            )
+            row = cursor.fetchone()
+            if row:
+                return max(0, int(row.get("balance") or 0))
+
+            legacy_balance = 0
+            if legacy_flag:
+                cursor.execute(
+                    "SELECT value FROM user_flags WHERE user_id = %s AND flag_name = %s",
+                    (user_id, legacy_flag),
+                )
+                legacy_balance = max(0, int((cursor.fetchone() or {}).get("value") or 0))
+            cursor.execute(
+                """
+                INSERT INTO gacha_currency_balances (user_id, currency, balance, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (user_id, currency) DO NOTHING
+                """,
+                (user_id, safe_currency, legacy_balance),
+            )
+            return legacy_balance
+    except Exception:
+        if legacy_flag:
+            return max(0, int(get_user_flag(vk_id, legacy_flag, 0) or 0))
+        return 0
+
+
+def change_gacha_currency(
+    vk_id: int,
+    currency: str,
+    delta: int,
+    *,
+    source: str,
+    details: dict | None = None,
+    legacy_flag: str | None = None,
+    allow_negative: bool = False,
+) -> dict:
+    safe_currency = str(currency or "").strip().lower()
+    safe_delta = int(delta or 0)
+    if not safe_currency:
+        return {"success": False, "message": "Не указана валюта.", "balance": 0}
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+            user = cursor.fetchone()
+            if not user:
+                raise RuntimeError("gacha currency user row not found")
+            user_id = int(user["id"])
+
+            cursor.execute(
+                """
+                SELECT balance FROM gacha_currency_balances
+                WHERE user_id = %s AND currency = %s
+                FOR UPDATE
+                """,
+                (user_id, safe_currency),
+            )
+            row = cursor.fetchone()
+            if row:
+                current = max(0, int(row.get("balance") or 0))
+            else:
+                current = 0
+                if legacy_flag:
+                    cursor.execute(
+                        "SELECT value FROM user_flags WHERE user_id = %s AND flag_name = %s",
+                        (user_id, legacy_flag),
+                    )
+                    current = max(0, int((cursor.fetchone() or {}).get("value") or 0))
+                cursor.execute(
+                    """
+                    INSERT INTO gacha_currency_balances (user_id, currency, balance, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (user_id, currency) DO NOTHING
+                    """,
+                    (user_id, safe_currency, current),
+                )
+
+            new_balance = current + safe_delta
+            if new_balance < 0 and not allow_negative:
+                return {
+                    "success": False,
+                    "message": f"Не хватает валюты: нужно {-safe_delta}, у тебя {current}.",
+                    "balance": current,
+                }
+            new_balance = max(0, new_balance)
+            cursor.execute(
+                """
+                UPDATE gacha_currency_balances
+                SET balance = %s, updated_at = NOW()
+                WHERE user_id = %s AND currency = %s
+                """,
+                (new_balance, user_id, safe_currency),
+            )
+            cursor.execute(
+                """
+                INSERT INTO gacha_currency_ledger (user_id, currency, delta, balance_after, source, details_json)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (user_id, safe_currency, safe_delta, new_balance, str(source or "unknown")[:60], _json_dumps_safe(details)),
+            )
+            if legacy_flag:
+                cursor.execute(
+                    """
+                    INSERT INTO user_flags (user_id, flag_name, value)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, flag_name) DO UPDATE
+                    SET value = EXCLUDED.value
+                    """,
+                    (user_id, legacy_flag, new_balance),
+                )
+            return {"success": True, "balance": new_balance, "old_balance": current}
+    except Exception:
+        current = max(0, int(get_user_flag(vk_id, legacy_flag, 0) or 0)) if legacy_flag else 0
+        new_balance = current + safe_delta
+        if new_balance < 0 and not allow_negative:
+            return {"success": False, "message": f"Не хватает валюты: нужно {-safe_delta}, у тебя {current}.", "balance": current}
+        new_balance = max(0, new_balance)
+        if legacy_flag:
+            set_user_flag(vk_id, legacy_flag, new_balance)
+        return {"success": True, "balance": new_balance, "old_balance": current}
+
+
+def get_gacha_user_state(vk_id: int, banner_id: str, legacy_flags: dict | None = None) -> dict:
+    safe_banner = str(banner_id or "").strip().lower()
+    state = {"pity_ssr": 0, "pity_sr": 0, "featured_guaranteed": False, "featured_sr_guaranteed": False}
+    if not safe_banner:
+        return state
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if not user:
+                if legacy_flags:
+                    for key, flag_name in legacy_flags.items():
+                        value = int(get_user_flag(vk_id, flag_name, 0) or 0)
+                        if key in {"featured_guaranteed", "featured_sr_guaranteed"}:
+                            state[key] = value == 1
+                        elif key in state:
+                            state[key] = max(0, value)
+                return state
+            user_id = int(user["id"])
+            cursor.execute(
+                """
+                SELECT pity_ssr, pity_sr, featured_guaranteed, featured_sr_guaranteed
+                FROM gacha_user_state WHERE user_id = %s AND banner_id = %s
+                """,
+                (user_id, safe_banner),
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "pity_ssr": max(0, int(row.get("pity_ssr") or 0)),
+                    "pity_sr": max(0, int(row.get("pity_sr") or 0)),
+                    "featured_guaranteed": bool(row.get("featured_guaranteed")),
+                    "featured_sr_guaranteed": bool(row.get("featured_sr_guaranteed")),
+                }
+            if legacy_flags:
+                for key, flag_name in legacy_flags.items():
+                    cursor.execute("SELECT value FROM user_flags WHERE user_id = %s AND flag_name = %s", (user_id, flag_name))
+                    value = int((cursor.fetchone() or {}).get("value") or 0)
+                    if key in {"featured_guaranteed", "featured_sr_guaranteed"}:
+                        state[key] = value == 1
+                    elif key in state:
+                        state[key] = max(0, value)
+            cursor.execute(
+                """
+                INSERT INTO gacha_user_state (
+                    user_id, banner_id, pity_ssr, pity_sr, featured_guaranteed, featured_sr_guaranteed, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (user_id, banner_id) DO NOTHING
+                """,
+                (user_id, safe_banner, int(state["pity_ssr"]), int(state["pity_sr"]), bool(state["featured_guaranteed"]), bool(state["featured_sr_guaranteed"])),
+            )
+            return state
+    except Exception:
+        if legacy_flags:
+            for key, flag_name in legacy_flags.items():
+                value = int(get_user_flag(vk_id, flag_name, 0) or 0)
+                if key in {"featured_guaranteed", "featured_sr_guaranteed"}:
+                    state[key] = value == 1
+                elif key in state:
+                    state[key] = max(0, value)
+        return state
+
+
+def set_gacha_user_state(vk_id: int, banner_id: str, state: dict, legacy_flags: dict | None = None) -> None:
+    safe_banner = str(banner_id or "").strip().lower()
+    if not safe_banner:
+        return
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if not user:
+                raise RuntimeError("gacha state user row not found")
+            user_id = int(user["id"])
+            values = {
+                "pity_ssr": max(0, int(state.get("pity_ssr", 0) or 0)),
+                "pity_sr": max(0, int(state.get("pity_sr", 0) or 0)),
+                "featured_guaranteed": bool(state.get("featured_guaranteed")),
+                "featured_sr_guaranteed": bool(state.get("featured_sr_guaranteed")),
+            }
+            cursor.execute(
+                """
+                INSERT INTO gacha_user_state (
+                    user_id, banner_id, pity_ssr, pity_sr, featured_guaranteed, featured_sr_guaranteed, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (user_id, banner_id) DO UPDATE
+                SET pity_ssr = EXCLUDED.pity_ssr,
+                    pity_sr = EXCLUDED.pity_sr,
+                    featured_guaranteed = EXCLUDED.featured_guaranteed,
+                    featured_sr_guaranteed = EXCLUDED.featured_sr_guaranteed,
+                    updated_at = NOW()
+                """,
+                (user_id, safe_banner, values["pity_ssr"], values["pity_sr"], values["featured_guaranteed"], values["featured_sr_guaranteed"]),
+            )
+            if legacy_flags:
+                for key, flag_name in legacy_flags.items():
+                    if key not in values:
+                        continue
+                    raw_value = int(values[key]) if isinstance(values[key], bool) else int(values[key])
+                    cursor.execute(
+                        """
+                        INSERT INTO user_flags (user_id, flag_name, value)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (user_id, flag_name) DO UPDATE SET value = EXCLUDED.value
+                        """,
+                        (user_id, flag_name, raw_value),
+                    )
+    except Exception:
+        if legacy_flags:
+            legacy_values = {
+                "pity_ssr": max(0, int(state.get("pity_ssr", 0) or 0)),
+                "pity_sr": max(0, int(state.get("pity_sr", 0) or 0)),
+                "featured_guaranteed": 1 if state.get("featured_guaranteed") else 0,
+                "featured_sr_guaranteed": 1 if state.get("featured_sr_guaranteed") else 0,
+            }
+            for key, flag_name in legacy_flags.items():
+                if key in legacy_values:
+                    set_user_flag(vk_id, flag_name, legacy_values[key])
+        return
+
+
+def record_gacha_pull_history(vk_id: int, *, banner_id: str, banner_name: str, pull_count: int, cost: int, shards_after: int, best_rarity: str, rewards: list[dict]) -> None:
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if not user:
+                return
+            cursor.execute(
+                """
+                INSERT INTO gacha_pull_history (user_id, banner_id, banner_name, pull_count, cost, shards_after, best_rarity, rewards_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (user["id"], str(banner_id or "").strip().lower(), str(banner_name or "")[:120], max(1, int(pull_count or 1)), max(0, int(cost or 0)), max(0, int(shards_after or 0)), str(best_rarity or "R")[:10], _json_dumps_safe(rewards or [])),
+            )
+    except Exception:
+        return
+
+
+def get_gacha_pull_history(vk_id: int, banner_id: str, limit: int = 50) -> list[dict]:
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if not user:
+                return []
+            cursor.execute(
+                """
+                SELECT id, banner_id, banner_name, pull_count, cost, shards_after, best_rarity, rewards_json, created_at
+                FROM gacha_pull_history
+                WHERE user_id = %s AND banner_id = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+                """,
+                (user["id"], str(banner_id or "").strip().lower(), max(1, min(200, int(limit or 50)))),
+            )
+            rows = cursor.fetchall()
+    except Exception:
+        return []
+    result = []
+    for row in rows:
+        try:
+            rewards = json.loads(row.get("rewards_json") or "[]")
+        except Exception:
+            rewards = []
+        created_at = row.get("created_at")
+        result.append({
+            "id": int(row["id"]),
+            "ts": int(created_at.replace(tzinfo=timezone.utc).timestamp()) if created_at else 0,
+            "banner_id": row["banner_id"],
+            "banner_name": row["banner_name"],
+            "count": int(row["pull_count"]),
+            "cost": int(row["cost"]),
+            "shards_left": int(row["shards_after"]),
+            "best_rarity": row["best_rarity"],
+            "rewards": rewards if isinstance(rewards, list) else [],
+        })
+    return result
+
+
+def get_gacha_banner_snapshots(cycle_start_ts: int) -> dict[str, dict]:
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT banner_id, payload_json FROM gacha_banner_snapshots WHERE cycle_start_ts = %s", (int(cycle_start_ts),))
+            rows = cursor.fetchall()
+    except Exception:
+        return {}
+    result = {}
+    for row in rows:
+        try:
+            payload = json.loads(row.get("payload_json") or "{}")
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            result[str(row["banner_id"])] = payload
+    return result
+
+
+def set_gacha_banner_snapshots(cycle_start_ts: int, snapshots: dict[str, dict]) -> None:
+    try:
+        with db_cursor() as (cursor, _):
+            for banner_id, payload in (snapshots or {}).items():
+                cursor.execute(
+                    """
+                    INSERT INTO gacha_banner_snapshots (cycle_start_ts, banner_id, payload_json, created_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (cycle_start_ts, banner_id) DO UPDATE SET payload_json = EXCLUDED.payload_json
+                    """,
+                    (int(cycle_start_ts), str(banner_id or "").strip().lower(), _json_dumps_safe(payload)),
+                )
+    except Exception:
+        return
+
+
+def get_gacha_banner_stats(cycle_start_ts: int, banner_id: str) -> dict:
+    keys = ("pulls", "ssr_total", "rateup_ssr", "fifty_fifty_losses", "guaranteed_rateup", "sr_total", "rateup_sr", "sr_rateup_losses", "guaranteed_rateup_sr", "pity_sum", "pity_count")
+    defaults = {key: 0 for key in keys}
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute(
+                f"SELECT {', '.join(keys)} FROM gacha_banner_stats WHERE cycle_start_ts = %s AND banner_id = %s",
+                (int(cycle_start_ts), str(banner_id or "").strip().lower()),
+            )
+            row = cursor.fetchone()
+    except Exception:
+        return defaults
+    if not row:
+        return defaults
+    return {key: max(0, int(row.get(key) or 0)) for key in keys}
+
+
+def set_gacha_banner_stats(cycle_start_ts: int, banner_id: str, stats: dict) -> None:
+    keys = ("pulls", "ssr_total", "rateup_ssr", "fifty_fifty_losses", "guaranteed_rateup", "sr_total", "rateup_sr", "sr_rateup_losses", "guaranteed_rateup_sr", "pity_sum", "pity_count")
+    values = {key: max(0, int(stats.get(key, 0) or 0)) for key in keys}
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute(
+                """
+                INSERT INTO gacha_banner_stats (
+                    cycle_start_ts, banner_id, pulls, ssr_total, rateup_ssr, fifty_fifty_losses,
+                    guaranteed_rateup, sr_total, rateup_sr, sr_rateup_losses, guaranteed_rateup_sr,
+                    pity_sum, pity_count, updated_at
+                )
+                VALUES (%(cycle_start_ts)s, %(banner_id)s, %(pulls)s, %(ssr_total)s, %(rateup_ssr)s, %(fifty_fifty_losses)s,
+                        %(guaranteed_rateup)s, %(sr_total)s, %(rateup_sr)s, %(sr_rateup_losses)s,
+                        %(guaranteed_rateup_sr)s, %(pity_sum)s, %(pity_count)s, NOW())
+                ON CONFLICT (cycle_start_ts, banner_id) DO UPDATE
+                SET pulls = EXCLUDED.pulls,
+                    ssr_total = EXCLUDED.ssr_total,
+                    rateup_ssr = EXCLUDED.rateup_ssr,
+                    fifty_fifty_losses = EXCLUDED.fifty_fifty_losses,
+                    guaranteed_rateup = EXCLUDED.guaranteed_rateup,
+                    sr_total = EXCLUDED.sr_total,
+                    rateup_sr = EXCLUDED.rateup_sr,
+                    sr_rateup_losses = EXCLUDED.sr_rateup_losses,
+                    guaranteed_rateup_sr = EXCLUDED.guaranteed_rateup_sr,
+                    pity_sum = EXCLUDED.pity_sum,
+                    pity_count = EXCLUDED.pity_count,
+                    updated_at = NOW()
+                """,
+                {"cycle_start_ts": int(cycle_start_ts), "banner_id": str(banner_id or "").strip().lower(), **values},
+            )
+    except Exception:
+        return
 
 
 def set_runtime_state(vk_id: int, state_key: str, payload: dict):

@@ -506,7 +506,9 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(granted.name, "Осколки сигнала")
         self.assertEqual(granted.quantity, 800)
         self.assertEqual(granted.source_name, "АК-74 «Резонанс»")
-        add_shards_mock.assert_called_once_with(777, 800)
+        add_shards_mock.assert_called_once()
+        self.assertEqual(add_shards_mock.call_args.args[:2], (777, 800))
+        self.assertEqual(add_shards_mock.call_args.kwargs["source"], "duplicate_ssr")
         add_storage_mock.assert_not_called()
 
     def test_duplicate_ssr_checks_equipped_items(self):
@@ -519,7 +521,9 @@ class GachaSystemTest(unittest.TestCase):
             granted = service._grant_reward(777, reward)
 
         self.assertTrue(granted.duplicate)
-        add_shards_mock.assert_called_once_with(777, 800)
+        add_shards_mock.assert_called_once()
+        self.assertEqual(add_shards_mock.call_args.args[:2], (777, 800))
+        self.assertEqual(add_shards_mock.call_args.kwargs["source"], "duplicate_ssr")
         add_storage_mock.assert_not_called()
 
     def test_duplicate_ssr_updates_pull_result_shards_left(self):
@@ -638,7 +642,9 @@ class GachaSystemTest(unittest.TestCase):
             reward = service.grant_daily_quest_shards(777, streak=7)
 
         self.assertEqual(reward["granted"], 84)
-        add_shards.assert_called_once_with(777, 84)
+        add_shards.assert_called_once()
+        self.assertEqual(add_shards.call_args.args[:2], (777, 84))
+        self.assertEqual(add_shards.call_args.kwargs["source"], "daily_quest")
 
     def test_combat_shards_only_for_hard_fights(self):
         with patch("game.gacha.service.get_signal_shards", return_value=0):

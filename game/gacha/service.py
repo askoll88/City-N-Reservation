@@ -44,6 +44,7 @@ from .event_items import is_gacha_event_item
 DUPLICATE_SSR_PULLS = 5
 DUPLICATE_SSR_SHARDS = SINGLE_PULL_COST * DUPLICATE_SSR_PULLS
 SIGNAL_SHARDS_REWARD_NAME = "Осколки сигнала"
+SIGNAL_SHARDS_CURRENCY = "signal_shards"
 EVENT_SHARDS_DAILY_CAP = 80
 COMBAT_SHARDS_DAILY_CAP = 120
 RESONANCE_HISTORY_RUNTIME_KEY = "resonance_history"
@@ -102,15 +103,20 @@ def is_resonance_available(vk_id: int) -> bool:
 
 
 def get_signal_shards(vk_id: int) -> int:
-    return max(0, int(database.get_user_flag(vk_id, SIGNAL_SHARDS_FLAG, 0) or 0))
+    return database.get_gacha_currency_balance(vk_id, SIGNAL_SHARDS_CURRENCY, legacy_flag=SIGNAL_SHARDS_FLAG)
 
 
-def add_signal_shards(vk_id: int, amount: int) -> int:
+def add_signal_shards(vk_id: int, amount: int, source: str = "grant", details: dict | None = None) -> int:
     safe_amount = int(amount or 0)
-    current = get_signal_shards(vk_id)
-    updated = max(0, current + safe_amount)
-    database.set_user_flag(vk_id, SIGNAL_SHARDS_FLAG, updated)
-    return updated
+    result = database.change_gacha_currency(
+        vk_id,
+        SIGNAL_SHARDS_CURRENCY,
+        safe_amount,
+        source=source,
+        details=details,
+        legacy_flag=SIGNAL_SHARDS_FLAG,
+    )
+    return max(0, int(result.get("balance", 0) or 0))
 
 
 def _now_ts() -> int:
@@ -204,13 +210,27 @@ def get_active_banners(now_ts: int | None = None) -> dict[str, Banner]:
     """
     cycle = ensure_banner_cycle(now_ts=now_ts)
     key = _snapshot_key(cycle["start_ts"])
-    stored = database.get_game_setting(key, default="")
-    banners = _deserialize_banners(stored)
+    snapshot_payload = database.get_gacha_banner_snapshots(cycle["start_ts"])
+    banners = _deserialize_banners(json.dumps(snapshot_payload, ensure_ascii=False) if snapshot_payload else None)
     if banners:
         return banners
 
+    stored = database.get_game_setting(key, default="")
+    banners = _deserialize_banners(stored)
+    if banners:
+        database.set_gacha_banner_snapshots(
+            cycle["start_ts"],
+            {banner_id: banner_to_dict(banner) for banner_id, banner in banners.items()},
+        )
+        return banners
+
     banners = build_phase_banners(cycle["phase_index"])
-    database.set_game_setting(key, _serialize_banners(banners))
+    serialized = _serialize_banners(banners)
+    database.set_gacha_banner_snapshots(
+        cycle["start_ts"],
+        {banner_id: banner_to_dict(banner) for banner_id, banner in banners.items()},
+    )
+    database.set_game_setting(key, serialized)
     return banners
 
 
@@ -238,7 +258,7 @@ def add_signal_shards_capped(vk_id: int, amount: int, source: str, daily_cap: in
     if grant <= 0:
         return {"granted": 0, "balance": get_signal_shards(vk_id), "cap": safe_cap, "used": used}
 
-    balance = add_signal_shards(vk_id, grant)
+    balance = add_signal_shards(vk_id, grant, source=f"{key}_reward", details={"cap": safe_cap, "used_before": used})
     database.set_user_flag(vk_id, day_flag, today)
     database.set_user_flag(vk_id, used_flag, used + grant)
     return {"granted": grant, "balance": balance, "cap": safe_cap, "used": used + grant}
@@ -254,7 +274,7 @@ def grant_daily_quest_shards(vk_id: int, streak: int) -> dict:
         amount += 20
     if safe_streak >= 30:
         amount += 30
-    return {"granted": amount, "balance": add_signal_shards(vk_id, amount), "cap": 0, "used": 0}
+    return {"granted": amount, "balance": add_signal_shards(vk_id, amount, source="daily_quest", details={"streak": safe_streak}), "cap": 0, "used": 0}
 
 
 def grant_event_shards(vk_id: int, event: dict, result: dict) -> dict:
@@ -320,27 +340,21 @@ def _flag_name(banner_id: str, suffix: str) -> str:
 
 
 def _get_banner_state(vk_id: int, banner_id: str) -> dict:
-    return {
-        "pity_ssr": max(0, int(database.get_user_flag(vk_id, _flag_name(banner_id, "pity_ssr"), 0) or 0)),
-        "pity_sr": max(0, int(database.get_user_flag(vk_id, _flag_name(banner_id, "pity_sr"), 0) or 0)),
-        "featured_guaranteed": int(database.get_user_flag(vk_id, _flag_name(banner_id, "featured_guaranteed"), 0) or 0) == 1,
-        "featured_sr_guaranteed": int(database.get_user_flag(vk_id, _flag_name(banner_id, "featured_sr_guaranteed"), 0) or 0) == 1,
-    }
+    return database.get_gacha_user_state(vk_id, banner_id, legacy_flags={
+        "pity_ssr": _flag_name(banner_id, "pity_ssr"),
+        "pity_sr": _flag_name(banner_id, "pity_sr"),
+        "featured_guaranteed": _flag_name(banner_id, "featured_guaranteed"),
+        "featured_sr_guaranteed": _flag_name(banner_id, "featured_sr_guaranteed"),
+    })
 
 
 def _save_banner_state(vk_id: int, banner_id: str, state: dict) -> None:
-    database.set_user_flag(vk_id, _flag_name(banner_id, "pity_ssr"), int(state.get("pity_ssr", 0) or 0))
-    database.set_user_flag(vk_id, _flag_name(banner_id, "pity_sr"), int(state.get("pity_sr", 0) or 0))
-    database.set_user_flag(
-        vk_id,
-        _flag_name(banner_id, "featured_guaranteed"),
-        1 if state.get("featured_guaranteed") else 0,
-    )
-    database.set_user_flag(
-        vk_id,
-        _flag_name(banner_id, "featured_sr_guaranteed"),
-        1 if state.get("featured_sr_guaranteed") else 0,
-    )
+    database.set_gacha_user_state(vk_id, banner_id, state, legacy_flags={
+        "pity_ssr": _flag_name(banner_id, "pity_ssr"),
+        "pity_sr": _flag_name(banner_id, "pity_sr"),
+        "featured_guaranteed": _flag_name(banner_id, "featured_guaranteed"),
+        "featured_sr_guaranteed": _flag_name(banner_id, "featured_sr_guaranteed"),
+    })
 
 
 def get_banner_state(vk_id: int, banner_id: str) -> dict:
@@ -403,7 +417,12 @@ def _grant_reward(vk_id: int, reward: PullReward) -> PullReward:
         return fallback
 
     if reward.rarity == "SSR" and is_gacha_event_item(reward.name) and _has_item(vk_id, reward.name):
-        add_signal_shards(vk_id, DUPLICATE_SSR_SHARDS)
+        add_signal_shards(
+            vk_id,
+            DUPLICATE_SSR_SHARDS,
+            source="duplicate_ssr",
+            details={"source_item": reward.name, "pulls_compensation": DUPLICATE_SSR_PULLS},
+        )
         return replace(
             reward,
             name=SIGNAL_SHARDS_REWARD_NAME,
@@ -528,7 +547,16 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
             "message": f"Не хватает осколков сигнала: нужно {cost}, у тебя {current_shards}.",
         }
 
-    database.set_user_flag(vk_id, SIGNAL_SHARDS_FLAG, current_shards - cost)
+    spend = database.change_gacha_currency(
+        vk_id,
+        SIGNAL_SHARDS_CURRENCY,
+        -cost,
+        source="pull",
+        details={"banner_id": banner.id, "count": count},
+        legacy_flag=SIGNAL_SHARDS_FLAG,
+    )
+    if not spend.get("success"):
+        return {"success": False, "message": spend.get("message") or "Не удалось списать осколки сигнала."}
     state = _get_banner_state(vk_id, banner.id)
     state["featured_candidates"] = _owned_featured_candidates(vk_id, banner)
     raw_rewards = [_roll_one(banner, state) for _ in range(count)]
@@ -557,9 +585,7 @@ def get_banners() -> tuple[Banner, ...]:
 
 def _load_pull_history(vk_id: int) -> dict:
     data = database.get_runtime_state(vk_id, RESONANCE_HISTORY_RUNTIME_KEY) or {}
-    if not isinstance(data, dict):
-        return {}
-    return data
+    return data if isinstance(data, dict) else {}
 
 
 def _save_pull_history(vk_id: int, data: dict) -> None:
@@ -575,10 +601,33 @@ def _record_pull_history(
     shards_left: int,
 ) -> None:
     """Сохранить короткую историю откликов игрока отдельно по баннерам."""
+    best_rarity = "SSR" if any(r.rarity == "SSR" for r in rewards) else "SR" if any(r.rarity == "SR" for r in rewards) else "R"
+    reward_rows = [
+        {
+            "rarity": reward.rarity,
+            "name": reward.name,
+            "quantity": int(reward.quantity),
+            "duplicate": bool(reward.duplicate),
+            "source_name": reward.source_name,
+            "featured": bool(reward.featured or reward.sr_featured),
+            "guaranteed": bool(reward.guaranteed or reward.sr_guaranteed),
+            "rateup_lost": bool(reward.fifty_fifty_lost or reward.sr_rateup_lost),
+        }
+        for reward in rewards
+    ]
+    database.record_gacha_pull_history(
+        vk_id,
+        banner_id=banner.id,
+        banner_name=banner.name,
+        pull_count=count,
+        cost=cost,
+        shards_after=shards_left,
+        best_rarity=best_rarity,
+        rewards=reward_rows,
+    )
     try:
         data = _load_pull_history(vk_id)
         rows = list(data.get(banner.id) or [])
-        best_rarity = "SSR" if any(r.rarity == "SSR" for r in rewards) else "SR" if any(r.rarity == "SR" for r in rewards) else "R"
         rows.insert(0, {
             "ts": _now_ts(),
             "banner_id": banner.id,
@@ -587,19 +636,7 @@ def _record_pull_history(
             "cost": int(cost),
             "shards_left": int(shards_left),
             "best_rarity": best_rarity,
-            "rewards": [
-                {
-                    "rarity": reward.rarity,
-                    "name": reward.name,
-                    "quantity": int(reward.quantity),
-                    "duplicate": bool(reward.duplicate),
-                    "source_name": reward.source_name,
-                    "featured": bool(reward.featured or reward.sr_featured),
-                    "guaranteed": bool(reward.guaranteed or reward.sr_guaranteed),
-                    "rateup_lost": bool(reward.fifty_fifty_lost or reward.sr_rateup_lost),
-                }
-                for reward in rewards
-            ],
+            "rewards": reward_rows,
         })
         data[banner.id] = rows[:RESONANCE_HISTORY_LIMIT_PER_BANNER]
         _save_pull_history(vk_id, data)
@@ -612,8 +649,10 @@ def get_pull_history(vk_id: int, banner_id: str, page: int = 0, page_size: int =
     banner = get_banner(banner_id)
     if not banner:
         return {"banner": None, "items": [], "page": 0, "total_pages": 1, "total": 0}
-    data = _load_pull_history(vk_id)
-    rows = list(data.get(banner.id) or [])
+    rows = database.get_gacha_pull_history(vk_id, banner.id, limit=RESONANCE_HISTORY_LIMIT_PER_BANNER)
+    if not rows:
+        data = _load_pull_history(vk_id)
+        rows = list(data.get(banner.id) or [])
     safe_size = max(1, int(page_size or 5))
     total_pages = max(1, (len(rows) + safe_size - 1) // safe_size)
     safe_page = max(0, min(total_pages - 1, int(page or 0)))
@@ -632,6 +671,9 @@ def _stats_key(cycle_start_ts: int, banner_id: str) -> str:
 
 
 def _load_stats(cycle_start_ts: int, banner_id: str) -> dict:
+    table_stats = database.get_gacha_banner_stats(cycle_start_ts, banner_id)
+    if table_stats and any(int(value or 0) for value in table_stats.values()):
+        return table_stats
     raw = database.get_game_setting(_stats_key(cycle_start_ts, banner_id), default="{}") or "{}"
     try:
         data = json.loads(raw)
@@ -655,6 +697,7 @@ def _load_stats(cycle_start_ts: int, banner_id: str) -> dict:
 
 
 def _save_stats(cycle_start_ts: int, banner_id: str, stats: dict) -> None:
+    database.set_gacha_banner_stats(cycle_start_ts, banner_id, stats)
     database.set_game_setting(_stats_key(cycle_start_ts, banner_id), json.dumps(stats, ensure_ascii=False, sort_keys=True))
 
 
