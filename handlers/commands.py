@@ -809,7 +809,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
     shop_stages = {
         "shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_food",
         "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts",
-        "buy_all", "sell_all",
+        "buy_all", "sell_all", "gacha_exchange_shop",
     }
     if npc_id == "барыга" and stage in shop_stages:
         from infra.state_manager import set_dialog_state
@@ -822,6 +822,11 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         if text in {"продать предметы", "продажа предметов", "продать", "продать вещи", "скупка"}:
             set_dialog_state(user_id, npc_id, "sell_all")
             show_trader_sell_all(player, vk, user_id)
+            return True
+        if text in {"обменник резонанса", "резонансный обмен", "обмен откликов"}:
+            set_dialog_state(user_id, npc_id, "gacha_exchange_shop")
+            from game.gacha.ui import show_exchange_shop
+            show_exchange_shop(vk, user_id)
             return True
 
     if stage in shop_stages:
@@ -866,7 +871,7 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         show_npc_dialog(player, vk, user_id, npc_id, None)
         return True
 
-    if text == 'назад' and stage not in ("shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_food", "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts"):
+    if text == 'назад' and stage not in ("shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_food", "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts", "gacha_exchange_shop"):
         handle_npc_back(player, vk, user_id)
         return True
     
@@ -900,6 +905,12 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
         ]:
             set_dialog_state(user_id, npc_id, "sell_all")
             show_trader_sell_all(player, vk, user_id)
+            return True
+
+        if text in ["обменник резонанса", "резонансный обмен", "обмен откликов"]:
+            set_dialog_state(user_id, npc_id, "gacha_exchange_shop")
+            from game.gacha.ui import show_exchange_shop
+            show_exchange_shop(vk, user_id)
             return True
     
     # Обработка выбора вопроса диалога

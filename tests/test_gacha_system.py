@@ -53,7 +53,9 @@ class GachaSystemTest(unittest.TestCase):
         def set_setting(key, value):
             settings[key] = value
 
-        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+        with patch("game.gacha.service.database.get_gacha_banner_snapshots", return_value={}), \
+             patch("game.gacha.service.database.set_gacha_banner_snapshots"), \
+             patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
              patch("game.gacha.service.database.set_game_setting", side_effect=set_setting):
             first = service.ensure_banner_cycle(now_ts=1000)
             second = service.ensure_banner_cycle(now_ts=1000 + duration + 10)
@@ -72,7 +74,9 @@ class GachaSystemTest(unittest.TestCase):
         def set_setting(key, value):
             settings[key] = value
 
-        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+        with patch("game.gacha.service.database.get_gacha_banner_snapshots", return_value={}), \
+             patch("game.gacha.service.database.set_gacha_banner_snapshots"), \
+             patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
              patch("game.gacha.service.database.set_game_setting", side_effect=set_setting):
             active = service.get_active_banners(now_ts=2000)
             snapshot_key = next(key for key in settings if key.startswith(service.BANNER_SNAPSHOT_SETTING_PREFIX))
@@ -121,7 +125,7 @@ class GachaSystemTest(unittest.TestCase):
         self.assertEqual(banners.get_ssr_hard_pity("weapon"), 80)
 
     def test_resonance_menu_shows_exact_banner_time_left(self):
-        with patch("game.gacha.ui.get_signal_shards", return_value=160), \
+        with patch("game.gacha.ui.get_exchange_wallet", return_value={"shards": 160, "dust": 0, "marks": 0, "weapon_tickets": 1, "outfit_tickets": 0}), \
              patch("game.gacha.ui.get_banner_time_left", return_value={"formatted": "19д 23:59:58", "phase_number": 1, "phases_per_patch": 2}), \
              patch("game.gacha.ui.get_banner_state", return_value={
                  "pity_ssr": 0,
@@ -141,6 +145,7 @@ class GachaSystemTest(unittest.TestCase):
         self.assertIn("Резонанс снаряжения", payload)
         self.assertIn("Шансы оружия", payload)
         self.assertIn("Шансы снаряжения", payload)
+        self.assertIn("Собрать оружейный отклик", payload)
         self.assertNotIn("История резонанса", payload)
         self.assertNotIn('"label": "Резонанс Зоны"', payload)
 
@@ -148,7 +153,7 @@ class GachaSystemTest(unittest.TestCase):
         keyboard = json.loads(create_resonance_banner_keyboard("weapon").get_keyboard())
         first_row = keyboard["buttons"][0]
         labels = [button["action"]["label"] for button in first_row]
-        second_row_labels = [button["action"]["label"] for button in keyboard["buttons"][1]]
+        second_row_labels = [button["action"]["label"] for button in keyboard["buttons"][2]]
 
         self.assertFalse(keyboard["inline"])
         self.assertEqual(labels, ["Оружие x1", "Оружие x10"])
@@ -315,7 +320,9 @@ class GachaSystemTest(unittest.TestCase):
             service.PullReward("R", "Бинт"),
         ]
 
-        with patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
+        with patch("game.gacha.service.database.get_gacha_banner_stats", return_value={}), \
+             patch("game.gacha.service.database.set_gacha_banner_stats"), \
+             patch("game.gacha.service.database.get_game_setting", side_effect=get_setting), \
              patch("game.gacha.service.database.set_game_setting", side_effect=set_setting), \
              patch("game.gacha.service._now_ts", return_value=1000):
             service._record_banner_stats(banners.WEAPON_BANNER, rewards)
@@ -474,15 +481,18 @@ class GachaSystemTest(unittest.TestCase):
              patch("game.gacha.service.database.get_user_by_vk", return_value={}), \
              patch("game.gacha.service.database.add_item_to_storage", return_value=True) as add_storage_mock, \
              patch("game.gacha.service.database.add_item_to_inventory", return_value=True) as add_inventory_mock, \
+             patch("game.gacha.service.database.remove_item_from_inventory", return_value=True), \
              patch("game.gacha.service.database.add_shells", return_value=(True, "")):
             result = service.perform_pulls(777, "weapon", 1)
 
         self.assertTrue(result["success"])
         self.assertEqual(result["shards_left"], 0)
+        self.assertEqual(result["ticket"], "Оружейный отклик")
+        self.assertEqual(result["converted_tickets"], 1)
         self.assertEqual(result["rewards"][0].rarity, "SSR")
         self.assertEqual(result["state"]["pity_ssr"], 0)
         add_storage_mock.assert_called_once()
-        add_inventory_mock.assert_not_called()
+        add_inventory_mock.assert_called_once_with(777, "Оружейный отклик", 1)
 
     def test_non_admin_cannot_pull_resonance(self):
         with patch("game.gacha.service.is_resonance_enabled", return_value=True), \
@@ -547,7 +557,9 @@ class GachaSystemTest(unittest.TestCase):
              patch("game.gacha.service.database.get_user_inventory", return_value=[{"name": "АК-74 «Резонанс»"}]), \
              patch("game.gacha.service.database.get_user_storage", return_value=[]), \
              patch("game.gacha.service.database.get_user_by_vk", return_value={}), \
-             patch("game.gacha.service.database.add_item_to_storage", return_value=True):
+             patch("game.gacha.service.database.add_item_to_storage", return_value=True), \
+             patch("game.gacha.service.database.add_item_to_inventory", return_value=True), \
+             patch("game.gacha.service.database.remove_item_from_inventory", return_value=True):
             result = service.perform_pulls(777, "weapon", 1)
 
         self.assertTrue(result["success"])
@@ -607,8 +619,12 @@ class GachaSystemTest(unittest.TestCase):
             "success": True,
             "banner": banners.WEAPON_BANNER,
             "count": 10,
-            "cost": banners.TEN_PULL_COST,
+            "cost": 10,
+            "ticket": "Оружейный отклик",
+            "tickets_left": 0,
+            "converted_tickets": 0,
             "shards_left": 0,
+            "exchange_reward": {"dust": 150, "dust_balance": 150, "marks": 11, "marks_balance": 11},
             "rewards": [
                 service.PullReward("R", "Бинт"),
                 service.PullReward("SSR", "АК-74 «Резонанс»", featured=True),

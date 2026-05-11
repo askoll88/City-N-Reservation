@@ -1064,6 +1064,7 @@ def _do_callback_processing(event, vk):
             "resonance_history",
             "resonance_pull",
             "resonance_exit",
+            "gacha_exchange_buy",
             "market_purchase",
             "random_event",
         }
@@ -1127,6 +1128,16 @@ def _do_callback_processing(event, vk):
             show_resonance_menu(player, vk, user_id)
             return
         _answer_callback(event, vk, "Резонанс обновлен")
+        handle_resonance_callback(player, vk, user_id, payload)
+        return
+
+    if command == "gacha_exchange_buy":
+        _answer_callback(event, vk, "Обменник обновлён")
+        player = get_player(user_id)
+        if player.current_location_id != "черный рынок":
+            vk.messages.send(user_id=user_id, message="Обменник Резонанса доступен у Барыги на Черном рынке.", random_id=0)
+            return
+        from game.gacha.ui import handle_resonance_callback
         handle_resonance_callback(player, vk, user_id, payload)
         return
 

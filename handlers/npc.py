@@ -96,7 +96,7 @@ def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None
         return
 
     # Обработка перехода в магазин
-    if next_stage in ["shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_artifacts", "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts"]:
+    if next_stage in ["shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_artifacts", "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts", "gacha_exchange_shop"]:
         _handle_shop_redirect(player, vk, user_id, npc_id, next_stage)
         return
 
@@ -1101,6 +1101,10 @@ def _handle_shop_redirect(player, vk, user_id: int, npc_id: str, next_stage: str
     elif next_stage in ["sell_items", "sell_gear", "sell_artifacts"]:
         set_dialog_state(user_id, npc_id, "sell_all")
         show_trader_sell_all(player, vk, user_id)
+    elif next_stage == "gacha_exchange_shop":
+        set_dialog_state(user_id, npc_id, "gacha_exchange_shop")
+        from game.gacha.ui import show_exchange_shop
+        show_exchange_shop(vk, user_id)
 
 
 def handle_npc_choice(player, vk, user_id: int, npc_id: str):

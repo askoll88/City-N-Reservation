@@ -490,6 +490,16 @@ def init_db():
                 PRIMARY KEY (cycle_start_ts, banner_id)
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gacha_shop_purchases (
+                user_id     INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                period_key  VARCHAR(20) NOT NULL,
+                shop_key    VARCHAR(80) NOT NULL,
+                quantity    INTEGER     NOT NULL DEFAULT 0,
+                updated_at  TIMESTAMP   NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, period_key, shop_key)
+            )
+        """)
 
         # -- Индексы --------------------------------------------------------
         for ddl in [
@@ -510,6 +520,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_user_runtime_state_key  ON user_runtime_state(state_key)",
             "CREATE INDEX IF NOT EXISTS idx_gacha_ledger_user_currency ON gacha_currency_ledger(user_id, currency, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_gacha_pull_history_user_banner ON gacha_pull_history(user_id, banner_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_gacha_shop_purchases_user_period ON gacha_shop_purchases(user_id, period_key)",
         ]:
             cursor.execute(ddl)
 
@@ -4908,6 +4919,64 @@ def set_gacha_banner_stats(cycle_start_ts: int, banner_id: str, stats: dict) -> 
             )
     except Exception:
         return
+
+
+def get_gacha_shop_purchase_count(vk_id: int, period_key: str, shop_key: str) -> int:
+    safe_period = str(period_key or "").strip()
+    safe_key = str(shop_key or "").strip().lower()
+    if not safe_period or not safe_key:
+        return 0
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if not user:
+                return max(0, int(get_user_flag(vk_id, f"gacha_shop_{safe_period}_{safe_key}", 0) or 0))
+            cursor.execute(
+                """
+                SELECT quantity FROM gacha_shop_purchases
+                WHERE user_id = %s AND period_key = %s AND shop_key = %s
+                """,
+                (int(user["id"]), safe_period, safe_key),
+            )
+            row = cursor.fetchone()
+            return max(0, int((row or {}).get("quantity", 0) or 0))
+    except Exception:
+        return max(0, int(get_user_flag(vk_id, f"gacha_shop_{safe_period}_{safe_key}", 0) or 0))
+
+
+def add_gacha_shop_purchase_count(vk_id: int, period_key: str, shop_key: str, quantity: int) -> int:
+    safe_period = str(period_key or "").strip()
+    safe_key = str(shop_key or "").strip().lower()
+    safe_qty = max(0, int(quantity or 0))
+    if not safe_period or not safe_key or safe_qty <= 0:
+        return get_gacha_shop_purchase_count(vk_id, safe_period, safe_key)
+    try:
+        with db_cursor() as (cursor, _):
+            cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if not user:
+                raise RuntimeError("gacha shop user row not found")
+            cursor.execute(
+                """
+                INSERT INTO gacha_shop_purchases (user_id, period_key, shop_key, quantity, updated_at)
+                VALUES (%s, %s, %s, %s, NOW())
+                ON CONFLICT (user_id, period_key, shop_key) DO UPDATE
+                SET quantity = gacha_shop_purchases.quantity + EXCLUDED.quantity,
+                    updated_at = NOW()
+                RETURNING quantity
+                """,
+                (int(user["id"]), safe_period, safe_key, safe_qty),
+            )
+            row = cursor.fetchone() or {}
+            updated = max(0, int(row.get("quantity", 0) or 0))
+            set_user_flag(vk_id, f"gacha_shop_{safe_period}_{safe_key}", updated)
+            return updated
+    except Exception:
+        flag_name = f"gacha_shop_{safe_period}_{safe_key}"
+        updated = max(0, int(get_user_flag(vk_id, flag_name, 0) or 0)) + safe_qty
+        set_user_flag(vk_id, flag_name, updated)
+        return updated
 
 
 def set_runtime_state(vk_id: int, state_key: str, payload: dict):

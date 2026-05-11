@@ -12,8 +12,6 @@ from .assets import first_ssr_attachment, upload_item_image
 from .banners import (
     BANNER_DURATION_DAYS,
     BANNER_PATCH_DURATION_DAYS,
-    SINGLE_PULL_COST,
-    TEN_PULL_COST,
     SR_HARD_PITY,
     SR_BASE_RATE,
     SSR_HARD_PITY,
@@ -24,10 +22,23 @@ from .banners import (
     get_ssr_soft_pity_start,
     get_ssr_soft_pity_step,
 )
-from .service import get_banners, get_banner_state, get_signal_shards, is_resonance_available, perform_pulls
+from .service import get_banners, get_banner_state, is_resonance_available, perform_pulls
 from .service import get_banner_time_left
 from .service import get_pull_history
 from .service import get_rate_disclosure
+from .service import (
+    DUST_TICKET_PRICE,
+    MARK_TICKET_PRICE,
+    MONTHLY_DUST_TICKET_LIMIT,
+    RESONANCE_DUST_NAME,
+    RESONANCE_MARKS_NAME,
+    TICKET_SHARD_COST,
+    buy_exchange_tickets,
+    convert_signal_shards_to_tickets,
+    get_exchange_shop,
+    get_exchange_wallet,
+    get_ticket_count,
+)
 from .event_items import (
     EVENT_OUTFIT_SET_BONUSES,
     GACHA_EVENT_ITEMS,
@@ -61,6 +72,9 @@ def create_resonance_keyboard() -> VkKeyboard:
     keyboard.add_button("Шансы оружия", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("Шансы снаряжения", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
+    keyboard.add_button("Собрать оружейный отклик", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Собрать отклик снаряжения", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
@@ -72,9 +86,24 @@ def create_resonance_banner_keyboard(banner_id: str) -> VkKeyboard:
     keyboard.add_button(f"{prefix} x1", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button(f"{prefix} x10", color=VkKeyboardColor.POSITIVE)
     keyboard.add_line()
+    keyboard.add_button(f"Собрать {prefix.lower()} x1", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
     keyboard.add_button(history_label, color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("Назад к резонансу", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_gacha_exchange_shop_keyboard() -> VkKeyboard:
+    keyboard = VkKeyboard(one_time=False, inline=True)
+    _add_callback_button(keyboard, "Пыль: оружие x1", command="gacha_exchange_buy", banner="weapon", currency="dust", qty=1, color=VkKeyboardColor.PRIMARY)
+    _add_callback_button(keyboard, "Пыль: снар. x1", command="gacha_exchange_buy", banner="outfit", currency="dust", qty=1, color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    _add_callback_button(keyboard, "Пыль: оружие x5", command="gacha_exchange_buy", banner="weapon", currency="dust", qty=5, color=VkKeyboardColor.SECONDARY)
+    _add_callback_button(keyboard, "Пыль: снар. x5", command="gacha_exchange_buy", banner="outfit", currency="dust", qty=5, color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    _add_callback_button(keyboard, "Знаки: оружие x1", command="gacha_exchange_buy", banner="weapon", currency="marks", qty=1, color=VkKeyboardColor.POSITIVE)
+    _add_callback_button(keyboard, "Знаки: снар. x1", command="gacha_exchange_buy", banner="outfit", currency="marks", qty=1, color=VkKeyboardColor.POSITIVE)
     return keyboard
 
 
@@ -196,13 +225,17 @@ def _set_bonus_lines(featured_ssr: tuple[str, ...]) -> list[str]:
 
 def format_resonance_menu(vk_id: int) -> str:
     time_left = get_banner_time_left()
+    wallet = get_exchange_wallet(vk_id)
     lines = [
         "▰ РЕЗОНАНС ЗОНЫ",
         "Приёмник ловит обрывки сигнала. Выбери баннер или посмотри шансы.",
         "",
         "• РЕСУРС",
-        f"💠 Осколки сигнала: {get_signal_shards(vk_id)}",
-        f"Отклик x1: {SINGLE_PULL_COST} | Отклик x10: {TEN_PULL_COST}",
+        f"💠 Осколки сигнала: {wallet['shards']}",
+        f"🎟 Оружейный отклик: {wallet['weapon_tickets']} | Отклик снаряжения: {wallet['outfit_tickets']}",
+        f"Сборка отклика: {TICKET_SHARD_COST} осколков -> 1 предмет",
+        f"Отклик x1: 1 предмет | Отклик x10: 10 предметов",
+        f"✦ {RESONANCE_DUST_NAME}: {wallet['dust']} | ✧ {RESONANCE_MARKS_NAME}: {wallet['marks']}",
         f"Фаза баннера: {time_left.get('phase_number', 1)}/{time_left.get('phases_per_patch', 1)}",
         f"Патч: {BANNER_PATCH_DURATION_DAYS} дней, волна: {BANNER_DURATION_DAYS} дней",
         f"До конца волны: {time_left['formatted']}",
@@ -239,6 +272,8 @@ def format_banner_menu(vk_id: int, banner_id: str) -> str:
         return "Неизвестный баннер Резонанса."
     state = get_banner_state(vk_id, banner.id)
     time_left = get_banner_time_left()
+    wallet = get_exchange_wallet(vk_id)
+    ticket_count = get_ticket_count(vk_id, banner.id)
     guarantee = "rate-up гарантирован" if state.get("featured_guaranteed") else "50/50 активен"
     sr_guarantee = "rate-up SR гарантирован" if state.get("featured_sr_guaranteed") else "SR 50/50 активен"
     ssr_hard_pity = get_ssr_hard_pity(banner.id)
@@ -248,8 +283,10 @@ def format_banner_menu(vk_id: int, banner_id: str) -> str:
         f"До конца волны: {time_left['formatted']}",
         "",
         "• РЕСУРС",
-        f"💠 Осколки сигнала: {get_signal_shards(vk_id)}",
-        f"x1: {SINGLE_PULL_COST} | x10: {TEN_PULL_COST}",
+        f"🎟 {banner.name}: {ticket_count} откликов",
+        f"💠 Осколки сигнала: {wallet['shards']} | автосборка {TICKET_SHARD_COST}:1 при нехватке",
+        f"x1: 1 отклик | x10: 10 откликов",
+        f"✦ {RESONANCE_DUST_NAME}: {wallet['dust']} | ✧ {RESONANCE_MARKS_NAME}: {wallet['marks']}",
         "",
         "• RATE-UP",
         f"SSR: {_featured_line(banner.featured_ssr)}",
@@ -556,6 +593,42 @@ def format_history(vk_id: int, banner_id: str, page: int = 0) -> tuple[str, int,
     return "\n".join(lines), safe_page, total_pages
 
 
+def format_exchange_shop(vk_id: int) -> str:
+    shop = get_exchange_shop(vk_id)
+    wallet = shop["wallet"]
+    lines = [
+        "▰ ОБМЕННИК РЕЗОНАНСА",
+        "Барыга держит отдельную коробку под всё, что пахнет сигналом.",
+        "",
+        "• БАЛАНС",
+        f"✦ {RESONANCE_DUST_NAME}: {wallet['dust']}",
+        f"✧ {RESONANCE_MARKS_NAME}: {wallet['marks']}",
+        f"🎟 Оружейный отклик: {wallet['weapon_tickets']}",
+        f"🎟 Отклик снаряжения: {wallet['outfit_tickets']}",
+        "",
+        "• СЕКЦИЯ ПЫЛИ",
+        f"Цена: {DUST_TICKET_PRICE} пыли за 1 отклик. Лимит обновляется 1 числа месяца.",
+    ]
+    for item in shop["dust_items"]:
+        lines.append(f"{item['ticket']}: осталось {item['left']}/{item['limit']}")
+    lines.extend([
+        "",
+        "• СЕКЦИЯ ЗНАКОВ",
+        f"Цена: {MARK_TICKET_PRICE} знаков за 1 отклик. Лимита нет.",
+        "SR даёт 1 знак, SSR даёт 25 знаков. SSR возвращает 5 откликов, SR копится как частичный кешбэк.",
+    ])
+    return "\n".join(lines)
+
+
+def show_exchange_shop(vk, user_id: int) -> None:
+    _send(
+        vk,
+        user_id,
+        format_exchange_shop(user_id),
+        create_gacha_exchange_shop_keyboard(),
+    )
+
+
 def _format_pull_result(result: dict) -> str:
     rewards = result["rewards"]
     best_rarity = "SSR" if any(r.rarity == "SSR" for r in rewards) else "SR" if any(r.rarity == "SR" for r in rewards) else "R"
@@ -563,11 +636,14 @@ def _format_pull_result(result: dict) -> str:
     lines = [
         f"▰ {best_title}",
         f"{result['banner'].name} | Откликов: x{result['count']}",
-        f"Потрачено: {result['cost']} осколков | Осталось: {result['shards_left']}",
+        f"Потрачено: {result['cost']} предметов '{result.get('ticket') or 'Отклик'}'",
+        f"Откликов осталось: {result.get('tickets_left', 0)} | Осколки: {result['shards_left']}",
         "Предметы отправлены в шкаф убежища. Дубли SSR конвертируются в осколки.",
         "",
         "• РАСШИФРОВКА СИГНАЛА",
     ]
+    if int(result.get("converted_tickets", 0) or 0) > 0:
+        lines.insert(3, f"Автосборка: +{int(result.get('converted_tickets', 0) or 0)} откл. из осколков")
     for idx, reward in enumerate(rewards, 1):
         if reward.duplicate and reward.kind == "currency":
             source = reward.source_name or "SSR предмет"
@@ -594,6 +670,13 @@ def _format_pull_result(result: dict) -> str:
     sr_guarantee = "следующий SR гарантированно rate-up" if state.get("featured_sr_guaranteed") else "SR 50/50 активен"
     ssr_hard_pity = get_ssr_hard_pity(result["banner"].id)
     lines.extend([
+        "",
+        "• ОБМЕННАЯ ВАЛЮТА",
+    ])
+    exchange = result.get("exchange_reward") or {}
+    lines.extend([
+        f"✦ {RESONANCE_DUST_NAME}: +{int(exchange.get('dust', 0) or 0)} | баланс {int(exchange.get('dust_balance', 0) or 0)}",
+        f"✧ {RESONANCE_MARKS_NAME}: +{int(exchange.get('marks', 0) or 0)} | баланс {int(exchange.get('marks_balance', 0) or 0)}",
         "",
         "• СОСТОЯНИЕ БАННЕРА",
         f"SSR {_bar(state['pity_ssr'], ssr_hard_pity)} {state['pity_ssr']}/{ssr_hard_pity}",
@@ -744,6 +827,25 @@ def handle_resonance_command(player, vk, user_id: int, text: str) -> bool:
         banner_id = "weapon" if "оруж" in text else "outfit" if "снаряж" in text else None
         show_rates(vk, user_id, banner_id, 0)
         return True
+    convert_mapping = {
+        "собрать оружейный отклик": "weapon",
+        "собрать оружие x1": "weapon",
+        "собрать оружия x1": "weapon",
+        "собрать отклик оружия": "weapon",
+        "собрать отклик снаряжения": "outfit",
+        "собрать снаряжение x1": "outfit",
+        "собрать снаряжения x1": "outfit",
+    }
+    if text in convert_mapping:
+        if not _can_use_resonance_text(player, vk, user_id):
+            return True
+        banner_id = convert_mapping[text]
+        result = convert_signal_shards_to_tickets(user_id, banner_id, 1)
+        message = result.get("message", "Операция завершена.")
+        if result.get("success"):
+            message += f"\nОсколки: {result.get('shards_left', 0)} | Отклики: {result.get('tickets_left', 0)}"
+        _send(vk, user_id, message, create_resonance_banner_keyboard(banner_id))
+        return True
 
     mapping = {
         "оружие x1": ("weapon", 1),
@@ -815,5 +917,18 @@ def handle_resonance_callback(player, vk, user_id: int, payload: dict) -> bool:
         count = int(payload.get("count", 1) or 1)
         result = perform_pulls(user_id, banner_id, count)
         _send_pull_result(vk, user_id, banner_id, result)
+        return True
+    if command == "gacha_exchange_buy":
+        banner_id = str(payload.get("banner") or "weapon")
+        currency = str(payload.get("currency") or "dust")
+        qty = int(payload.get("qty", 1) or 1)
+        result = buy_exchange_tickets(user_id, banner_id, currency, qty)
+        prefix = "✅" if result.get("success") else "❌"
+        _send(
+            vk,
+            user_id,
+            f"{prefix} {result.get('message', 'Обменник обновлён.')}\n\n{format_exchange_shop(user_id)}",
+            create_gacha_exchange_shop_keyboard(),
+        )
         return True
     return False

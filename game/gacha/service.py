@@ -45,6 +45,21 @@ DUPLICATE_SSR_PULLS = 5
 DUPLICATE_SSR_SHARDS = SINGLE_PULL_COST * DUPLICATE_SSR_PULLS
 SIGNAL_SHARDS_REWARD_NAME = "Осколки сигнала"
 SIGNAL_SHARDS_CURRENCY = "signal_shards"
+RESONANCE_DUST_CURRENCY = "resonance_dust"
+RESONANCE_MARKS_CURRENCY = "resonance_marks"
+RESONANCE_DUST_NAME = "Пыль резонанса"
+RESONANCE_MARKS_NAME = "Знаки резонанса"
+TICKET_NAMES = {
+    "weapon": "Оружейный отклик",
+    "outfit": "Отклик снаряжения",
+}
+TICKET_SHARD_COST = SINGLE_PULL_COST
+DUST_PER_PULL = 15
+MARKS_PER_SR = 1
+MARKS_PER_SSR = 25
+DUST_TICKET_PRICE = 75
+MARK_TICKET_PRICE = 5
+MONTHLY_DUST_TICKET_LIMIT = 5
 EVENT_SHARDS_DAILY_CAP = 80
 COMBAT_SHARDS_DAILY_CAP = 120
 RESONANCE_HISTORY_RUNTIME_KEY = "resonance_history"
@@ -106,6 +121,14 @@ def get_signal_shards(vk_id: int) -> int:
     return database.get_gacha_currency_balance(vk_id, SIGNAL_SHARDS_CURRENCY, legacy_flag=SIGNAL_SHARDS_FLAG)
 
 
+def get_resonance_dust(vk_id: int) -> int:
+    return database.get_gacha_currency_balance(vk_id, RESONANCE_DUST_CURRENCY)
+
+
+def get_resonance_marks(vk_id: int) -> int:
+    return database.get_gacha_currency_balance(vk_id, RESONANCE_MARKS_CURRENCY)
+
+
 def add_signal_shards(vk_id: int, amount: int, source: str = "grant", details: dict | None = None) -> int:
     safe_amount = int(amount or 0)
     result = database.change_gacha_currency(
@@ -117,6 +140,119 @@ def add_signal_shards(vk_id: int, amount: int, source: str = "grant", details: d
         legacy_flag=SIGNAL_SHARDS_FLAG,
     )
     return max(0, int(result.get("balance", 0) or 0))
+
+
+def add_resonance_dust(vk_id: int, amount: int, source: str = "pull", details: dict | None = None) -> int:
+    result = database.change_gacha_currency(
+        vk_id,
+        RESONANCE_DUST_CURRENCY,
+        int(amount or 0),
+        source=source,
+        details=details,
+    )
+    return max(0, int(result.get("balance", 0) or 0))
+
+
+def add_resonance_marks(vk_id: int, amount: int, source: str = "pull", details: dict | None = None) -> int:
+    result = database.change_gacha_currency(
+        vk_id,
+        RESONANCE_MARKS_CURRENCY,
+        int(amount or 0),
+        source=source,
+        details=details,
+    )
+    return max(0, int(result.get("balance", 0) or 0))
+
+
+def get_ticket_name(banner_id: str) -> str | None:
+    return TICKET_NAMES.get(str(banner_id or "").strip().lower())
+
+
+def get_ticket_count(vk_id: int, banner_id: str) -> int:
+    ticket_name = get_ticket_name(banner_id)
+    if not ticket_name:
+        return 0
+    try:
+        for row in database.get_user_inventory(vk_id):
+            if row.get("name") == ticket_name:
+                return max(0, int(row.get("quantity", 0) or 0))
+    except Exception:
+        return 0
+    return 0
+
+
+def convert_signal_shards_to_tickets(vk_id: int, banner_id: str, quantity: int) -> dict:
+    """Собрать предметы-отклики из сырой валюты Резонанса."""
+    safe_banner = str(banner_id or "").strip().lower()
+    ticket_name = get_ticket_name(safe_banner)
+    safe_qty = max(1, int(quantity or 1))
+    if not ticket_name:
+        return {"success": False, "message": "Неизвестный тип отклика.", "converted": 0}
+
+    cost = safe_qty * TICKET_SHARD_COST
+    spend = database.change_gacha_currency(
+        vk_id,
+        SIGNAL_SHARDS_CURRENCY,
+        -cost,
+        source="ticket_convert",
+        details={"banner_id": safe_banner, "ticket": ticket_name, "quantity": safe_qty},
+        legacy_flag=SIGNAL_SHARDS_FLAG,
+    )
+    if not spend.get("success"):
+        return {"success": False, "message": spend.get("message") or "Не хватает осколков сигнала.", "converted": 0}
+
+    if not database.add_item_to_inventory(vk_id, ticket_name, safe_qty):
+        database.change_gacha_currency(
+            vk_id,
+            SIGNAL_SHARDS_CURRENCY,
+            cost,
+            source="ticket_convert_refund",
+            details={"banner_id": safe_banner, "ticket": ticket_name, "quantity": safe_qty},
+            legacy_flag=SIGNAL_SHARDS_FLAG,
+        )
+        return {"success": False, "message": f"Не удалось выдать предмет '{ticket_name}'. Осколки возвращены.", "converted": 0}
+
+    return {
+        "success": True,
+        "message": f"Собрано: {ticket_name} x{safe_qty}.",
+        "converted": safe_qty,
+        "ticket": ticket_name,
+        "shards_spent": cost,
+        "shards_left": max(0, int(spend.get("balance", 0) or 0)),
+        "tickets_left": get_ticket_count(vk_id, safe_banner),
+    }
+
+
+def _ensure_pull_tickets(vk_id: int, banner_id: str, count: int) -> dict:
+    ticket_name = get_ticket_name(banner_id)
+    safe_count = max(1, int(count or 1))
+    if not ticket_name:
+        return {"success": False, "message": "Неизвестный тип отклика."}
+    current = get_ticket_count(vk_id, banner_id)
+    converted = 0
+    if current < safe_count:
+        missing = safe_count - current
+        conversion = convert_signal_shards_to_tickets(vk_id, banner_id, missing)
+        if not conversion.get("success"):
+            return {
+                "success": False,
+                "message": (
+                    f"Не хватает предметов '{ticket_name}': нужно {safe_count}, у тебя {current}. "
+                    f"Автосборка из осколков не прошла: {conversion.get('message', 'ошибка')}"
+                ),
+            }
+        converted = int(conversion.get("converted", 0) or 0)
+
+    if not database.remove_item_from_inventory(vk_id, ticket_name, safe_count):
+        return {"success": False, "message": f"Не удалось списать '{ticket_name}' x{safe_count}."}
+    return {
+        "success": True,
+        "ticket": ticket_name,
+        "ticket_cost": safe_count,
+        "converted": converted,
+        "tickets_left": get_ticket_count(vk_id, banner_id),
+        "shards_left": get_signal_shards(vk_id),
+    }
 
 
 def _now_ts() -> int:
@@ -335,6 +471,135 @@ def grant_dungeon_shards(vk_id: int, threat_id: str) -> dict:
     return add_signal_shards_capped(vk_id, amount, "combat", COMBAT_SHARDS_DAILY_CAP)
 
 
+def _exchange_shop_period_key(now: datetime | None = None) -> str:
+    current = now or datetime.now(timezone.utc)
+    return current.strftime("%Y%m")
+
+
+def _dust_shop_key(banner_id: str) -> str:
+    return f"dust_ticket_{str(banner_id or '').strip().lower()}"
+
+
+def get_exchange_wallet(vk_id: int) -> dict:
+    return {
+        "shards": get_signal_shards(vk_id),
+        "dust": get_resonance_dust(vk_id),
+        "marks": get_resonance_marks(vk_id),
+        "weapon_tickets": get_ticket_count(vk_id, "weapon"),
+        "outfit_tickets": get_ticket_count(vk_id, "outfit"),
+    }
+
+
+def get_exchange_shop(vk_id: int) -> dict:
+    period_key = _exchange_shop_period_key()
+    dust_items = []
+    for banner_id, ticket_name in TICKET_NAMES.items():
+        bought = database.get_gacha_shop_purchase_count(vk_id, period_key, _dust_shop_key(banner_id))
+        dust_items.append({
+            "banner_id": banner_id,
+            "ticket": ticket_name,
+            "price": DUST_TICKET_PRICE,
+            "limit": MONTHLY_DUST_TICKET_LIMIT,
+            "bought": min(MONTHLY_DUST_TICKET_LIMIT, max(0, int(bought or 0))),
+            "left": max(0, MONTHLY_DUST_TICKET_LIMIT - max(0, int(bought or 0))),
+        })
+    mark_items = [
+        {
+            "banner_id": banner_id,
+            "ticket": ticket_name,
+            "price": MARK_TICKET_PRICE,
+        }
+        for banner_id, ticket_name in TICKET_NAMES.items()
+    ]
+    return {
+        "period_key": period_key,
+        "wallet": get_exchange_wallet(vk_id),
+        "dust_items": dust_items,
+        "mark_items": mark_items,
+    }
+
+
+def buy_exchange_tickets(vk_id: int, banner_id: str, currency: str, quantity: int) -> dict:
+    safe_banner = str(banner_id or "").strip().lower()
+    ticket_name = get_ticket_name(safe_banner)
+    safe_currency = str(currency or "").strip().lower()
+    safe_qty = max(1, int(quantity or 1))
+    if not ticket_name:
+        return {"success": False, "message": "Неизвестный тип отклика."}
+    if safe_currency not in {"dust", "marks"}:
+        return {"success": False, "message": "Неизвестная валюта обменника."}
+
+    period_key = _exchange_shop_period_key()
+    source_currency = RESONANCE_DUST_CURRENCY if safe_currency == "dust" else RESONANCE_MARKS_CURRENCY
+    price = DUST_TICKET_PRICE if safe_currency == "dust" else MARK_TICKET_PRICE
+    if safe_currency == "dust":
+        bought = database.get_gacha_shop_purchase_count(vk_id, period_key, _dust_shop_key(safe_banner))
+        left = max(0, MONTHLY_DUST_TICKET_LIMIT - int(bought or 0))
+        if safe_qty > left:
+            return {"success": False, "message": f"Месячный лимит: осталось {left} шт."}
+
+    spend = database.change_gacha_currency(
+        vk_id,
+        source_currency,
+        -(price * safe_qty),
+        source="exchange_shop",
+        details={"banner_id": safe_banner, "ticket": ticket_name, "quantity": safe_qty, "section": safe_currency},
+    )
+    if not spend.get("success"):
+        currency_name = RESONANCE_DUST_NAME if safe_currency == "dust" else RESONANCE_MARKS_NAME
+        return {"success": False, "message": f"Не хватает валюты '{currency_name}'."}
+
+    if not database.add_item_to_inventory(vk_id, ticket_name, safe_qty):
+        database.change_gacha_currency(
+            vk_id,
+            source_currency,
+            price * safe_qty,
+            source="exchange_shop_refund",
+            details={"banner_id": safe_banner, "ticket": ticket_name, "quantity": safe_qty, "section": safe_currency},
+        )
+        return {"success": False, "message": f"Не удалось выдать '{ticket_name}'. Валюта возвращена."}
+
+    if safe_currency == "dust":
+        database.add_gacha_shop_purchase_count(vk_id, period_key, _dust_shop_key(safe_banner), safe_qty)
+
+    return {
+        "success": True,
+        "message": f"Куплено: {ticket_name} x{safe_qty}.",
+        "ticket": ticket_name,
+        "quantity": safe_qty,
+        "wallet": get_exchange_wallet(vk_id),
+        "shop": get_exchange_shop(vk_id),
+    }
+
+
+def _grant_pull_exchange_currencies(vk_id: int, banner_id: str, rewards: list[PullReward]) -> dict:
+    dust = DUST_PER_PULL * len(rewards)
+    marks = 0
+    for reward in rewards:
+        if reward.rarity == "SSR":
+            marks += MARKS_PER_SSR
+        elif reward.rarity == "SR":
+            marks += MARKS_PER_SR
+    dust_balance = add_resonance_dust(
+        vk_id,
+        dust,
+        source="pull_reward",
+        details={"banner_id": banner_id, "pulls": len(rewards)},
+    ) if dust else get_resonance_dust(vk_id)
+    marks_balance = add_resonance_marks(
+        vk_id,
+        marks,
+        source="pull_reward",
+        details={"banner_id": banner_id, "pulls": len(rewards)},
+    ) if marks else get_resonance_marks(vk_id)
+    return {
+        "dust": dust,
+        "dust_balance": dust_balance,
+        "marks": marks,
+        "marks_balance": marks_balance,
+    }
+
+
 def _flag_name(banner_id: str, suffix: str) -> str:
     return f"resonance_{banner_id}_{suffix}"
 
@@ -539,40 +804,30 @@ def perform_pulls(vk_id: int, banner_id: str, count: int) -> dict:
     if not database.is_user_admin(vk_id):
         return {"success": False, "message": "Резонанс Зоны пока доступен только администраторам."}
 
-    cost = TEN_PULL_COST if count == 10 else SINGLE_PULL_COST
-    current_shards = get_signal_shards(vk_id)
-    if current_shards < cost:
-        return {
-            "success": False,
-            "message": f"Не хватает осколков сигнала: нужно {cost}, у тебя {current_shards}.",
-        }
-
-    spend = database.change_gacha_currency(
-        vk_id,
-        SIGNAL_SHARDS_CURRENCY,
-        -cost,
-        source="pull",
-        details={"banner_id": banner.id, "count": count},
-        legacy_flag=SIGNAL_SHARDS_FLAG,
-    )
-    if not spend.get("success"):
-        return {"success": False, "message": spend.get("message") or "Не удалось списать осколки сигнала."}
+    ticket_spend = _ensure_pull_tickets(vk_id, banner.id, count)
+    if not ticket_spend.get("success"):
+        return {"success": False, "message": ticket_spend.get("message") or "Не хватает откликов."}
     state = _get_banner_state(vk_id, banner.id)
     state["featured_candidates"] = _owned_featured_candidates(vk_id, banner)
     raw_rewards = [_roll_one(banner, state) for _ in range(count)]
     state.pop("featured_candidates", None)
     rewards = [_grant_reward(vk_id, reward) for reward in raw_rewards]
+    exchange_reward = _grant_pull_exchange_currencies(vk_id, banner.id, raw_rewards)
     _record_banner_stats(banner, raw_rewards)
     _save_banner_state(vk_id, banner.id, state)
     shards_left = get_signal_shards(vk_id)
-    _record_pull_history(vk_id, banner, count, cost, rewards, shards_left)
+    _record_pull_history(vk_id, banner, count, int(ticket_spend.get("ticket_cost", count) or count), rewards, shards_left)
 
     return {
         "success": True,
         "banner": banner,
         "count": count,
-        "cost": cost,
+        "cost": int(ticket_spend.get("ticket_cost", count) or count),
+        "ticket": ticket_spend.get("ticket"),
+        "converted_tickets": int(ticket_spend.get("converted", 0) or 0),
+        "tickets_left": int(ticket_spend.get("tickets_left", 0) or 0),
         "shards_left": shards_left,
+        "exchange_reward": exchange_reward,
         "rewards": rewards,
         "state": state,
     }
