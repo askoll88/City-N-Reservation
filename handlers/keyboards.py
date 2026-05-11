@@ -32,6 +32,7 @@ INNER_TO_ROAD_LOCATION = {
     "главный_корпус_нии": "Дорога на НИИ",
     "зараженный_лес": "Дорога на зараженный лес",
     "заимка_лесника": "Дорога на зараженный лес",
+    "охотничьи_угодья": "Заимка лесника",
 }
 
 
@@ -246,7 +247,20 @@ def create_location_keyboard(location_id: str, player_level: int = None):
     # --- Заимка лесника ---
     elif location_id == "заимка_лесника":
         keyboard.add_button("Поговорить", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Отдохнуть", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_line()
+        keyboard.add_button("Охотничьи угодья", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_line()
         keyboard.add_button("Дорога на зараженный лес", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        _add_meta_row(keyboard)
+
+    # --- Охотничьи угодья ---
+    elif location_id == "охотничьи_угодья":
+        keyboard.add_button("Охотиться", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button("Проверить охоту", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+        keyboard.add_button("Заимка лесника", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()
         _add_meta_row(keyboard)
 
@@ -444,6 +458,46 @@ def create_travel_keyboard():
     keyboard.add_button("Отмена пути", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
     _add_meta_row(keyboard, include_map=False)
+    return keyboard
+
+
+def create_hunting_grounds_keyboard(active: bool = False):
+    """Клавиатура охотничьих угодий."""
+    keyboard = VkKeyboard(one_time=False)
+    if active:
+        keyboard.add_button("Проверить охоту", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Отменить охоту", color=VkKeyboardColor.NEGATIVE)
+    else:
+        keyboard.add_button("Тихая тропа", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button("Засада у солонца", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+        keyboard.add_button("Глубокий след", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button("Заимка лесника", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    _add_meta_row(keyboard)
+    return keyboard
+
+
+def create_forester_trial_keyboard(stage: str):
+    """Клавиатура испытания Лесника."""
+    keyboard = VkKeyboard(one_time=False)
+    if stage == "tracks":
+        keyboard.add_button("Смотреть мох", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Идти по крови", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        keyboard.add_button("Стрелять в шум", color=VkKeyboardColor.NEGATIVE)
+    elif stage == "wind":
+        keyboard.add_button("Зайти под ветер", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Идти напрямик", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        keyboard.add_button("Обойти по сухим веткам", color=VkKeyboardColor.SECONDARY)
+    else:
+        keyboard.add_button("Обойти тушу кругом", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Забрать приманку", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        keyboard.add_button("Ждать у туши", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("К выбору NPC", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
 
@@ -775,6 +829,23 @@ def create_daily_quests_keyboard():
     keyboard.add_line()
     keyboard.add_button("Забрать награду", color=VkKeyboardColor.POSITIVE)
     keyboard.add_line()
+    keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_quests_keyboard(page: int = 0, total_pages: int = 3):
+    """Постраничная клавиатура общей вкладки заданий."""
+    total = max(1, int(total_pages or 1))
+    current = max(0, min(total - 1, int(page or 0)))
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Задания назад", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button(f"{current + 1}/{total}", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Задания далее", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("Активные задания", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Дейлики", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_line()
+    keyboard.add_button("Забрать награду", color=VkKeyboardColor.POSITIVE)
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 

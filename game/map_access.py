@@ -160,7 +160,16 @@ def _get_flag(player, flag_name: str) -> int:
 
 
 def _has_flag(player, flag_name: str) -> bool:
+    if flag_name == "forest_hunting_grounds_unlocked" and _get_flag(player, "forest_hunting_unlocked") > 0:
+        return True
     return _get_flag(player, flag_name) > 0
+
+
+def _format_required_flag(flag_name: str) -> str:
+    labels = {
+        "forest_hunting_grounds_unlocked": "пройти проверку Лесника в заимке",
+    }
+    return labels.get(flag_name, f"флаг: {flag_name}")
 
 
 def _has_key(player, key_name: str) -> bool:
@@ -243,11 +252,15 @@ def can_enter_location(player, location_id: str) -> AccessResult:
     for flag_key in ("flag", "quest_flag"):
         flag = requires.get(flag_key)
         if flag and not _has_flag(player, str(flag)):
-            reasons.append(f"флаг: {flag}")
+            reasons.append(_format_required_flag(str(flag)))
     required_flags = list(requires.get("flags", []) or []) + list(requires.get("quest_flags", []) or [])
     missing_flags = _missing_required_list(player, required_flags, _has_flag)
     if missing_flags:
-        reasons.append("флаги: " + ", ".join(missing_flags))
+        formatted_flags = [_format_required_flag(flag) for flag in missing_flags]
+        if all(value.startswith("флаг: ") for value in formatted_flags):
+            reasons.append("флаги: " + ", ".join(value.replace("флаг: ", "", 1) for value in formatted_flags))
+        else:
+            reasons.append("условия: " + ", ".join(formatted_flags))
 
     equipped = list(requires.get("equipped", []) or [])
     missing_equipped = _missing_required_list(player, equipped, _has_equipped)

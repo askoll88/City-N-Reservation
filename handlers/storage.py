@@ -81,6 +81,18 @@ def _current_storage_page(user_id: int) -> int:
     return int(current.get("page", 0) or 0)
 
 
+def _storage_item_name_by_index(storage: list[dict], target: str) -> tuple[str | None, str | None]:
+    if not str(target or "").isdigit():
+        return None, None
+
+    index = int(target)
+    if index <= 0:
+        return None, "Номер должен быть от 1."
+    if index > len(storage):
+        return None, f"В шкафу нет предмета с номером {index}."
+    return str(storage[index - 1].get("name") or "").strip(), None
+
+
 def format_storage_page(storage: list[dict], load: dict, page: int = 0) -> tuple[str, int, int]:
     safe_page, total_pages, start, end = _storage_page_bounds(len(storage), page)
     current = int(load["current"])
@@ -102,10 +114,12 @@ def format_storage_page(storage: list[dict], load: dict, page: int = 0) -> tuple
     lines += [
         "",
         "Команды:",
+        "• <номер> — забрать 1 шт. из шкафа",
         "• в шкаф <предмет>",
         "• в шкаф <кол-во> <предмет>",
-        "• из шкафа <предмет>",
+        "• из шкафа <номер|предмет>",
         "• из шкафа <кол-во> <предмет>",
+        "• из шкафа <кол-во> <номер>",
     ]
     return "\n".join(lines), safe_page, total_pages
 
@@ -202,7 +216,11 @@ def take_from_storage(player, vk, user_id: int, payload: str):
         )
         return
 
-    parsed = _parse_transfer_payload(payload)
+    raw_payload = str(payload or "").strip()
+    if raw_payload.isdigit():
+        parsed = (1, raw_payload)
+    else:
+        parsed = _parse_transfer_payload(raw_payload)
     if parsed[0] is None:
         vk.messages.send(
             user_id=user_id,
@@ -214,6 +232,18 @@ def take_from_storage(player, vk, user_id: int, payload: str):
     qty, item_name = parsed
 
     storage = database.get_user_storage(user_id)
+    indexed_name, index_error = _storage_item_name_by_index(storage, item_name)
+    if index_error:
+        vk.messages.send(
+            user_id=user_id,
+            message=f"❌ {index_error}",
+            keyboard=create_location_keyboard(player.current_location_id, player.level).get_keyboard(),
+            random_id=0,
+        )
+        return
+    if indexed_name:
+        item_name = indexed_name
+
     st_item = next((i for i in storage if i["name"].lower() == item_name.lower()), None)
     if not st_item:
         vk.messages.send(

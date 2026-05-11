@@ -62,6 +62,20 @@ def _split_combat_use_target(raw: str) -> tuple[str, int]:
     return target, 1
 
 
+COMBAT_QUICK_HEAL_ITEMS = {
+    "бинт",
+    "аптечка",
+    "научная аптечка",
+    "стимулятор",
+    "боевой стимулятор",
+    "боевой стимулятор упак",
+    "лечебная трава",
+    "витамины",
+    "чистая вода",
+    "антирад",
+}
+
+
 # === Текстовые сообщения ===
 
 def get_welcome_message():
@@ -146,6 +160,18 @@ def handle_navigation(player, vk, user_id: int, text: str):
         text in ['зараженный лес', 'заражённый лес', 'в зараженный лес', 'в заражённый лес', 'чаща']
     ):
         requested = 'зараженный_лес'
+    elif current == 'дорога_зараженный_лес' and text in ['заимка лесника', 'заимка', 'лесник']:
+        requested = 'заимка_лесника'
+    elif current == 'заимка_лесника' and (
+        text in ['охотничьи угодья', 'угодья', 'охота', 'в угодья', 'на охоту']
+    ):
+        requested = 'охотничьи_угодья'
+    elif current == 'заимка_лесника' and ('дорога' in text or text in ['к дороге', 'на дорогу']):
+        requested = 'дорога_зараженный_лес'
+    elif current == 'охотничьи_угодья' and (
+        text in ['заимка лесника', 'заимка', 'назад'] or 'заимка' in text
+    ):
+        requested = 'заимка_лесника'
     elif current == 'зараженный_лес' and ('дорога' in text or text in ['к дороге', 'на дорогу']):
         requested = 'дорога_зараженный_лес'
     elif 'военная' in text or ('дорога' in text and 'воен' in text):
@@ -173,7 +199,9 @@ def handle_navigation(player, vk, user_id: int, text: str):
         'склад_17': {'дорога_военная_часть'},
         'дорога_нии': {'кпп', 'главный_корпус_нии'},
         'главный_корпус_нии': {'дорога_нии'},
-        'дорога_зараженный_лес': {'кпп', 'зараженный_лес'},
+        'дорога_зараженный_лес': {'кпп', 'зараженный_лес', 'заимка_лесника'},
+        'заимка_лесника': {'дорога_зараженный_лес', 'охотничьи_угодья'},
+        'охотничьи_угодья': {'заимка_лесника'},
         'зараженный_лес': {'дорога_зараженный_лес'},
     }
 
@@ -206,6 +234,7 @@ def handle_location_actions(player, vk, user_id: int, text: str):
     from handlers.location import handle_sleep, handle_confirm_heal, handle_cancel_heal
     from handlers.crafting import show_crafting_menu, show_weapon_upgrade_menu, show_workbench_menu, craft_recipe
     from handlers.storage import show_storage, put_to_storage, take_from_storage
+    from infra.state_manager import get_ui_current_screen
     from game.gacha.ui import handle_resonance_command
 
     if text == 'подтвердить лечение' or text.startswith('подтвердить лечение'):
@@ -218,6 +247,11 @@ def handle_location_actions(player, vk, user_id: int, text: str):
 
     if handle_resonance_command(player, vk, user_id, text):
         return True
+
+    if player.current_location_id == "охотничьи_угодья":
+        from game.hunting_grounds import handle_hunting_command
+        if handle_hunting_command(player, vk, user_id, text):
+            return True
 
     if player.current_location_id == "склад_17" and text in {
         "зачистить", "зачистить склад", "зачистить склад 17", "рейд", "рейд склад 17", "выбор угрозы"
@@ -253,7 +287,7 @@ def handle_location_actions(player, vk, user_id: int, text: str):
         return True
 
     # Отдых в убежище
-    if text in ['спать', 'сон', 'отдохнуть'] or 'спать' in text:
+    if text in ['спать', 'сон', 'отдохнуть', 'отдых'] or 'спать' in text:
         handle_sleep(player, vk, user_id)
         return True
 
@@ -291,6 +325,10 @@ def handle_location_actions(player, vk, user_id: int, text: str):
     if text.startswith('из шкафа '):
         payload = text.replace('из шкафа ', '', 1).strip()
         take_from_storage(player, vk, user_id, payload)
+        return True
+
+    if get_ui_current_screen(user_id).get("name") == "storage" and text.isdigit():
+        take_from_storage(player, vk, user_id, text)
         return True
     
     return False
@@ -396,7 +434,8 @@ def _show_combat_inventory(player, vk, user_id: int):
 
     player.inventory.reload()
     items = player.inventory.other
-    keyboard = create_combat_inventory_keyboard(user_id).get_keyboard()
+    quick_items = _get_combat_quick_heal_items(items)
+    keyboard = create_combat_inventory_keyboard(user_id, quick_items=quick_items).get_keyboard()
 
     if not items:
         try_edit_or_send_ui(
@@ -411,6 +450,8 @@ def _show_combat_inventory(player, vk, user_id: int):
     msg = "🎒 БОЕВОЙ ИНВЕНТАРЬ\n\n"
     for idx, item in enumerate(items, 1):
         msg += f"{idx}. {item['name']} x{item.get('quantity', 1)}\n"
+    if quick_items:
+        msg += "\nБыстрые кнопки ниже используют только те лечилки, которые сейчас есть в рюкзаке."
     msg += "\nИспользуй текстом: использовать <номер> [кол-во] или использовать <название> [кол-во]."
 
     try_edit_or_send_ui(
@@ -420,6 +461,23 @@ def _show_combat_inventory(player, vk, user_id: int):
         msg,
         keyboard=keyboard,
     )
+
+
+def _get_combat_quick_heal_items(items: list[dict]) -> list[dict]:
+    """Вернуть доступные лечилки для быстрых кнопок."""
+    quick = []
+    seen = set()
+    for item in items or []:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        quantity = max(0, int(item.get("quantity", 0) or 0))
+        key = name.lower()
+        if quantity <= 0 or key not in COMBAT_QUICK_HEAL_ITEMS or key in seen:
+            continue
+        seen.add(key)
+        quick.append({"name": name, "quantity": quantity})
+    return quick
 
 
 def _use_combat_item_by_index(player, vk, user_id: int, idx: int, quantity: int = 1) -> bool:
@@ -747,6 +805,7 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
     if player.current_location_id != 'черный рынок':
         return False
 
+    from infra.state_manager import get_ui_current_screen
     from handlers.inventory import show_trader_shop_all, show_trader_sell_all
     from handlers.market import (
         show_market_menu,
@@ -757,7 +816,8 @@ def handle_blackmarket_commands(player, vk, user_id: int, text: str):
     )
 
     # Универсальный обработчик рынка (пагинация, сортировка, поиск, навигация)
-    if handle_market_input(player, vk, user_id, text):
+    shop_digit = get_ui_current_screen(user_id).get("name") == "shop" and text.isdigit()
+    if not shop_digit and handle_market_input(player, vk, user_id, text):
         return True
 
     # Команды P2P рынка (парсим первыми, чтобы не перехватились обычным "купить ...")
@@ -871,6 +931,10 @@ def handle_dialog_commands(player, vk, user_id: int, text: str, original_text: s
     if text in {'назад к наставнику', 'назад к инструктору'}:
         show_npc_dialog(player, vk, user_id, npc_id, None)
         return True
+
+    if npc_id == "лесник" and isinstance(stage, str) and stage.startswith("forester_trial:"):
+        from handlers.npc import handle_forester_trial_choice
+        return handle_forester_trial_choice(player, vk, user_id, text, stage)
 
     if text == 'назад' and stage not in ("shop_menu", "shop_weapons", "shop_armor", "shop_meds", "shop_food", "sell_items", "sell_gear", "buy_artifacts", "sell_artifacts", "gacha_exchange_shop"):
         handle_npc_back(player, vk, user_id)

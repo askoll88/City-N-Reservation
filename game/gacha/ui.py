@@ -34,7 +34,6 @@ from .service import (
     RESONANCE_MARKS_NAME,
     TICKET_SHARD_COST,
     buy_exchange_tickets,
-    convert_signal_shards_to_tickets,
     get_exchange_shop,
     get_exchange_wallet,
     get_ticket_count,
@@ -72,9 +71,6 @@ def create_resonance_keyboard() -> VkKeyboard:
     keyboard.add_button("Шансы оружия", color=VkKeyboardColor.SECONDARY)
     keyboard.add_button("Шансы снаряжения", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
-    keyboard.add_button("Собрать оружейный отклик", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("Собрать отклик снаряжения", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_line()
     keyboard.add_button("Назад", color=VkKeyboardColor.NEGATIVE)
     return keyboard
 
@@ -85,8 +81,6 @@ def create_resonance_banner_keyboard(banner_id: str) -> VkKeyboard:
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button(f"{prefix} x1", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button(f"{prefix} x10", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_line()
-    keyboard.add_button(f"Собрать {prefix.lower()} x1", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button(history_label, color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
@@ -233,8 +227,8 @@ def format_resonance_menu(vk_id: int) -> str:
         "• РЕСУРС",
         f"💠 Осколки сигнала: {wallet['shards']}",
         f"🎟 Оружейный отклик: {wallet['weapon_tickets']} | Отклик снаряжения: {wallet['outfit_tickets']}",
-        f"Сборка отклика: {TICKET_SHARD_COST} осколков -> 1 предмет",
-        f"Отклик x1: 1 предмет | Отклик x10: 10 предметов",
+        f"Автоконверт при крутке: {TICKET_SHARD_COST} осколков -> 1 отклик",
+        f"x1: 1 отклик | x10: 10 откликов",
         f"✦ {RESONANCE_DUST_NAME}: {wallet['dust']} | ✧ {RESONANCE_MARKS_NAME}: {wallet['marks']}",
         f"Фаза баннера: {time_left.get('phase_number', 1)}/{time_left.get('phases_per_patch', 1)}",
         f"Патч: {BANNER_PATCH_DURATION_DAYS} дней, волна: {BANNER_DURATION_DAYS} дней",
@@ -284,7 +278,7 @@ def format_banner_menu(vk_id: int, banner_id: str) -> str:
         "",
         "• РЕСУРС",
         f"🎟 {banner.name}: {ticket_count} откликов",
-        f"💠 Осколки сигнала: {wallet['shards']} | автосборка {TICKET_SHARD_COST}:1 при нехватке",
+        f"💠 Осколки сигнала: {wallet['shards']} | автоконверт {TICKET_SHARD_COST}:1 при нехватке",
         f"x1: 1 отклик | x10: 10 откликов",
         f"✦ {RESONANCE_DUST_NAME}: {wallet['dust']} | ✧ {RESONANCE_MARKS_NAME}: {wallet['marks']}",
         "",
@@ -643,7 +637,7 @@ def _format_pull_result(result: dict) -> str:
         "• РАСШИФРОВКА СИГНАЛА",
     ]
     if int(result.get("converted_tickets", 0) or 0) > 0:
-        lines.insert(3, f"Автосборка: +{int(result.get('converted_tickets', 0) or 0)} откл. из осколков")
+        lines.insert(3, f"Автоконверт: +{int(result.get('converted_tickets', 0) or 0)} откл. из осколков")
     for idx, reward in enumerate(rewards, 1):
         if reward.duplicate and reward.kind == "currency":
             source = reward.source_name or "SSR предмет"
@@ -827,26 +821,6 @@ def handle_resonance_command(player, vk, user_id: int, text: str) -> bool:
         banner_id = "weapon" if "оруж" in text else "outfit" if "снаряж" in text else None
         show_rates(vk, user_id, banner_id, 0)
         return True
-    convert_mapping = {
-        "собрать оружейный отклик": "weapon",
-        "собрать оружие x1": "weapon",
-        "собрать оружия x1": "weapon",
-        "собрать отклик оружия": "weapon",
-        "собрать отклик снаряжения": "outfit",
-        "собрать снаряжение x1": "outfit",
-        "собрать снаряжения x1": "outfit",
-    }
-    if text in convert_mapping:
-        if not _can_use_resonance_text(player, vk, user_id):
-            return True
-        banner_id = convert_mapping[text]
-        result = convert_signal_shards_to_tickets(user_id, banner_id, 1)
-        message = result.get("message", "Операция завершена.")
-        if result.get("success"):
-            message += f"\nОсколки: {result.get('shards_left', 0)} | Отклики: {result.get('tickets_left', 0)}"
-        _send(vk, user_id, message, create_resonance_banner_keyboard(banner_id))
-        return True
-
     mapping = {
         "оружие x1": ("weapon", 1),
         "оружие х1": ("weapon", 1),

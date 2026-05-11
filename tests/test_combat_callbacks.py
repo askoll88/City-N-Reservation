@@ -358,6 +358,37 @@ class CombatCallbackKeyboardTests(unittest.TestCase):
             {"command": "combat_action", "action": "back", "combat_id": "fight-1"},
         )
 
+    def test_combat_inventory_keyboard_shows_only_available_quick_items(self):
+        set_combat_state(1, {"combat_id": "fight-1"})
+
+        keyboard = json.loads(
+            create_combat_inventory_keyboard(
+                user_id=1,
+                quick_items=[
+                    {"name": "Бинт", "quantity": 2},
+                    {"name": "Аптечка", "quantity": 1},
+                ],
+            ).get_keyboard()
+        )
+
+        labels = [
+            button["action"]["label"]
+            for row in keyboard["buttons"]
+            for button in row
+        ]
+        payload = json.loads(keyboard["buttons"][0][0]["action"]["payload"])
+
+        self.assertEqual(labels, ["Бинт x2", "Аптечка x1", "Назад к бою"])
+        self.assertEqual(
+            payload,
+            {
+                "command": "combat_action",
+                "action": "use_item",
+                "combat_id": "fight-1",
+                "item": "Бинт",
+            },
+        )
+
     def test_combat_inventory_edits_active_combat_message(self):
         from handlers.commands import handle_combat_commands
 

@@ -37,6 +37,23 @@ from handlers.keyboards import (
 
 logger = logging.getLogger(__name__)
 
+SAFE_LOCATION_LABELS = {
+    "город": "Город",
+    "больница": "Больница",
+    "убежище": "Убежище",
+    "кпп": "КПП",
+    "черный рынок": "Черный рынок",
+    "заимка_лесника": "Заимка лесника",
+}
+SAFE_LOCATION_PRIORITY = [
+    "заимка_лесника",
+    "кпп",
+    "убежище",
+    "больница",
+    "черный рынок",
+    "город",
+]
+
 _EMISSION_RISK_LOCK_FLAG = "emission_risk_lock"
 _EMISSION_RISK_EID_FLAG = "emission_risk_emission_id"
 _EMISSION_IMPACT_RAD_SLOT_FLAG = "emission_impact_rad_slot"
@@ -68,6 +85,47 @@ def _resolve_emission_location(vk_id: int, location: str | None, row: dict | Non
         prev = user.get("previous_location")
     if prev:
         return str(prev)
+    return "город"
+
+
+def _safe_locations_text() -> str:
+    return ", ".join(SAFE_LOCATION_LABELS.get(loc, loc) for loc in SAFE_LOCATIONS)
+
+
+def _nearest_safe_location(location_id: str | None) -> str:
+    """Найти ближайшее укрытие по графу выходов локаций."""
+    from collections import deque
+    from models.locations import LOCATIONS
+
+    start = location_id or "город"
+    if start in SAFE_LOCATIONS:
+        return start
+    if start not in LOCATIONS:
+        return "город"
+
+    visited = {start}
+    queue = deque([start])
+    while queue:
+        level_size = len(queue)
+        candidates = []
+        for _ in range(level_size):
+            current = queue.popleft()
+            exits = LOCATIONS.get(current, {}).get("exits", {}) or {}
+            for target in exits.values():
+                if target in visited:
+                    continue
+                if target in SAFE_LOCATIONS:
+                    candidates.append(target)
+                    visited.add(target)
+                    continue
+                if target in LOCATIONS:
+                    visited.add(target)
+                    queue.append(target)
+        if candidates:
+            return min(
+                candidates,
+                key=lambda loc: SAFE_LOCATION_PRIORITY.index(loc) if loc in SAFE_LOCATION_PRIORITY else len(SAFE_LOCATION_PRIORITY),
+            )
     return "город"
 
 
@@ -425,7 +483,7 @@ def _send_warning_to_all_players(vk, emission_id: int):
                     "⚠️ ВНИМАНИЕ! ВЫБРОС!\n\n"
                     "Зона предупреждает: через 15 минут начнётся Выброс!\n"
                     f"Ты в укрытии ({location}) — ты в безопасности.\n\n"
-                    "🛡️ Укрытия: Город, Больница, Убежище\n\n"
+                    f"🛡️ Укрытия: {_safe_locations_text()}\n\n"
                     f"{lock_timer_text}\n\n"
                     "Если ты в Зоне — срочно возвращайся в укрытие!"
                 ),
@@ -445,7 +503,7 @@ def _send_warning_to_all_players(vk, emission_id: int):
                     "Сталкер, через 15 минут начнётся Выброс!\n"
                     f"Ты сейчас в: {location}\n\n"
                     "🚨 Срочно ищи укрытие!\n"
-                    "🛡️ Укрытия: Город, Больница, Убежище\n\n"
+                    f"🛡️ Укрытия: {_safe_locations_text()}\n\n"
                     f"{lock_timer_text}\n\n"
                     "Если не успеешь — Зона не будет щадить..."
                 ),
@@ -773,9 +831,9 @@ def _restore_interrupted_context(player, vk, user_id: int, header: str = ""):
 
 
 def _flee_to_safe_location(player, vk, user_id: int) -> bool:
-    """Переместить игрока в случайное безопасное место"""
-    import random
-    safe_location = random.choice(SAFE_LOCATIONS)
+    """Переместить игрока в ближайшее безопасное место."""
+    current_location = _resolve_emission_location(user_id, getattr(player, "current_location_id", None))
+    safe_location = _nearest_safe_location(current_location)
 
     player.current_location_id = safe_location
     player.energy = max(0, player.energy - 10)  # Затраты энергии на бегство

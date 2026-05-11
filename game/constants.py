@@ -20,6 +20,7 @@ class LocationType(Enum):
     NII_MAIN_BUILDING = "главный_корпус_нии"
     INFECTED_FOREST_DEEP = "зараженный_лес"
     FORESTER_HUT = "заимка_лесника"
+    HUNTING_GROUNDS = "охотничьи_угодья"
 
 
 # === Разделы инвентаря ===
@@ -73,6 +74,8 @@ COMMANDS = {
     'заимка лесника': 'location:заимка_лесника',
     'заимка': 'location:заимка_лесника',
     'лесник': 'location:заимка_лесника',
+    'охотничьи угодья': 'location:охотничьи_угодья',
+    'угодья': 'location:охотничьи_угодья',
     
     # Статус
     'статус': 'status',
@@ -310,6 +313,7 @@ SAFE_LOCATIONS = [
     LocationType.SHELTER.value,
     LocationType.KPP.value,
     LocationType.BLACK_MARKET.value,
+    LocationType.FORESTER_HUT.value,
 ]
 
 # === Опасные локации (Зона — урон от Выброса) ===
@@ -320,7 +324,7 @@ DANGEROUS_LOCATIONS = [
     LocationType.NII_MAIN_BUILDING.value,
     LocationType.INFECTED_FOREST.value,
     LocationType.INFECTED_FOREST_DEEP.value,
-    LocationType.FORESTER_HUT.value,
+    LocationType.HUNTING_GROUNDS.value,
 ]
 
 

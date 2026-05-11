@@ -145,7 +145,7 @@ class GachaSystemTest(unittest.TestCase):
         self.assertIn("Резонанс снаряжения", payload)
         self.assertIn("Шансы оружия", payload)
         self.assertIn("Шансы снаряжения", payload)
-        self.assertIn("Собрать оружейный отклик", payload)
+        self.assertNotIn("Собрать", payload)
         self.assertNotIn("История резонанса", payload)
         self.assertNotIn('"label": "Резонанс Зоны"', payload)
 
@@ -153,12 +153,13 @@ class GachaSystemTest(unittest.TestCase):
         keyboard = json.loads(create_resonance_banner_keyboard("weapon").get_keyboard())
         first_row = keyboard["buttons"][0]
         labels = [button["action"]["label"] for button in first_row]
-        second_row_labels = [button["action"]["label"] for button in keyboard["buttons"][2]]
+        second_row_labels = [button["action"]["label"] for button in keyboard["buttons"][1]]
 
         self.assertFalse(keyboard["inline"])
         self.assertEqual(labels, ["Оружие x1", "Оружие x10"])
         self.assertEqual(second_row_labels, ["История оружия"])
         self.assertNotIn("Шансы", json.dumps(keyboard, ensure_ascii=False))
+        self.assertNotIn("Собрать", json.dumps(keyboard, ensure_ascii=False))
 
     def test_resonance_banner_back_text_returns_to_menu(self):
         class Player:

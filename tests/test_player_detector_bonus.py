@@ -49,6 +49,7 @@ class PlayerDetectorBonusTest(unittest.TestCase):
         self.assertTrue(is_detector_name("детектор"))
         self.assertFalse(is_detector_name("Компас"))
         self.assertFalse(is_detector_name("Бинт"))
+        self.assertFalse(is_detector_name("2"))
 
     def test_detector_x_to_anomalist_2_is_clear_upgrade(self):
         player = Player.__new__(Player)

@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from handlers.keyboards import create_storage_keyboard
-from handlers.storage import _parse_transfer_payload, format_storage_page, show_storage
+from handlers.storage import _parse_transfer_payload, format_storage_page, show_storage, take_from_storage
 
 
 class StorageParsingTest(unittest.TestCase):
@@ -74,6 +74,46 @@ class StorageParsingTest(unittest.TestCase):
         self.assertEqual(args[2], "storage")
         self.assertIn("Бинт", args[3])
         self.assertIn("keyboard", kwargs)
+
+    def test_take_from_storage_accepts_item_number(self):
+        class Inventory:
+            total_weight = 0
+
+            def reload(self):
+                pass
+
+        class Player:
+            current_location_id = "убежище"
+            level = 1
+            max_weight = 30
+            inventory = Inventory()
+
+        class Messages:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, **kwargs):
+                self.sent.append(kwargs)
+                return 1
+
+        class Vk:
+            messages = Messages()
+
+        storage = [
+            {"name": "Бинт", "quantity": 3, "weight": 0.1},
+            {"name": "Аптечка", "quantity": 2, "weight": 0.4},
+        ]
+        load = {"current": 2, "capacity": 80}
+
+        with patch("handlers.storage.database.get_user_storage", return_value=storage), \
+             patch("handlers.storage.database.get_user_storage_load", return_value=load), \
+             patch("handlers.storage.database.move_item_from_storage_transaction", return_value={"success": True, "message": "ok"}) as move_item, \
+             patch("handlers.storage.get_ui_current_screen", return_value={"name": "storage", "page": 0}), \
+             patch("handlers.storage.set_ui_screen"), \
+             patch("handlers.storage.try_edit_or_send_ui"):
+            take_from_storage(Player(), Vk(), 777, "2")
+
+        move_item.assert_called_once_with(777, "Аптечка", 1)
 
 
 if __name__ == "__main__":

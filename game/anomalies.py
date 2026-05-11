@@ -512,7 +512,13 @@ def get_equipped_detector(player) -> dict | None:
 def _device_names_match(canonical_name: str, item_name: str) -> bool:
     canonical = str(canonical_name or "").lower()
     actual = str(item_name or "").lower()
-    return bool(canonical and actual and (canonical in actual or actual in canonical))
+    if not canonical or not actual:
+        return False
+    if canonical == actual:
+        return True
+    if len(canonical) < 3 or len(actual) < 3:
+        return False
+    return canonical in actual or actual in canonical
 
 
 def is_detector_name(item_name: str) -> bool:

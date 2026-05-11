@@ -347,7 +347,7 @@ def _arrive_to_location(player, vk, user_id: int, location_id: str, from_locatio
     # Фиксируем якорь пассивного регена энергии по факту прибытия в локацию.
     now_ts = int(time.time())
     database.set_user_flag(user_id, SHELTER_REGEN_TS_FLAG, now_ts)
-    database.set_user_flag(user_id, SHELTER_REGEN_ACTIVE_FLAG, 1 if location_id == "убежище" else 0)
+    database.set_user_flag(user_id, SHELTER_REGEN_ACTIVE_FLAG, 1 if location_id in SAFE_LOCATIONS else 0)
     set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
 
     track_quest_visit(user_id, location_id, vk=vk)
@@ -834,15 +834,40 @@ def go_back(player, vk, user_id: int):
 
 
 def handle_sleep(player, vk, user_id: int):
-    """Спать в убежище"""
+    """Отдых в безопасных местах."""
     from main import create_location_keyboard
     from models.player import format_radiation_rate, get_radiation_stage
     from infra import config
     
-    if player.current_location_id == "убежище":
+    rest_profiles = {
+        "убежище": {
+            "flag": "shelter_sleep_last",
+            "cooldown": int(getattr(config, "SHELTER_SLEEP_COOLDOWN_SEC", 3 * 60 * 60) or (3 * 60 * 60)),
+            "hp_pct": 0.18,
+            "hp_min": 12,
+            "energy": 35,
+            "rad": 10,
+            "place": "убежище",
+            "message": "Ты устроился в убежище и немного выспался.",
+            "ending": "Сон в Зоне тревожный, но силы восстановлены.",
+        },
+        "заимка_лесника": {
+            "flag": "forester_hut_rest_last",
+            "cooldown": 90 * 60,
+            "hp_pct": 0.10,
+            "hp_min": 8,
+            "energy": 24,
+            "rad": 4,
+            "place": "заимка",
+            "message": "Ты переждал шум леса в заимке, у печки и сухих стен.",
+            "ending": "Отдых неглубокий, но здесь хотя бы не достаёт выброс.",
+        },
+    }
+    profile = rest_profiles.get(player.current_location_id)
+    if profile:
         now = int(time.time())
-        cooldown = int(getattr(config, "SHELTER_SLEEP_COOLDOWN_SEC", 3 * 60 * 60) or (3 * 60 * 60))
-        last_sleep = int(database.get_user_flag(user_id, "shelter_sleep_last", 0) or 0)
+        cooldown = int(profile["cooldown"])
+        last_sleep = int(database.get_user_flag(user_id, profile["flag"], 0) or 0)
 
         if last_sleep and now - last_sleep < cooldown:
             left = cooldown - (now - last_sleep)
@@ -853,7 +878,7 @@ def handle_sleep(player, vk, user_id: int):
                 user_id=user_id,
                 message=(
                     "🛏️ Ты уже отдыхал недавно.\n\n"
-                    f"Следующий полноценный сон будет доступен через {wait_text}."
+                    f"Следующий отдых в месте «{profile['place']}» будет доступен через {wait_text}."
                 ),
                 keyboard=create_location_keyboard(player.current_location_id).get_keyboard(),
                 random_id=0
@@ -864,9 +889,9 @@ def handle_sleep(player, vk, user_id: int):
         old_energy = int(player.energy)
         old_rad = int(player.radiation)
 
-        hp_heal = max(12, int(player.max_health * 0.18))
-        energy_heal = 35
-        rad_reduce = 10
+        hp_heal = max(int(profile["hp_min"]), int(player.max_health * float(profile["hp_pct"])))
+        energy_heal = int(profile["energy"])
+        rad_reduce = int(profile["rad"])
 
         new_hp = min(player.max_health, old_hp + hp_heal)
         new_energy = min(player.max_energy, old_energy + energy_heal)
@@ -886,16 +911,16 @@ def handle_sleep(player, vk, user_id: int):
             energy=new_energy,
             radiation=new_rad,
         )
-        database.set_user_flag(user_id, "shelter_sleep_last", now)
+        database.set_user_flag(user_id, profile["flag"], now)
 
         message = (
-            "🛏️ Ты устроился в убежище и немного выспался.\n\n"
+            f"🛏️ {profile['message']}\n\n"
             f"❤️ HP: {old_hp} → {new_hp}/{player.max_health}\n"
             f"⚡ Энергия: {old_energy} → {new_energy}/{player.max_energy}\n"
             f"☢️ Радиация: {old_rad} → {new_rad} ед.\n"
             f"   ({format_radiation_rate(old_rad)} → {format_radiation_rate(new_rad)})\n"
             f"🧪 Стадия: {get_radiation_stage(new_rad)['name']}\n\n"
-            "Сон в Зоне тревожный, но силы восстановлены."
+            f"{profile['ending']}"
         )
         vk.messages.send(
             user_id=user_id,

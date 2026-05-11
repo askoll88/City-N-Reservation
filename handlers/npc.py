@@ -19,7 +19,8 @@ from handlers.keyboards import (
     create_npc_select_keyboard,
     create_class_selection_keyboard,
     create_class_confirm_keyboard,
-    create_kpp_shop_keyboard
+    create_kpp_shop_keyboard,
+    create_forester_trial_keyboard,
 )
 from handlers.inventory import (
     show_soldier_weapons, 
@@ -48,6 +49,7 @@ DOSIMETER_FORECAST_BASIC_COST = 12000
 DOSIMETER_FORECAST_ADVANCED_COST = 35000
 MSK_TZ = timezone(timedelta(hours=3))
 FORESTER_HUNTING_UNLOCK_FLAG = "forest_hunting_unlocked"
+FORESTER_HUNTING_GROUNDS_UNLOCK_FLAG = "forest_hunting_grounds_unlocked"
 FORESTER_HUNTING_UNLOCK_LEVEL = 10
 
 
@@ -259,15 +261,17 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
 
 
 def _handle_forester_unlock_hunting(player, vk, user_id: int, npc_id: str):
-    """Открыть игроку будущую механику охотничьих мест через Лесника."""
-    unlocked = int(database.get_user_flag(user_id, FORESTER_HUNTING_UNLOCK_FLAG, 0) or 0) == 1
+    """Запустить проверку Лесника для открытия охотничьих угодий."""
+    from infra.state_manager import set_dialog_state
+
+    unlocked = int(database.get_user_flag(user_id, FORESTER_HUNTING_GROUNDS_UNLOCK_FLAG, 0) or 0) == 1
     if unlocked:
         vk.messages.send(
             user_id=user_id,
             message=(
                 "🌲Лесник:\n\n"
                 "Метки у тебя уже есть. Дальше дело не в бумаге, а в ногах и тишине.\n\n"
-                "Когда охотничьи места откроются на карте, иди по меткам от заимки или из заражённого леса."
+                "Охотничьи угодья открыты от заимки. Хочешь добычи — иди туда, а трофеи неси обратно."
             ),
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
@@ -288,19 +292,102 @@ def _handle_forester_unlock_hunting(player, vk, user_id: int, npc_id: str):
         )
         return True
 
-    database.set_user_flag(user_id, FORESTER_HUNTING_UNLOCK_FLAG, 1)
-    database.set_user_flag(user_id, "quest:forester_first_marks", 1)
+    from handlers.quests import accept_story_quest
+    accept_story_quest(user_id, "forester_marks")
+    set_dialog_state(user_id, npc_id, "forester_trial:tracks")
     vk.messages.send(
         user_id=user_id,
         message=(
             "🌲Лесник:\n\n"
-            "Он достаёт из жестяной коробки три потёртые бирки с насечками и кладёт тебе в ладонь.\n\n"
-            "«Первая метка — где зверь ходит. Вторая — где он ест. Третья — где он ждёт дурака. "
-            "Не перепутай порядок.»\n\n"
-            "✅ Открыт доступ к охотничьим тропам лесной ветки.\n"
-            "Пока сами охотничьи места не вынесены отдельной локацией, Лесник уже будет принимать трофеи."
+            "«Метки не дают тем, кто просто просит. Бумажка дорогу не запомнит за тебя.»\n\n"
+            "Он кладёт на стол кусок коры с тремя насечками и старую гильзу, набитую землёй.\n\n"
+            "Первая проверка: след уходит через мокрый мох. Чуть дальше на траве кровь, а слева в чаще хрустнуло.\n"
+            "Что читаешь первым?"
         ),
-        keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
+        keyboard=create_forester_trial_keyboard("tracks").get_keyboard(),
+        random_id=0
+    )
+    return True
+
+
+def handle_forester_trial_choice(player, vk, user_id: int, text: str, stage: str):
+    """Интерактивная проверка Лесника: чтение следа, ветер, приманка."""
+    from infra.state_manager import set_dialog_state
+
+    choice = (text or "").strip().lower()
+    step = stage.split(":", 1)[1] if ":" in stage else "tracks"
+    expected = {
+        "tracks": "смотреть мох",
+        "wind": "зайти под ветер",
+        "bait": "обойти тушу кругом",
+    }
+    next_step = {"tracks": "wind", "wind": "bait"}
+
+    if choice in {"к выбору npc", "назад"}:
+        show_npc_dialog(player, vk, user_id, "лесник", None)
+        return True
+
+    if choice != expected.get(step):
+        set_dialog_state(user_id, "лесник", "menu")
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🌲Лесник:\n\n"
+                "Он молча забирает кору со стола.\n\n"
+                "«Вот так люди и пропадают: видят кровь, слышат шум и забывают про землю под ногами. "
+                "Попробуешь ещё раз, когда голова станет тише.»"
+            ),
+            keyboard=create_npc_dialog_keyboard("лесник").get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    if step == "tracks":
+        set_dialog_state(user_id, "лесник", "forester_trial:wind")
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🌲Лесник:\n\n"
+                "«Верно. Кровь могли пролить специально, шум могли сделать нарочно. Мох врёт реже.»\n\n"
+                "Вторая проверка: зверь кормится у солонца. Ветер тянет от него к тебе, сухие ветки лежат справа, "
+                "короткая просека идёт напрямик. Как заходишь?"
+            ),
+            keyboard=create_forester_trial_keyboard("wind").get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    if step == "wind":
+        set_dialog_state(user_id, "лесник", "forester_trial:bait")
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🌲Лесник:\n\n"
+                "«Под ветер. Сухие ветки сдадут тебя, прямая тропа сдаст ещё быстрее.»\n\n"
+                "Третья проверка: на поляне лежит свежая туша. Вокруг тихо, слишком тихо. "
+                "Трофей хороший, но рядом нет ни птиц, ни мелкой падали. Что делаешь?"
+            ),
+            keyboard=create_forester_trial_keyboard("bait").get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    database.set_user_flag(user_id, FORESTER_HUNTING_UNLOCK_FLAG, 1)
+    database.set_user_flag(user_id, FORESTER_HUNTING_GROUNDS_UNLOCK_FLAG, 1)
+    database.set_user_flag(user_id, "quest:forester_first_marks", 1)
+    from handlers.quests import complete_story_quest
+    complete_story_quest(user_id, "forester_marks")
+    set_dialog_state(user_id, "лесник", "menu")
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "🌲Лесник:\n\n"
+            "Лесник наконец кивает и отдаёт тебе три потёртые бирки с насечками.\n\n"
+            "«Живую добычу ищут глазами. Опасную — спиной. Если туша лежит слишком удобно, значит охотятся уже на тебя.»\n\n"
+            "✅ Открыт маршрут: Охотничьи угодья.\n"
+            "Теперь от заимки можно выйти к угодьям, выбирать тактику охоты и приносить трофеи Леснику."
+        ),
+        keyboard=create_npc_dialog_keyboard("лесник").get_keyboard(),
         random_id=0
     )
     return True

@@ -3438,8 +3438,8 @@ def create_combat_keyboard(player=None, user_id=None, *, inline: bool = True):
     return keyboard
 
 
-def create_combat_inventory_keyboard(user_id=None, *, inline: bool = True):
-    """Клавиатура боевого инвентаря: только возврат к бою."""
+def create_combat_inventory_keyboard(user_id=None, *, inline: bool = True, quick_items: list[dict] | None = None):
+    """Клавиатура боевого инвентаря с быстрым использованием доступных лечилок."""
     from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
     combat_id = None
@@ -3453,6 +3453,23 @@ def create_combat_inventory_keyboard(user_id=None, *, inline: bool = True):
         payload["combat_id"] = combat_id
 
     keyboard = VkKeyboard(one_time=False, inline=inline)
+    shown = 0
+    for item in (quick_items or [])[:6]:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        quantity = max(1, int(item.get("quantity", 1) or 1))
+        item_payload = {**payload, "action": "use_item", "item": name}
+        keyboard.add_callback_button(
+            f"{name} x{quantity}",
+            color=VkKeyboardColor.POSITIVE,
+            payload=item_payload,
+        )
+        shown += 1
+        if shown % 2 == 0:
+            keyboard.add_line()
+    if shown and shown % 2:
+        keyboard.add_line()
     keyboard.add_callback_button(
         "Назад к бою",
         color=VkKeyboardColor.NEGATIVE,

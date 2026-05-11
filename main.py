@@ -478,6 +478,17 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
     from handlers.combat import handle_explore_time
     from game.constants import RESEARCH_LOCATIONS
 
+    current_ui = get_ui_current_screen(user_id)
+
+    if current_ui.get("name") == "shop" and text.isdigit():
+        shop_view = str(current_ui.get("view") or "").strip().lower()
+        if shop_view == "sell":
+            if handle_sell_item_by_number(player, vk, user_id, text):
+                return True
+        else:
+            if _handle_shop_buy_by_number(player, vk, user_id, text):
+                return True
+
     # Исследование
     if 'исследовать' in text:
         if player.current_location_id == "склад_17":
@@ -500,8 +511,11 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
             )
         return True
 
+    inventory_ui = current_ui.get("name") == "inventory"
+    in_inventory_context = player.current_location_id == "инвентарь" or inventory_ui
+
     # Инвентарь - цифры
-    if player.current_location_id == "инвентарь":
+    if in_inventory_context:
         if text == 'назад':
             go_back(player, vk, user_id)
             return True
@@ -539,6 +553,10 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
             item_name = text.replace('выпить ', '')
         else:
             item_name = text.replace('съесть ', '')
+        item_name = item_name.strip()
+        if in_inventory_context and item_name.isdigit():
+            if handle_inventory_digit(player, item_name, vk, user_id):
+                return True
         handle_use_item(player, item_name, vk, user_id)
         return True
 
@@ -651,6 +669,10 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
             )
             return True
 
+        if in_inventory_context and item_name.isdigit():
+            if handle_inventory_digit(player, item_name, vk, user_id):
+                return True
+
         player.inventory.reload()
 
         # Рюкзак
@@ -699,6 +721,12 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         success, msg = player.ascend_weapon(item_name or None)
         vk.messages.send(user_id=user_id, message=msg, random_id=0)
         return True
+
+    if text.startswith('снять '):
+        item_name = text.replace('снять ', '', 1).strip()
+        if in_inventory_context and item_name.isdigit():
+            if handle_inventory_digit(player, item_name, vk, user_id):
+                return True
 
     # Снять предмет
     if text in ['снять рюкзак', 'снять оружие', 'снять броню', 'снять устройство', 'снять детектор', 'снять']:
@@ -1221,6 +1249,10 @@ def _do_callback_processing(event, vk):
             "shell_decoy": "отвлечь гильзами",
             "back": "назад",
         }.get(action)
+        if action == "use_item":
+            item_name = str(payload.get("item") or "").strip()
+            if item_name:
+                action_text = f"использовать {item_name}"
         if not action_text:
             _answer_callback(event, vk, "Действие устарело")
             return
