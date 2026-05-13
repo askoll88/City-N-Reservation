@@ -178,7 +178,7 @@ def handle_navigation(player, vk, user_id: int, text: str):
         requested = 'дорога_военная_часть'
     elif 'нии' in text or 'на нии' in text:
         requested = 'дорога_нии'
-    elif 'лес' in text or 'заражен' in text:
+    elif text != 'лесник' and ('лес' in text or 'заражен' in text):
         requested = 'дорога_зараженный_лес'
 
     if text in ['назад', 'выйти', 'выйти из']:
