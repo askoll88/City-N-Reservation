@@ -172,8 +172,20 @@ def handle_navigation(player, vk, user_id: int, text: str):
         text in ['заимка лесника', 'заимка', 'назад'] or 'заимка' in text
     ):
         requested = 'заимка_лесника'
+    elif current == 'зараженный_лес' and text in ['турбаза', 'турбаза лучик', 'лучик', 'к турбазе', 'на турбазу']:
+        requested = 'турбаза_лучик'
     elif current == 'зараженный_лес' and ('дорога' in text or text in ['к дороге', 'на дорогу']):
         requested = 'дорога_зараженный_лес'
+    elif current == 'турбаза_лучик' and text in ['озеро', 'к озеру', 'на озеро', 'рыбалка']:
+        requested = 'озеро'
+    elif current == 'турбаза_лучик' and (
+        text in ['зараженный лес', 'заражённый лес', 'лес', 'назад'] or 'заражен' in text
+    ):
+        requested = 'зараженный_лес'
+    elif current == 'озеро' and (
+        text in ['турбаза', 'турбаза лучик', 'лучик', 'назад'] or 'турбаз' in text
+    ):
+        requested = 'турбаза_лучик'
     elif 'военная' in text or ('дорога' in text and 'воен' in text):
         requested = 'дорога_военная_часть'
     elif 'нии' in text or 'на нии' in text:
@@ -202,7 +214,9 @@ def handle_navigation(player, vk, user_id: int, text: str):
         'дорога_зараженный_лес': {'кпп', 'зараженный_лес', 'заимка_лесника'},
         'заимка_лесника': {'дорога_зараженный_лес', 'охотничьи_угодья'},
         'охотничьи_угодья': {'заимка_лесника'},
-        'зараженный_лес': {'дорога_зараженный_лес'},
+        'зараженный_лес': {'дорога_зараженный_лес', 'турбаза_лучик'},
+        'турбаза_лучик': {'зараженный_лес', 'озеро'},
+        'озеро': {'турбаза_лучик'},
     }
 
     # Из инвентаря прямые переходы запрещены, нужен "Назад"
@@ -251,6 +265,16 @@ def handle_location_actions(player, vk, user_id: int, text: str):
     if player.current_location_id == "охотничьи_угодья":
         from game.hunting_grounds import handle_hunting_command
         if handle_hunting_command(player, vk, user_id, text):
+            return True
+
+    if player.current_location_id == "озеро":
+        from game.fishing import handle_fishing_command
+        if handle_fishing_command(player, vk, user_id, text):
+            return True
+
+    if player.current_location_id == "турбаза_лучик":
+        from game.fishing import handle_tourbase_command
+        if handle_tourbase_command(player, vk, user_id, text):
             return True
 
     if player.current_location_id == "склад_17" and text in {
@@ -669,6 +693,8 @@ def handle_npc_selection(player, vk, user_id: int, text: str):
         'медик': 'медик',
         'дозиметрист': 'дозиметрист',
         'лесник': 'лесник',
+        'лучик': 'лучик',
+        'старик лучик': 'лучик',
     }
     
     npc_id = npc_map.get(text)

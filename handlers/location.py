@@ -862,6 +862,17 @@ def handle_sleep(player, vk, user_id: int):
             "message": "Ты переждал шум леса в заимке, у печки и сухих стен.",
             "ending": "Отдых неглубокий, но здесь хотя бы не достаёт выброс.",
         },
+        "турбаза_лучик": {
+            "flag": "tourbase_luchik_rest_last",
+            "cooldown": 2 * 60 * 60,
+            "hp_pct": 0.14,
+            "hp_min": 10,
+            "energy": 30,
+            "rad": 6,
+            "place": "турбаза Лучик",
+            "message": "Ты отдохнул на старой турбазе, под треск печи и шум озёрного камыша.",
+            "ending": "Это не городская безопасность, но после леса даже такой привал держит на ногах.",
+        },
     }
     profile = rest_profiles.get(player.current_location_id)
     if profile:

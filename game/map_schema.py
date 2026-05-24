@@ -227,6 +227,28 @@ LOCATION_METADATA: dict[str, dict[str, Any]] = {
         "activities": ["afk_hunt", "trophy", "risk_choice"],
         "loot_profile": "hunting_trophies",
     },
+    "турбаза_лучик": {
+        "region": "forest",
+        "type": "safehouse",
+        "level_min": 24,
+        "level_max": 34,
+        "danger": "safe",
+        "tags": ["safe", "forest", "lake", "npc", "rest", "cooking", "fish"],
+        "requires": {},
+        "activities": ["talk", "rest", "cooking", "fish_sell", "travel"],
+        "loot_profile": None,
+    },
+    "озеро": {
+        "region": "forest",
+        "type": "resource_job",
+        "level_min": 26,
+        "level_max": 38,
+        "danger": "medium",
+        "tags": ["forest", "lake", "fishing", "afk", "food", "rare_drop"],
+        "requires": {},
+        "activities": ["afk_fishing", "food", "risk_choice"],
+        "loot_profile": "lake_fishing",
+    },
 }
 
 

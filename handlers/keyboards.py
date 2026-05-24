@@ -33,6 +33,8 @@ INNER_TO_ROAD_LOCATION = {
     "зараженный_лес": "Дорога на зараженный лес",
     "заимка_лесника": "Дорога на зараженный лес",
     "охотничьи_угодья": "Заимка лесника",
+    "турбаза_лучик": "Зараженный лес",
+    "озеро": "Турбаза Лучик",
 }
 
 
@@ -264,6 +266,34 @@ def create_location_keyboard(location_id: str, player_level: int = None):
         keyboard.add_line()
         _add_meta_row(keyboard)
 
+    # --- Турбаза Лучик ---
+    elif location_id == "турбаза_лучик":
+        keyboard.add_button("Поговорить", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Отдохнуть", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_line()
+        keyboard.add_button("Готовка", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Заказы", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+        keyboard.add_button("Рыбный шкаф", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Снасти", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+        keyboard.add_button("Озеро", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_line()
+        keyboard.add_button("Зараженный лес", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        _add_meta_row(keyboard)
+
+    # --- Озеро ---
+    elif location_id == "озеро":
+        keyboard.add_button("Рыбачить", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button("Проверить улов", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+        keyboard.add_button("Рыбный шкаф", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+        keyboard.add_button("Турбаза Лучик", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        _add_meta_row(keyboard)
+
     # --- Больница ---
     elif location_id == "больница":
         keyboard.add_button("Лечиться", color=VkKeyboardColor.POSITIVE)
@@ -473,6 +503,23 @@ def create_hunting_grounds_keyboard(active: bool = False):
         keyboard.add_line()
         keyboard.add_button("Глубокий след", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_button("Заимка лесника", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    _add_meta_row(keyboard)
+    return keyboard
+
+
+def create_fishing_keyboard(active: bool = False):
+    """Клавиатура рыбалки у озера."""
+    keyboard = VkKeyboard(one_time=False)
+    if active:
+        keyboard.add_button("Проверить улов", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Отменить рыбалку", color=VkKeyboardColor.NEGATIVE)
+    else:
+        keyboard.add_button("Береговая снасть", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button("Глубокий заброс", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+        keyboard.add_button("Аномальная заводь", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button("Турбаза Лучик", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     _add_meta_row(keyboard)
     return keyboard

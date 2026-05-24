@@ -307,6 +307,23 @@ def init_db():
             )
         """)
 
+        # -- user_fish_locker ---------------------------------------------
+        # Рыбный шкаф турбазы: каждая рыба хранится отдельной записью,
+        # потому что у неё индивидуальные вес и цена.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_fish_locker (
+                id           SERIAL PRIMARY KEY,
+                user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                fish_name    VARCHAR(100) NOT NULL,
+                tier         VARCHAR(20)  NOT NULL DEFAULT 'common',
+                weight_kg    REAL         NOT NULL DEFAULT 0,
+                price_per_kg INTEGER      NOT NULL DEFAULT 0,
+                value        INTEGER      NOT NULL DEFAULT 0,
+                spot         VARCHAR(30),
+                caught_at    TIMESTAMP    NOT NULL DEFAULT NOW()
+            )
+        """)
+
         # -- game_settings --------------------------------------------------
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS game_settings (
@@ -509,6 +526,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_user_inventory_item   ON user_inventory(item_id)",
             "CREATE INDEX IF NOT EXISTS idx_user_storage_user     ON user_storage(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_user_storage_item     ON user_storage(item_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_fish_locker_user ON user_fish_locker(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_fish_locker_name ON user_fish_locker(user_id, fish_name)",
             "CREATE INDEX IF NOT EXISTS idx_items_category        ON items(category)",
             "CREATE INDEX IF NOT EXISTS idx_user_equipment_user   ON user_equipment(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status)",
@@ -1753,6 +1772,237 @@ def remove_item_from_inventory(vk_id: int, item_name: str, quantity: int = 1) ->
     return True
 
 
+def get_inventory_item_quantities(vk_id: int, item_names: list[str] | tuple[str, ...]) -> dict[str, int]:
+    """Вернуть количества указанных предметов в инвентаре пользователя."""
+    names = [str(name) for name in item_names if str(name or "").strip()]
+    if not names:
+        return {}
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {}
+        cursor.execute(
+            """
+            SELECT i.name, COALESCE(ui.quantity, 0) AS quantity
+            FROM items i
+            LEFT JOIN user_inventory ui ON ui.item_id = i.id AND ui.user_id = %s
+            WHERE i.name = ANY(%s)
+            """,
+            (user["id"], names),
+        )
+        return {
+            str(row["name"]): max(0, int(row.get("quantity", 0) or 0))
+            for row in cursor.fetchall()
+        }
+
+
+def add_user_money(vk_id: int, amount: int) -> int | None:
+    """Добавить деньги пользователю и вернуть новый баланс."""
+    safe_amount = int(amount or 0)
+    if safe_amount <= 0:
+        user = get_user_by_vk(vk_id)
+        return int(user.get("money", 0) or 0) if user else None
+    with db_cursor() as (cursor, _):
+        cursor.execute(
+            "UPDATE users SET money = money + %s WHERE vk_id = %s RETURNING money",
+            (safe_amount, vk_id),
+        )
+        row = cursor.fetchone()
+        return int(row["money"]) if row else None
+
+
+def _fish_entry_caught_at(entry: dict) -> datetime:
+    raw = entry.get("caught_at") if isinstance(entry, dict) else None
+    if isinstance(raw, (int, float)) and raw > 0:
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc).replace(tzinfo=None)
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
+        except Exception:
+            pass
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _fish_locker_row_to_entry(row: dict) -> dict:
+    caught_at = row.get("caught_at")
+    if isinstance(caught_at, datetime):
+        caught_value = int(caught_at.replace(tzinfo=timezone.utc).timestamp())
+    else:
+        caught_value = 0
+    return {
+        "id": int(row["id"]),
+        "name": str(row["fish_name"]),
+        "tier": str(row.get("tier") or "common"),
+        "weight_kg": round(float(row.get("weight_kg", 0) or 0), 2),
+        "price_per_kg": int(row.get("price_per_kg", 0) or 0),
+        "value": int(row.get("value", 0) or 0),
+        "spot": str(row.get("spot") or ""),
+        "caught_at": caught_value,
+    }
+
+
+def get_user_fish_locker(vk_id: int) -> list[dict]:
+    """Вернуть рыбу из рыбного шкафа турбазы, одна запись = одна рыба."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return []
+        cursor.execute(
+            """
+            SELECT id, fish_name, tier, weight_kg, price_per_kg, value, spot, caught_at
+            FROM user_fish_locker
+            WHERE user_id = %s
+            ORDER BY caught_at ASC, id ASC
+            """,
+            (user["id"],),
+        )
+        return [_fish_locker_row_to_entry(row) for row in cursor.fetchall()]
+
+
+def add_fish_to_locker_transaction(vk_id: int, entry: dict, capacity: int) -> dict:
+    """Атомарно положить одну рыбу в шкаф, если есть место."""
+    safe_capacity = max(1, int(capacity or 1))
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "full": False, "message": "Пользователь не найден."}
+        user_id = int(user["id"])
+
+        cursor.execute("SELECT COUNT(*) AS cnt FROM user_fish_locker WHERE user_id = %s", (user_id,))
+        current = int((cursor.fetchone() or {}).get("cnt", 0) or 0)
+        if current >= safe_capacity:
+            return {"success": False, "full": True, "current": current, "capacity": safe_capacity}
+
+        cursor.execute(
+            """
+            INSERT INTO user_fish_locker
+                (user_id, fish_name, tier, weight_kg, price_per_kg, value, spot, caught_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                user_id,
+                str(entry.get("name") or "Рыба"),
+                str(entry.get("tier") or "common"),
+                float(entry.get("weight_kg", 0) or 0),
+                int(entry.get("price_per_kg", 0) or 0),
+                int(entry.get("value", 0) or 0),
+                str(entry.get("spot") or ""),
+                _fish_entry_caught_at(entry),
+            ),
+        )
+        row = cursor.fetchone()
+    return {"success": True, "id": int(row["id"]), "current": current + 1, "capacity": safe_capacity}
+
+
+def restore_fish_locker_entries(vk_id: int, entries: list[dict]) -> bool:
+    """Вернуть ранее списанные записи рыбы в шкаф."""
+    if not entries:
+        return True
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return False
+        user_id = int(user["id"])
+        for entry in entries:
+            cursor.execute(
+                """
+                INSERT INTO user_fish_locker
+                    (user_id, fish_name, tier, weight_kg, price_per_kg, value, spot, caught_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id,
+                    str(entry.get("name") or "Рыба"),
+                    str(entry.get("tier") or "common"),
+                    float(entry.get("weight_kg", 0) or 0),
+                    int(entry.get("price_per_kg", 0) or 0),
+                    int(entry.get("value", 0) or 0),
+                    str(entry.get("spot") or ""),
+                    _fish_entry_caught_at(entry),
+                ),
+            )
+    return True
+
+
+def consume_fish_locker_entries_transaction(
+    vk_id: int,
+    fish_names: tuple[str, ...] | list[str],
+    quantity: int,
+) -> dict:
+    """Списать самые дешёвые подходящие рыбы из рыбного шкафа."""
+    names = [str(name) for name in fish_names if str(name or "").strip()]
+    safe_qty = max(1, int(quantity or 1))
+    if not names:
+        return {"success": False, "message": "Не указана рыба.", "used_text": "", "consumed": []}
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден.", "used_text": "", "consumed": []}
+        user_id = int(user["id"])
+        cursor.execute(
+            """
+            SELECT id, fish_name, tier, weight_kg, price_per_kg, value, spot, caught_at
+            FROM user_fish_locker
+            WHERE user_id = %s AND fish_name = ANY(%s)
+            ORDER BY value ASC, weight_kg ASC, fish_name ASC, caught_at ASC, id ASC
+            LIMIT %s
+            FOR UPDATE
+            """,
+            (user_id, names, safe_qty),
+        )
+        rows = cursor.fetchall()
+        if len(rows) < safe_qty:
+            return {"success": False, "message": "В рыбном шкафу не хватает подходящего улова.", "used_text": "", "consumed": []}
+        ids = [int(row["id"]) for row in rows]
+        cursor.execute("DELETE FROM user_fish_locker WHERE user_id = %s AND id = ANY(%s)", (user_id, ids))
+
+    consumed = [_fish_locker_row_to_entry(row) for row in rows]
+    counts: dict[str, int] = {}
+    for entry in consumed:
+        name = str(entry.get("name") or "Рыба")
+        counts[name] = counts.get(name, 0) + 1
+    used_text = ", ".join(f"{name} x{qty}" for name, qty in counts.items())
+    return {"success": True, "used_text": used_text, "consumed": consumed}
+
+
+def sell_fish_locker_transaction(vk_id: int) -> dict:
+    """Атомарно продать Лучику всю рыбу из рыбного шкафа."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден.", "sold": [], "total": 0}
+        user_id = int(user["id"])
+        cursor.execute(
+            """
+            SELECT id, fish_name, tier, weight_kg, price_per_kg, value, spot, caught_at
+            FROM user_fish_locker
+            WHERE user_id = %s
+            ORDER BY caught_at ASC, id ASC
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+        rows = cursor.fetchall()
+        sold = [_fish_locker_row_to_entry(row) for row in rows if int(row.get("value", 0) or 0) > 0]
+        total = sum(int(row.get("value", 0) or 0) for row in sold)
+        if total <= 0 or not sold:
+            return {"success": False, "message": "В рыбном шкафу нет рыбы, которую берёт Лучик.", "sold": [], "total": 0}
+        cursor.execute("DELETE FROM user_fish_locker WHERE user_id = %s", (user_id,))
+        cursor.execute(
+            "UPDATE users SET money = money + %s WHERE id = %s RETURNING money",
+            (total, user_id),
+        )
+        new_balance = int(cursor.fetchone()["money"])
+    return {"success": True, "sold": sold, "total": total, "remaining_money": new_balance}
+
+
 def craft_item_transaction(
     vk_id: int,
     ingredients: list[tuple[str, int]],
@@ -2629,6 +2879,23 @@ FORESTER_TROPHY_PRICES = {
 }
 
 
+LUCHIK_FISH_PRICES = {
+    "Серебристая плотва": 70,
+    "Пятнистый окунь": 85,
+    "Старый карась": 80,
+    "Тяжелый карп": 170,
+    "Слепая щука": 220,
+    "Электрический угорь": 360,
+    "Аномальная чешуя": 520,
+}
+
+LUCHIK_SOUP_FISH = (
+    "Серебристая плотва",
+    "Пятнистый окунь",
+    "Старый карась",
+)
+
+
 def sell_forester_trophies_transaction(vk_id: int) -> dict:
     """Атомарно продать Леснику все лесные трофеи из инвентаря игрока."""
     trophy_names = tuple(FORESTER_TROPHY_PRICES.keys())
@@ -2690,6 +2957,264 @@ def sell_forester_trophies_transaction(vk_id: int) -> dict:
         "sold": sold,
         "total": total,
         "remaining_money": new_balance,
+    }
+
+
+def sell_luchik_fish_transaction(vk_id: int) -> dict:
+    """Атомарно продать Лучику весь базовый рыбный улов игрока."""
+    fish_names = tuple(LUCHIK_FISH_PRICES.keys())
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден.", "sold": [], "total": 0}
+
+        cursor.execute(
+            """
+            SELECT ui.item_id, ui.quantity, i.name
+            FROM user_inventory ui
+            JOIN items i ON ui.item_id = i.id
+            WHERE ui.user_id = %s AND i.name = ANY(%s)
+            FOR UPDATE
+            """,
+            (user["id"], list(fish_names)),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return {"success": False, "message": "У тебя нет рыбы, которую берёт Лучик.", "sold": [], "total": 0}
+
+        sold = []
+        total = 0
+        for row in rows:
+            quantity = max(0, int(row.get("quantity") or 0))
+            if quantity <= 0:
+                continue
+            name = str(row["name"])
+            unit_price = int(LUCHIK_FISH_PRICES.get(name, 0) or 0)
+            if unit_price <= 0:
+                continue
+            amount = unit_price * quantity
+            total += amount
+            sold.append({"name": name, "quantity": quantity, "unit_price": unit_price, "amount": amount})
+            cursor.execute(
+                "DELETE FROM user_inventory WHERE user_id = %s AND item_id = %s",
+                (user["id"], row["item_id"]),
+            )
+
+        if total <= 0 or not sold:
+            return {"success": False, "message": "Улов нашёлся, но Лучик за него ничего не предлагает.", "sold": [], "total": 0}
+
+        cursor.execute(
+            """
+            UPDATE users
+            SET money = money + %s
+            WHERE id = %s
+            RETURNING money
+            """,
+            (total, user["id"]),
+        )
+        new_balance = int(cursor.fetchone()["money"])
+
+    return {
+        "success": True,
+        "message": f"Лучик забрал улов за {total} руб.",
+        "sold": sold,
+        "total": total,
+        "remaining_money": new_balance,
+    }
+
+
+def _consume_any_items_tx(
+    cursor,
+    user_id: int,
+    item_names: tuple[str, ...] | list[str],
+    quantity: int,
+) -> tuple[bool, str, list[tuple[int, str, int]]]:
+    ok, used_text, selected = _select_any_items_tx(cursor, user_id, item_names, quantity)
+    if not ok:
+        return False, "", []
+    for item_id, _, qty in selected:
+        _consume_inventory_item_tx(cursor, user_id, item_id, qty)
+    return True, used_text, selected
+
+
+def _select_any_items_tx(
+    cursor,
+    user_id: int,
+    item_names: tuple[str, ...] | list[str],
+    quantity: int,
+) -> tuple[bool, str, list[tuple[int, str, int]]]:
+    selected: list[tuple[int, str, int]] = []
+    remaining = max(1, int(quantity or 1))
+    for item_name in item_names:
+        qty, item_id = _get_inventory_quantity_tx(cursor, user_id, str(item_name))
+        if not item_id or qty <= 0:
+            continue
+        take = min(qty, remaining)
+        selected.append((item_id, str(item_name), take))
+        remaining -= take
+        if remaining <= 0:
+            break
+    if remaining > 0:
+        return False, "", []
+    used_text = ", ".join(f"{name} x{qty}" for _, name, qty in selected)
+    return True, used_text, selected
+
+
+def cook_luchik_recipe_transaction(vk_id: int, recipe: dict) -> dict:
+    """Сварить блюдо на турбазе по табличному рецепту."""
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден."}
+        user_id = int(user["id"])
+
+        result_name, result_qty = recipe.get("result", ("", 1))
+        result_qty = max(1, int(result_qty or 1))
+        cursor.execute("SELECT id FROM items WHERE name = %s", (result_name,))
+        result_item = cursor.fetchone()
+        if not result_item:
+            return {"success": False, "message": f"Рецепт есть, но предмет '{result_name}' не найден в базе."}
+
+        fixed_ingredients: list[tuple[int, str, int]] = []
+        for item_name, qty_needed in recipe.get("ingredients", []):
+            qty, item_id = _get_inventory_quantity_tx(cursor, user_id, str(item_name))
+            safe_qty = max(1, int(qty_needed or 1))
+            if not item_id or qty < safe_qty:
+                return {"success": False, "message": f"Не хватает: {item_name} x{safe_qty}."}
+            fixed_ingredients.append((item_id, str(item_name), safe_qty))
+
+        selected_any_groups: list[tuple[str, list[tuple[int, str, int]]]] = []
+        for group in (recipe.get("ingredients_any") or {}).values():
+            ok, used_text, selected = _select_any_items_tx(
+                cursor,
+                user_id,
+                tuple(group.get("items") or ()),
+                int(group.get("qty", 1) or 1),
+            )
+            if not ok:
+                return {"success": False, "message": f"Не хватает: {group.get('label', 'ингредиенты')}."}
+
+            selected_any_groups.append((used_text, selected))
+
+        used_parts: list[str] = []
+        for used_text, selected in selected_any_groups:
+            for item_id, _, qty in selected:
+                _consume_inventory_item_tx(cursor, user_id, item_id, qty)
+            used_parts.append(used_text)
+
+        for item_id, item_name, safe_qty in fixed_ingredients:
+            _consume_inventory_item_tx(cursor, user_id, item_id, safe_qty)
+            used_parts.append(f"{item_name} x{safe_qty}")
+
+        cursor.execute(
+            """
+            INSERT INTO user_inventory (user_id, item_id, quantity)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+            """,
+            (user_id, result_item["id"], result_qty),
+        )
+
+    return {
+        "success": True,
+        "message": f"Готово: {result_name} x{result_qty}. Списано: {', '.join(used_parts)}.",
+    }
+
+
+def cook_luchik_fish_soup_transaction(vk_id: int) -> dict:
+    """Обратная совместимость для старого вызова базовой ухи."""
+    return cook_luchik_recipe_transaction(vk_id, {
+        "result": ("Уха у Лучика", 1),
+        "ingredients_any": {
+            "fish": {
+                "items": LUCHIK_SOUP_FISH,
+                "qty": 2,
+                "label": "любая обычная рыба x2",
+            },
+        },
+        "ingredients": [("Чистая вода", 1)],
+    })
+
+
+def complete_luchik_order_transaction(vk_id: int, order: dict) -> dict:
+    """Сдать один табличный заказ Лучика."""
+    flag = str(order.get("flag") or "")
+    with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return {"success": False, "message": "Пользователь не найден."}
+        user_id = int(user["id"])
+
+        if flag:
+            cursor.execute(
+                "SELECT value FROM user_flags WHERE user_id = %s AND flag_name = %s",
+                (user_id, flag),
+            )
+            existing = cursor.fetchone()
+            if existing and int(existing.get("value", 0) or 0) > 0:
+                return {"success": False, "message": "Этот заказ уже закрыт."}
+
+        order_items = tuple(order.get("items") or ())
+        order_qty = int(order.get("qty", 1) or 1)
+        used_text = "ничего"
+        if order_items and order_qty > 0:
+            ok, used_text, _ = _consume_any_items_tx(cursor, user_id, order_items, order_qty)
+            if not ok:
+                return {"success": False, "message": f"Не хватает улова для заказа «{order.get('label', 'заказ')}»."}
+
+        reward_money = max(0, int(order.get("reward_money", 0) or 0))
+        new_balance = int(user.get("money", 0) or 0)
+        if reward_money:
+            cursor.execute(
+                "UPDATE users SET money = money + %s WHERE id = %s RETURNING money",
+                (reward_money, user_id),
+            )
+            new_balance = int(cursor.fetchone()["money"])
+
+        granted: list[str] = []
+        for item_name, qty in order.get("reward_items", []):
+            safe_qty = max(1, int(qty or 1))
+            cursor.execute("SELECT id FROM items WHERE name = %s", (item_name,))
+            item = cursor.fetchone()
+            if not item:
+                continue
+            cursor.execute(
+                """
+                INSERT INTO user_inventory (user_id, item_id, quantity)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, item_id)
+                DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+                """,
+                (user_id, item["id"], safe_qty),
+            )
+            granted.append(f"{item_name} x{safe_qty}")
+
+        if flag:
+            cursor.execute(
+                """
+                INSERT INTO user_flags (user_id, flag_name, value)
+                VALUES (%s, %s, 1)
+                ON CONFLICT (user_id, flag_name) DO UPDATE
+                SET value = EXCLUDED.value
+                """,
+                (user_id, flag),
+            )
+
+    reward_text = f"{reward_money} руб." if reward_money else "без денег"
+    if granted:
+        reward_text += ", " + ", ".join(granted)
+    return {
+        "success": True,
+        "message": (
+            f"Заказ закрыт: {order.get('label', 'заказ')}.\n"
+            f"Списано: {used_text}.\n"
+            f"Награда: {reward_text}.\n"
+            f"Денег сейчас: {new_balance} руб."
+        ),
     }
 
 

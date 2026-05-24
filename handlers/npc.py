@@ -257,6 +257,9 @@ def _handle_special_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str
     if npc_id == "лесник" and dialog_id == "сдатьтрофеи":
         return _handle_forester_sell_trophies(player, vk, user_id, npc_id)
 
+    if npc_id == "лучик" and dialog_id == "сдатьрыбу":
+        return _handle_luchik_sell_fish(player, vk, user_id, npc_id)
+
     return False
 
 
@@ -426,6 +429,17 @@ def _handle_forester_sell_trophies(player, vk, user_id: int, npc_id: str):
         random_id=0
     )
     return True
+
+
+def _handle_luchik_sell_fish(player, vk, user_id: int, npc_id: str):
+    """Сдать весь озёрный улов Старику Лучику."""
+    from handlers.quests import track_quest_shop_sell
+    from game.fishing import sell_luchik_fish
+
+    handled = sell_luchik_fish(player, vk, user_id, npc_id)
+    if getattr(player, "_luchik_last_sale_success", False):
+        track_quest_shop_sell(user_id, vk=vk)
+    return handled
 
 
 def _handle_trader_slot_info(player, vk, user_id: int, npc_id: str):
