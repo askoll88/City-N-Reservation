@@ -216,11 +216,236 @@ def _roll_fish_entry(fish: FishSpecies, spot: FishingSpot, rng: random.Random) -
     }
 
 
+def _early_bite_chance(
+    elapsed: int,
+    duration: int,
+    player,
+    gear: FishingGear,
+    bait: FishingBait | None,
+) -> int:
+    if elapsed < 30:
+        return 0
+    progress = max(0.0, min(0.99, elapsed / max(1, duration)))
+    progress_bonus = max(0, int((progress - 0.20) * 55))
+    stat_bonus = min(30, _stat(player, "luck") * 3 + _stat(player, "perception"))
+    gear_bonus = min(12, gear.tier * 3)
+    bait_bonus = 5 if bait else 0
+    return max(5, min(70, 5 + progress_bonus + stat_bonus + gear_bonus + bait_bonus))
+
+
+def _roll_early_bite(
+    elapsed: int,
+    duration: int,
+    player,
+    gear: FishingGear,
+    bait: FishingBait | None,
+    seed: int,
+    checks_done: int,
+) -> tuple[bool, int]:
+    chance = _early_bite_chance(elapsed, duration, player, gear, bait)
+    if chance <= 0:
+        return False, 0
+    rng = random.Random(seed + 17 + checks_done * 7919)
+    return rng.randint(1, 100) <= chance, chance
+
+
 def _format_fish_entry(entry: dict) -> str:
     return (
         f"• {entry['name']} {float(entry['weight_kg']):.2f} кг "
         f"({int(entry['value'])} руб.)"
     )
+
+
+def _adjust_fish_entry(entry: dict, quality_pct: int) -> dict:
+    adjusted = dict(entry)
+    quality = max(65, min(125, int(quality_pct)))
+    adjusted["weight_kg"] = round(float(adjusted["weight_kg"]) * quality / 100, 2)
+    adjusted["value"] = max(1, int(round(adjusted["value"] * quality / 100)))
+    adjusted["fight_quality"] = quality
+    return adjusted
+
+
+def _fight_signal(seed: int, turn: int) -> str:
+    signals = ("jerk", "bottom", "tremble")
+    return signals[random.Random(seed + turn * 37).randint(0, len(signals) - 1)]
+
+
+def _format_fight_signal(signal: str, perception: int) -> str:
+    descriptions = {
+        "jerk": "Рыба резко рванула в сторону.",
+        "bottom": "Леска тяжелеет: рыба давит ко дну.",
+        "tremble": "По леске идёт короткая дрожь.",
+    }
+    hints = {
+        "jerk": "Лучше дать леске немного свободы.",
+        "bottom": "Сейчас важнее держать натяжение.",
+        "tremble": "Момент удобный, можно тянуть.",
+    }
+    text = descriptions.get(signal, descriptions["tremble"])
+    if perception >= 7:
+        text += f"\nНаблюдение: {hints.get(signal, hints['tremble'])}"
+    return text
+
+
+def _fight_turns_for(tier: str, early_success: bool) -> int:
+    if tier == "rare":
+        return 3
+    if early_success:
+        return 2
+    return 2
+
+
+def _should_start_fight(tier: str, early_success: bool, fish_entry: dict, rng: random.Random) -> bool:
+    if early_success:
+        return True
+    if tier == "rare":
+        return True
+    if tier == "uncommon" and rng.randint(1, 100) <= 35:
+        return True
+    return int(fish_entry.get("value", 0) or 0) >= 350 and rng.randint(1, 100) <= 50
+
+
+def _send_fight_prompt(player, vk, user_id: int, state: dict, intro: str | None = None):
+    from handlers.keyboards import create_fishing_fight_keyboard
+
+    signal = str(state.get("signal") or "tremble")
+    fish_entry = state.get("fish_entry") or {}
+    lines = [
+        intro or "🎣 На крючке сильная рыба.",
+        "",
+        _format_fight_signal(signal, _stat(player, "perception")),
+        "",
+        f"Натяжение: {int(state.get('control', 50) or 50)}/100.",
+        f"Осталось ходов: {int(state.get('turns_left', 1) or 1)}.",
+        f"На кону: {fish_entry.get('name', 'рыба')} примерно {float(fish_entry.get('weight_kg', 0) or 0):.2f} кг.",
+    ]
+    vk.messages.send(
+        user_id=user_id,
+        message="\n".join(lines),
+        keyboard=create_fishing_fight_keyboard().get_keyboard(),
+        random_id=0,
+    )
+
+
+def _start_fishing_fight(
+    player,
+    vk,
+    user_id: int,
+    state: dict,
+    fish_entry: dict,
+    xp_gain: int,
+    tier: str,
+    hazard: bool,
+    bonus_rewards: list[tuple[str, int]],
+    gear: FishingGear,
+    bait: FishingBait | None,
+    seed: int,
+    early_success: bool,
+) -> bool:
+    turns = _fight_turns_for(tier, early_success)
+    fight_state = {
+        "mode": "fight",
+        "fish_entry": fish_entry,
+        "xp_gain": int(xp_gain),
+        "tier": tier,
+        "hazard": bool(hazard),
+        "spot": str(state.get("spot") or "shore"),
+        "gear": gear.name,
+        "gear_label": gear.label,
+        "bait": bait.name if bait else "",
+        "bait_label": bait.label if bait else "",
+        "bonus_rewards": [[name, qty] for name, qty in bonus_rewards],
+        "seed": seed,
+        "turn": 0,
+        "turns_left": turns,
+        "control": 55 + min(20, _stat(player, "luck") + gear.tier * 3),
+        "quality_pct": 100,
+        "signal": _fight_signal(seed, 0),
+    }
+    _set_state(user_id, fight_state)
+    _send_fight_prompt(
+        player,
+        vk,
+        user_id,
+        fight_state,
+        intro="🎣 Резкая поклёвка. Похоже, на крючке что-то стоящее.",
+    )
+    return True
+
+
+def _finish_fishing_result(
+    player,
+    vk,
+    user_id: int,
+    *,
+    catch_name: str,
+    rewards: list[tuple[str, int]],
+    xp_gain: int,
+    spot: FishingSpot,
+    gear: FishingGear,
+    bait: FishingBait | None,
+    hazard: bool,
+    bonus_rewards: list[tuple[str, int]],
+    fish_entry: dict | None = None,
+    fight_note: str = "",
+) -> bool:
+    from handlers.keyboards import create_fishing_keyboard
+
+    rng = random.Random(int((fish_entry or {}).get("caught_at") or _now()) + 41)
+    reward_lines = []
+    if fish_entry:
+        locker_result = database.add_fish_to_locker_transaction(user_id, fish_entry, FISH_LOCKER_CAPACITY)
+        if locker_result.get("success"):
+            reward_lines.append(_format_fish_entry(fish_entry))
+        elif locker_result.get("full"):
+            reward_lines.append(
+                f"• {fish_entry.get('name', catch_name)} сорвалась: рыбный шкаф турбазы заполнен "
+                f"({FISH_LOCKER_CAPACITY}/{FISH_LOCKER_CAPACITY})."
+            )
+        else:
+            reward_lines.append(f"• {fish_entry.get('name', catch_name)} сорвалась: не удалось записать улов в БД.")
+
+    for item_name, qty in [*rewards, *bonus_rewards]:
+        if item_name in FISH_SPECIES_NAMES:
+            continue
+        if database.add_item_to_inventory(user_id, item_name, qty):
+            reward_lines.append(f"• {item_name} x{qty}")
+
+    hazard_line = ""
+    if hazard and spot.id == "anomaly":
+        rad_gain = rng.randint(3, 9)
+        player.radiation = max(0, int(getattr(player, "radiation", 0) or 0) + rad_gain)
+        database.update_user_stats(user_id, radiation=player.radiation)
+        hazard_line = f"\n\n⚠️ Заводь вспыхнула под водой: +{rad_gain} рад."
+    elif hazard:
+        energy_loss = rng.randint(2, 6)
+        player.energy = max(0, int(getattr(player, "energy", 0) or 0) - energy_loss)
+        database.update_user_stats(user_id, energy=player.energy)
+        hazard_line = f"\n\n⚠️ Снасть зацепилась в корягах: -{energy_loss}⚡."
+
+    gained_xp = int(player.add_experience(xp_gain)) if xp_gain > 0 else 0
+    _clear_state(user_id)
+    invalidate_player_cache(user_id)
+
+    result_text = (
+        f"🎣 Рыбалка завершена: {catch_name}.\n\n"
+        f"Снасть: {gear.label}.\n"
+        f"Наживка: {bait.label if bait else 'без наживки'}."
+    )
+    if fight_note:
+        result_text += f"\n{fight_note}"
+    result_text += "\n\nУлов:\n" + ("\n".join(reward_lines) if reward_lines else "• ничего полезного")
+    if gained_xp:
+        result_text += f"\n\nОпыт: +{gained_xp}."
+    result_text += hazard_line
+
+    vk.messages.send(
+        user_id=user_id,
+        message=result_text,
+        keyboard=create_fishing_keyboard(active=False).get_keyboard(),
+        random_id=0,
+    )
+    return True
 
 
 def _format_menu(player, active: bool = False) -> str:
@@ -286,15 +511,20 @@ def start_fishing(player, vk, user_id: int, spot_id: str):
     if bait:
         if not database.remove_item_from_inventory(user_id, bait.name, 1):
             bait = None
+    started_at = _now()
+    duration = FISHING_DURATION_SECONDS
+    seed = random.randint(1, 2_000_000_000)
     _set_state(user_id, {
-        "started_at": _now(),
-        "duration": FISHING_DURATION_SECONDS,
+        "started_at": started_at,
+        "duration": duration,
+        "early_checks": 0,
+        "last_check_at": 0,
         "spot": spot.id,
         "gear": gear.name,
         "gear_label": gear.label,
         "bait": bait.name if bait else "",
         "bait_label": bait.label if bait else "",
-        "seed": random.randint(1, 2_000_000_000),
+        "seed": seed,
     })
     vk.messages.send(
         user_id=user_id,
@@ -303,7 +533,7 @@ def start_fishing(player, vk, user_id: int, spot_id: str):
             f"Снасть: {gear.label}.\n"
             f"Наживка: {bait.label if bait else 'без наживки'}.\n"
             f"Потрачено: {spot.energy_cost}⚡.\n"
-            "Вода у турбазы тихая только сверху. Вернись через несколько минут и проверь улов."
+            "Вода у турбазы тихая только сверху. Можно проверять улов раньше, но ранняя поклёвка не гарантирована."
         ),
         keyboard=create_fishing_keyboard(active=True).get_keyboard(),
         random_id=0,
@@ -318,91 +548,94 @@ def check_fishing(player, vk, user_id: int):
     if not state:
         show_fishing_menu(player, vk, user_id)
         return True
+    if state.get("mode") == "fight":
+        _send_fight_prompt(player, vk, user_id, state)
+        return True
 
     now = _now()
     started = int(state.get("started_at", now) or now)
     duration = max(30, int(state.get("duration", FISHING_DURATION_SECONDS) or FISHING_DURATION_SECONDS))
-    remaining = started + duration - now
-    if remaining > 0:
-        vk.messages.send(
-            user_id=user_id,
-            message=f"🎣 Поплавок ещё ходит по воде.\nОсталось примерно: {max(1, remaining // 60)} мин. {remaining % 60} сек.",
-            keyboard=create_fishing_keyboard(active=True).get_keyboard(),
-            random_id=0,
-        )
-        return True
-
     spot = SPOTS.get(str(state.get("spot") or "shore"), SPOTS["shore"])
     gear_name = str(state.get("gear") or "")
     gear = next((row for row in GEAR if row.name == gear_name), FALLBACK_GEAR)
     bait_name = str(state.get("bait") or "")
     bait = next((row for row in BAITS if row.name == bait_name), None)
     seed = int(state.get("seed") or random.randint(1, 999999))
+    finish_at = started + duration
+    remaining = finish_at - now
+    early_bite_won = False
+    if remaining > 0:
+        elapsed = max(0, now - started)
+        last_check_at = int(state.get("last_check_at", 0) or 0)
+        checks_done = max(0, int(state.get("early_checks", 0) or 0))
+        if last_check_at and now - last_check_at < 20:
+            wait = 20 - (now - last_check_at)
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    "🎣 Ты только что дёргал снасть.\n"
+                    f"Подожди ещё {wait} сек. или дождись полного таймера: {remaining // 60} мин. {remaining % 60} сек."
+                ),
+                keyboard=create_fishing_keyboard(active=True).get_keyboard(),
+                random_id=0,
+            )
+            return True
+
+        early_success, chance = _roll_early_bite(elapsed, duration, player, gear, bait, seed, checks_done)
+        state["early_checks"] = checks_done + 1
+        state["last_check_at"] = now
+        _set_state(user_id, state)
+        if early_success:
+            early_bite_won = True
+            remaining = 0
+        else:
+            chance_text = f"Шанс ранней поклёвки был около {chance}%." if chance else "Слишком рано для нормальной поклёвки."
+            vk.messages.send(
+                user_id=user_id,
+                message=(
+                    "🎣 Ранней поклёвки нет.\n"
+                    f"{chance_text}\n"
+                    f"Гарантированная проверка через {remaining // 60} мин. {remaining % 60} сек."
+                ),
+                keyboard=create_fishing_keyboard(active=True).get_keyboard(),
+                random_id=0,
+            )
+            return True
+
     tier, hazard = _pick_tier(player, spot, seed, gear, bait)
     rng = random.Random(seed + 29)
 
-    reward_lines = []
     if tier == "junk":
         catch_name, rewards, xp_gain = rng.choice(JUNK_CATCHES["junk"])
+        fish_entry = None
     else:
         fish = rng.choice(_fish_candidates(tier, spot, bait))
         fish_entry = _roll_fish_entry(fish, spot, rng)
         catch_name = fish.name
-        rewards = [(fish.name, 1)]
+        rewards = []
         xp_gain = fish.xp
-        locker_result = database.add_fish_to_locker_transaction(user_id, fish_entry, FISH_LOCKER_CAPACITY)
-        if locker_result.get("success"):
-            reward_lines.append(_format_fish_entry(fish_entry))
-        elif locker_result.get("full"):
-            reward_lines.append(
-                f"• {fish.name} сорвалась: рыбный шкаф турбазы заполнен "
-                f"({FISH_LOCKER_CAPACITY}/{FISH_LOCKER_CAPACITY})."
-            )
-        else:
-            reward_lines.append(f"• {fish.name} сорвалась: не удалось записать улов в БД.")
 
     bonus_rewards = _roll_bonus_drops(spot, tier, rng, gear, bait)
+    if fish_entry and _should_start_fight(tier, early_bite_won, fish_entry, rng):
+        return _start_fishing_fight(
+            player, vk, user_id, state, fish_entry, xp_gain, tier, hazard,
+            bonus_rewards, gear, bait, seed, early_bite_won,
+        )
 
-    for item_name, qty in [*rewards, *bonus_rewards]:
-        if item_name in FISH_SPECIES_NAMES:
-            continue
-        if database.add_item_to_inventory(user_id, item_name, qty):
-            reward_lines.append(f"• {item_name} x{qty}")
-
-    hazard_line = ""
-    if hazard and spot.id == "anomaly":
-        rad_gain = rng.randint(3, 9)
-        player.radiation = max(0, int(getattr(player, "radiation", 0) or 0) + rad_gain)
-        database.update_user_stats(user_id, radiation=player.radiation)
-        hazard_line = f"\n\n⚠️ Заводь вспыхнула под водой: +{rad_gain} рад."
-    elif hazard:
-        energy_loss = rng.randint(2, 6)
-        player.energy = max(0, int(getattr(player, "energy", 0) or 0) - energy_loss)
-        database.update_user_stats(user_id, energy=player.energy)
-        hazard_line = f"\n\n⚠️ Снасть зацепилась в корягах: -{energy_loss}⚡."
-
-    gained_xp = int(player.add_experience(xp_gain)) if xp_gain > 0 else 0
-    _clear_state(user_id)
-    invalidate_player_cache(user_id)
-
-    result_text = (
-        f"🎣 Рыбалка завершена: {catch_name}.\n\n"
-        f"Снасть: {gear.label}.\n"
-        f"Наживка: {bait.label if bait else 'без наживки'}.\n\n"
-        "Улов:\n"
-        + ("\n".join(reward_lines) if reward_lines else "• ничего полезного")
+    return _finish_fishing_result(
+        player,
+        vk,
+        user_id,
+        catch_name=catch_name,
+        rewards=rewards,
+        xp_gain=xp_gain,
+        spot=spot,
+        gear=gear,
+        bait=bait,
+        hazard=hazard,
+        bonus_rewards=bonus_rewards,
+        fish_entry=fish_entry,
     )
-    if gained_xp:
-        result_text += f"\n\nОпыт: +{gained_xp}."
-    result_text += hazard_line
-
-    vk.messages.send(
-        user_id=user_id,
-        message=result_text,
-        keyboard=create_fishing_keyboard(active=False).get_keyboard(),
-        random_id=0,
-    )
-    return True
 
 
 def cancel_fishing(player, vk, user_id: int):
@@ -420,6 +653,87 @@ def cancel_fishing(player, vk, user_id: int):
         random_id=0,
     )
     return True
+
+
+def handle_fishing_fight_action(player, vk, user_id: int, action: str) -> bool:
+    state = _get_state(user_id)
+    if not state or state.get("mode") != "fight":
+        return False
+
+    normalized = (action or "").strip().lower()
+    action_map = {
+        "тянуть": "pull",
+        "держать": "hold",
+        "отпустить": "release",
+        "ослабить": "release",
+        "подсечь": "strike",
+    }
+    move = action_map.get(normalized)
+    if not move:
+        return False
+
+    spot = SPOTS.get(str(state.get("spot") or "shore"), SPOTS["shore"])
+    gear_name = str(state.get("gear") or "")
+    gear = next((row for row in GEAR if row.name == gear_name), FALLBACK_GEAR)
+    bait_name = str(state.get("bait") or "")
+    bait = next((row for row in BAITS if row.name == bait_name), None)
+    signal = str(state.get("signal") or "tremble")
+    correct = {
+        "jerk": "release",
+        "bottom": "hold",
+        "tremble": "pull",
+    }.get(signal) == move
+
+    control = max(0, min(100, int(state.get("control", 50) or 50)))
+    quality = max(65, min(125, int(state.get("quality_pct", 100) or 100)))
+    if move == "strike":
+        correct = control >= 55 or signal == "tremble"
+        quality += 8 if correct else -18
+        turns_left = 0
+        note = "Подсечка вышла чисто." if correct else "Подсечка вышла грубо, рыба побилась о снасть."
+    else:
+        turns_left = max(0, int(state.get("turns_left", 1) or 1) - 1)
+        if correct:
+            control += 10 + min(6, _stat(player, "luck"))
+            quality += 6
+            note = "Ты поймал ритм рыбы."
+        else:
+            control -= 18
+            quality -= 12
+            note = "Рыба сбила натяжение, часть веса ушла в борьбу."
+
+    state["control"] = max(0, min(100, control))
+    state["quality_pct"] = max(65, min(125, quality))
+    state["turns_left"] = turns_left
+    state["turn"] = int(state.get("turn", 0) or 0) + 1
+    state["signal"] = _fight_signal(int(state.get("seed", 0) or 0), int(state["turn"]))
+
+    if turns_left > 0 and state["control"] > 0:
+        _set_state(user_id, state)
+        _send_fight_prompt(player, vk, user_id, state, intro=f"🎣 {note}")
+        return True
+
+    fish_entry = _adjust_fish_entry(dict(state.get("fish_entry") or {}), int(state["quality_pct"]))
+    final_note = f"Вываживание: {note} Качество улова {int(state['quality_pct'])}%."
+    if state["control"] <= 0:
+        final_note = "Вываживание: рыба почти сорвалась, но ты вытащил её на берег. Качество улова 65%."
+        fish_entry = _adjust_fish_entry(dict(state.get("fish_entry") or {}), 65)
+
+    return _finish_fishing_result(
+        player,
+        vk,
+        user_id,
+        catch_name=str(fish_entry.get("name") or "рыба"),
+        rewards=[],
+        xp_gain=int(state.get("xp_gain", 0) or 0),
+        spot=spot,
+        gear=gear,
+        bait=bait,
+        hazard=bool(state.get("hazard")),
+        bonus_rewards=[(str(name), int(qty)) for name, qty in state.get("bonus_rewards", [])],
+        fish_entry=fish_entry,
+        fight_note=final_note,
+    )
 
 
 def show_cooking_menu(player, vk, user_id: int):
@@ -698,6 +1012,8 @@ def handle_fishing_command(player, vk, user_id: int, text: str) -> bool:
     if normalized in {"рыбачить", "рыбалка", "озеро"}:
         show_fishing_menu(player, vk, user_id)
         return True
+    if normalized in {"тянуть", "держать", "отпустить", "ослабить", "подсечь"}:
+        return handle_fishing_fight_action(player, vk, user_id, normalized)
     if normalized in {"проверить улов", "проверить рыбалку", "проверить", "улов"}:
         return check_fishing(player, vk, user_id)
     if normalized in {"отменить рыбалку", "отмена рыбалки", "смотать снасть", "отмена", "стоп"}:

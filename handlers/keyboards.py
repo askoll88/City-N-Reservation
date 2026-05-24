@@ -234,6 +234,8 @@ def create_location_keyboard(location_id: str, player_level: int = None):
             keyboard.add_button("Зараженный лес", color=VkKeyboardColor.NEGATIVE)
             keyboard.add_line()
             keyboard.add_button("Заимка лесника", color=VkKeyboardColor.PRIMARY)
+        elif location_id == "зараженный_лес":
+            keyboard.add_button("Турбаза Лучик", color=VkKeyboardColor.PRIMARY)
         elif location_id in ROAD_TO_INNER_LOCATION:
             label, color = ROAD_TO_INNER_LOCATION[location_id]
             keyboard.add_button(label, color=color)
@@ -520,6 +522,19 @@ def create_fishing_keyboard(active: bool = False):
         keyboard.add_line()
         keyboard.add_button("Аномальная заводь", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_button("Турбаза Лучик", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    _add_meta_row(keyboard)
+    return keyboard
+
+
+def create_fishing_fight_keyboard():
+    """Клавиатура короткого вываживания рыбы."""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("Тянуть", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Держать", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_line()
+    keyboard.add_button("Отпустить", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Подсечь", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
     _add_meta_row(keyboard)
     return keyboard

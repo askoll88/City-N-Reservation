@@ -31,6 +31,7 @@ from .service import (
     cook_recipe,
     buy_luchik_shop_item,
     handle_fishing_command,
+    handle_fishing_fight_action,
     handle_tourbase_command,
     sell_luchik_fish,
     show_cooking_menu,

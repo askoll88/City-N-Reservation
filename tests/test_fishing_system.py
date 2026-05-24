@@ -15,6 +15,7 @@ from game.fishing import (
     complete_luchik_order,
     cook_recipe,
     buy_luchik_shop_item,
+    handle_fishing_fight_action,
     sell_luchik_fish,
     show_fish_locker,
     start_fishing,
@@ -83,6 +84,8 @@ class FishingSystemTest(unittest.TestCase):
         update_stats.assert_called_once_with(777, energy=player.energy)
         self.assertEqual(set_state.call_args.args[2]["spot"], "deep")
         self.assertEqual(set_state.call_args.args[2]["gear_label"], "Леска с крючком")
+        self.assertEqual(set_state.call_args.args[2]["early_checks"], 0)
+        self.assertEqual(set_state.call_args.args[2]["last_check_at"], 0)
         remove_item.assert_not_called()
         self.assertIn("Глубокий заброс", vk.messages.sent[-1]["message"])
 
@@ -145,6 +148,7 @@ class FishingSystemTest(unittest.TestCase):
         }
 
         with patch("game.fishing.service.database.get_runtime_state", return_value=state), \
+             patch("game.fishing.service._should_start_fight", return_value=False), \
              patch("game.fishing.service.database.add_item_to_inventory", return_value=True) as add_item, \
              patch("game.fishing.service.database.add_fish_to_locker_transaction", return_value={"success": True}) as add_fish, \
              patch("game.fishing.service.database.clear_runtime_state") as clear_state, \
@@ -156,6 +160,114 @@ class FishingSystemTest(unittest.TestCase):
         self.assertTrue(add_fish.called)
         clear_state.assert_called_once_with(777, "fishing_state")
         self.assertIn("Рыбалка завершена", vk.messages.sent[-1]["message"])
+
+    def test_check_fishing_starts_fight_on_early_bite_roll(self):
+        player = DummyPlayer()
+        vk = DummyVk()
+        now = int(time.time())
+        state = {
+            "started_at": now - 60,
+            "duration": FISHING_DURATION_SECONDS,
+            "early_checks": 0,
+            "last_check_at": 0,
+            "spot": "shore",
+            "gear": "Старая удочка",
+            "bait": "Черви",
+            "seed": 12345,
+        }
+
+        with patch("game.fishing.service.database.get_runtime_state", return_value=state), \
+             patch("game.fishing.service._roll_early_bite", return_value=(True, 42)) as roll_bite, \
+             patch("game.fishing.service.database.set_runtime_state") as set_state, \
+             patch("game.fishing.service.database.add_item_to_inventory", return_value=True) as add_item, \
+             patch("game.fishing.service.database.add_fish_to_locker_transaction", return_value={"success": True}) as add_fish, \
+             patch("game.fishing.service.database.clear_runtime_state") as clear_state:
+            handled = check_fishing(player, vk, 777)
+
+        self.assertTrue(handled)
+        roll_bite.assert_called_once()
+        self.assertEqual(set_state.call_args.args[2]["mode"], "fight")
+        self.assertFalse(add_item.called)
+        self.assertFalse(add_fish.called)
+        clear_state.assert_not_called()
+        self.assertIn("Резкая поклёвка", vk.messages.sent[-1]["message"])
+
+    def test_fishing_fight_action_finishes_with_adjusted_fish(self):
+        player = DummyPlayer()
+        vk = DummyVk()
+        state = {
+            "mode": "fight",
+            "fish_entry": {
+                "name": "Тяжелый карп",
+                "tier": "uncommon",
+                "weight_kg": 2.0,
+                "price_per_kg": 100,
+                "value": 200,
+                "spot": "deep",
+                "caught_at": int(time.time()),
+            },
+            "xp_gain": 100,
+            "tier": "uncommon",
+            "hazard": False,
+            "spot": "deep",
+            "gear": "Старая удочка",
+            "gear_label": "Старая удочка",
+            "bait": "",
+            "bait_label": "",
+            "bonus_rewards": [],
+            "seed": 12345,
+            "turn": 0,
+            "turns_left": 1,
+            "control": 70,
+            "quality_pct": 100,
+            "signal": "tremble",
+        }
+
+        with patch("game.fishing.service.database.get_runtime_state", return_value=state), \
+             patch("game.fishing.service.database.add_item_to_inventory", return_value=True), \
+             patch("game.fishing.service.database.add_fish_to_locker_transaction", return_value={"success": True}) as add_fish, \
+             patch("game.fishing.service.database.clear_runtime_state") as clear_state, \
+             patch("game.fishing.service.invalidate_player_cache"):
+            handled = handle_fishing_fight_action(player, vk, 777, "Тянуть")
+
+        self.assertTrue(handled)
+        fish_entry = add_fish.call_args.args[1]
+        self.assertEqual(fish_entry["fight_quality"], 106)
+        self.assertGreater(fish_entry["value"], 200)
+        clear_state.assert_called_once_with(777, "fishing_state")
+        self.assertIn("Вываживание", vk.messages.sent[-1]["message"])
+
+    def test_check_fishing_reports_missed_early_bite_roll(self):
+        player = DummyPlayer()
+        vk = DummyVk()
+        now = int(time.time())
+        state = {
+            "started_at": now - 60,
+            "duration": FISHING_DURATION_SECONDS,
+            "early_checks": 2,
+            "last_check_at": 0,
+            "spot": "shore",
+            "gear": "Старая удочка",
+            "bait": "Черви",
+            "seed": 12345,
+        }
+
+        with patch("game.fishing.service.database.get_runtime_state", return_value=state), \
+             patch("game.fishing.service._roll_early_bite", return_value=(False, 37)) as roll_bite, \
+             patch("game.fishing.service.database.set_runtime_state") as set_state, \
+             patch("game.fishing.service.database.add_item_to_inventory") as add_item, \
+             patch("game.fishing.service.database.add_fish_to_locker_transaction") as add_fish, \
+             patch("game.fishing.service.database.clear_runtime_state") as clear_state:
+            handled = check_fishing(player, vk, 777)
+
+        self.assertTrue(handled)
+        roll_bite.assert_called_once()
+        self.assertEqual(set_state.call_args.args[2]["early_checks"], 3)
+        add_item.assert_not_called()
+        add_fish.assert_not_called()
+        clear_state.assert_not_called()
+        self.assertIn("Ранней поклёвки нет", vk.messages.sent[-1]["message"])
+        self.assertIn("37%", vk.messages.sent[-1]["message"])
 
     def test_fish_entry_has_weight_and_value_in_range(self):
         fish = next(row for row in FISH_SPECIES if row.name == "Тяжелый карп")
@@ -282,6 +394,7 @@ class FishingSystemTest(unittest.TestCase):
             "seed": 12345,
         }
         with patch("game.fishing.service.database.get_runtime_state", return_value=state), \
+             patch("game.fishing.service._should_start_fight", return_value=False), \
              patch("game.fishing.service.database.add_item_to_inventory", return_value=True), \
              patch("game.fishing.service.database.add_fish_to_locker_transaction", return_value={"success": False, "full": True}), \
              patch("game.fishing.service.database.clear_runtime_state"), \
