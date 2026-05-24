@@ -7,11 +7,13 @@ from game.fishing import (
     FISHING_DURATION_SECONDS,
     FISH_LOCKER_CAPACITY,
     FISH_SPECIES,
+    GEAR,
     LAKE_LOCATION,
     LUCHIK_PROTECTED_UPGRADE_ITEMS,
     LUCHIK_ROD_UPGRADES,
     SPOTS,
     _roll_fish_entry,
+    _resolve_fight_action,
     _select_gear,
     check_fishing,
     complete_luchik_order,
@@ -234,10 +236,30 @@ class FishingSystemTest(unittest.TestCase):
 
         self.assertTrue(handled)
         fish_entry = add_fish.call_args.args[1]
-        self.assertEqual(fish_entry["fight_quality"], 106)
-        self.assertGreater(fish_entry["value"], 200)
+        self.assertIn("fight_quality", fish_entry)
+        self.assertGreaterEqual(fish_entry["fight_quality"], 65)
+        self.assertLessEqual(fish_entry["fight_quality"], 125)
         clear_state.assert_called_once_with(777, "fishing_state")
         self.assertIn("Вываживание", vk.messages.sent[-1]["message"])
+
+    def test_fishing_fight_actions_are_risk_based_not_fixed_answers(self):
+        player = DummyPlayer()
+        gear = next(row for row in GEAR if row.name == "Старая удочка")
+        base_state = {
+            "seed": 12345,
+            "turn": 0,
+            "control": 70,
+            "quality_pct": 100,
+        }
+
+        pull = _resolve_fight_action(player, dict(base_state), "pull", "tremble", gear)
+        release = _resolve_fight_action(player, dict(base_state), "release", "jerk", gear)
+
+        self.assertGreaterEqual(pull["risk"], 5)
+        self.assertLessEqual(pull["risk"], 85)
+        self.assertGreaterEqual(release["risk"], 5)
+        self.assertLessEqual(release["risk"], 85)
+        self.assertNotEqual(pull["risk"], release["risk"])
 
     def test_check_fishing_reports_missed_early_bite_roll(self):
         player = DummyPlayer()

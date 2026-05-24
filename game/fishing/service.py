@@ -282,9 +282,9 @@ def _format_fight_signal(signal: str, perception: int) -> str:
         "tremble": "По леске идёт короткая дрожь.",
     }
     hints = {
-        "jerk": "Лучше дать леске немного свободы.",
-        "bottom": "Сейчас важнее держать натяжение.",
-        "tremble": "Момент удобный, можно тянуть.",
+        "jerk": "Риск срыва высокий, быстрые действия опаснее обычного.",
+        "bottom": "Рыба тяжёлая, ошибка сильнее бьёт по качеству.",
+        "tremble": "Окно стабильнее обычного, но рыба ещё может обмануть.",
     }
     text = descriptions.get(signal, descriptions["tremble"])
     if perception >= 7:
@@ -308,6 +308,80 @@ def _should_start_fight(tier: str, early_success: bool, fish_entry: dict, rng: r
     if tier == "uncommon" and rng.randint(1, 100) <= 35:
         return True
     return int(fish_entry.get("value", 0) or 0) >= 350 and rng.randint(1, 100) <= 50
+
+
+def _fight_action_profile(move: str) -> dict:
+    return {
+        "pull": {"control": -6, "quality": 8, "progress": 1, "risk": 20},
+        "hold": {"control": 9, "quality": 2, "progress": 1, "risk": 12},
+        "release": {"control": 15, "quality": -5, "progress": 0, "risk": 8},
+        "strike": {"control": -12, "quality": 14, "progress": 99, "risk": 34},
+    }.get(move, {"control": 0, "quality": 0, "progress": 1, "risk": 20})
+
+
+def _fight_signal_pressure(signal: str, move: str) -> dict:
+    pressure = {
+        "jerk": {
+            "pull": {"risk": 22, "control": -12, "quality": -5},
+            "hold": {"risk": 8, "control": -2, "quality": 1},
+            "release": {"risk": -10, "control": 8, "quality": -3},
+            "strike": {"risk": 26, "control": -16, "quality": -10},
+        },
+        "bottom": {
+            "pull": {"risk": 8, "control": -4, "quality": 4},
+            "hold": {"risk": -6, "control": 7, "quality": 2},
+            "release": {"risk": 4, "control": 3, "quality": -8},
+            "strike": {"risk": 12, "control": -10, "quality": -4},
+        },
+        "tremble": {
+            "pull": {"risk": -4, "control": -1, "quality": 5},
+            "hold": {"risk": -2, "control": 4, "quality": 0},
+            "release": {"risk": 8, "control": 5, "quality": -7},
+            "strike": {"risk": 2, "control": -6, "quality": 7},
+        },
+    }
+    return pressure.get(signal, {}).get(move, {"risk": 0, "control": 0, "quality": 0})
+
+
+def _resolve_fight_action(
+    player,
+    state: dict,
+    move: str,
+    signal: str,
+    gear: FishingGear,
+) -> dict:
+    profile = _fight_action_profile(move)
+    pressure = _fight_signal_pressure(signal, move)
+    control = max(0, min(100, int(state.get("control", 50) or 50)))
+    quality = max(65, min(125, int(state.get("quality_pct", 100) or 100)))
+    seed = int(state.get("seed", 0) or 0)
+    turn = int(state.get("turn", 0) or 0)
+    rng = random.Random(seed + turn * 104729 + len(move) * 97)
+
+    risk = int(profile["risk"]) + int(pressure["risk"])
+    risk += max(0, 45 - control) // 2
+    risk -= min(14, _stat(player, "luck") + gear.tier * 2)
+    risk = max(5, min(85, risk))
+
+    stumble = rng.randint(1, 100) <= risk
+    swing = rng.randint(-4, 4)
+    if stumble:
+        control_delta = int(profile["control"]) + int(pressure["control"]) - rng.randint(8, 18)
+        quality_delta = int(profile["quality"]) + int(pressure["quality"]) - rng.randint(6, 16)
+        note = "Рыба сбила темп: решение не провалилось полностью, но улов потерял качество."
+    else:
+        control_delta = int(profile["control"]) + int(pressure["control"]) + rng.randint(0, 8)
+        quality_delta = int(profile["quality"]) + int(pressure["quality"]) + swing
+        note = "Ты удержал ситуацию, но рыба всё ещё сопротивляется."
+
+    return {
+        "control": max(0, min(100, control + control_delta)),
+        "quality": max(65, min(125, quality + quality_delta)),
+        "progress": int(profile["progress"]),
+        "risk": risk,
+        "stumble": stumble,
+        "note": note,
+    }
 
 
 def _send_fight_prompt(player, vk, user_id: int, state: dict, intro: str | None = None):
@@ -683,43 +757,22 @@ def handle_fishing_fight_action(player, vk, user_id: int, action: str) -> bool:
     bait_name = str(state.get("bait") or "")
     bait = next((row for row in BAITS if row.name == bait_name), None)
     signal = str(state.get("signal") or "tremble")
-    correct = {
-        "jerk": "release",
-        "bottom": "hold",
-        "tremble": "pull",
-    }.get(signal) == move
+    outcome = _resolve_fight_action(player, state, move, signal, gear)
+    turns_left = max(0, int(state.get("turns_left", 1) or 1) - int(outcome["progress"]))
 
-    control = max(0, min(100, int(state.get("control", 50) or 50)))
-    quality = max(65, min(125, int(state.get("quality_pct", 100) or 100)))
-    if move == "strike":
-        correct = control >= 55 or signal == "tremble"
-        quality += 8 if correct else -18
-        turns_left = 0
-        note = "Подсечка вышла чисто." if correct else "Подсечка вышла грубо, рыба побилась о снасть."
-    else:
-        turns_left = max(0, int(state.get("turns_left", 1) or 1) - 1)
-        if correct:
-            control += 10 + min(6, _stat(player, "luck"))
-            quality += 6
-            note = "Ты поймал ритм рыбы."
-        else:
-            control -= 18
-            quality -= 12
-            note = "Рыба сбила натяжение, часть веса ушла в борьбу."
-
-    state["control"] = max(0, min(100, control))
-    state["quality_pct"] = max(65, min(125, quality))
+    state["control"] = outcome["control"]
+    state["quality_pct"] = outcome["quality"]
     state["turns_left"] = turns_left
     state["turn"] = int(state.get("turn", 0) or 0) + 1
     state["signal"] = _fight_signal(int(state.get("seed", 0) or 0), int(state["turn"]))
 
     if turns_left > 0 and state["control"] > 0:
         _set_state(user_id, state)
-        _send_fight_prompt(player, vk, user_id, state, intro=f"🎣 {note}")
+        _send_fight_prompt(player, vk, user_id, state, intro=f"🎣 {outcome['note']} Риск хода был около {outcome['risk']}%.")
         return True
 
     fish_entry = _adjust_fish_entry(dict(state.get("fish_entry") or {}), int(state["quality_pct"]))
-    final_note = f"Вываживание: {note} Качество улова {int(state['quality_pct'])}%."
+    final_note = f"Вываживание: {outcome['note']} Качество улова {int(state['quality_pct'])}%."
     if state["control"] <= 0:
         final_note = "Вываживание: рыба почти сорвалась, но ты вытащил её на берег. Качество улова 65%."
         fish_entry = _adjust_fish_entry(dict(state.get("fish_entry") or {}), 65)

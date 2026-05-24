@@ -45,6 +45,7 @@ from .service import (
     _fish_candidates,
     _format_fish_entry,
     _pick_tier,
+    _resolve_fight_action,
     _roll_bonus_drops,
     _roll_fish_entry,
     _select_bait,
