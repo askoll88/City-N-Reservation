@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from handlers.keyboards import create_status_keyboard
 from handlers.status import STATUS_PAGES, format_status_page
+from models.player import format_radiation_state, get_radiation_stage
 
 
 class DummyInventory:
@@ -85,6 +86,12 @@ class DummyPlayer:
 
 
 class StatusScreenTest(unittest.TestCase):
+    def test_radiation_stage_zero_is_background_level(self):
+        self.assertEqual(get_radiation_stage(0)["name"], "0. Фоновый уровень")
+        self.assertEqual(get_radiation_stage(29)["name"], "0. Фоновый уровень")
+        self.assertEqual(get_radiation_stage(30)["name"], "I. Лёгкое облучение")
+        self.assertIn("0. Фоновый уровень", format_radiation_state(0))
+
     def test_status_keyboard_uses_callback_pagination(self):
         keyboard = create_status_keyboard(page=0, total_pages=len(STATUS_PAGES)).get_keyboard()
         buttons = json.loads(keyboard)["buttons"][0]
