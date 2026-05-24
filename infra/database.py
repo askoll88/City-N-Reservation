@@ -30,6 +30,7 @@ from game.weapon_progression import (
     clamp_weapon_level,
     get_rank_ascension_limit,
     get_rank_weapon_level_cap,
+    get_required_rank_for_ascension,
     get_weapon_cap,
     get_event_weapon_bonus,
     get_weapon_required_level,
@@ -2854,11 +2855,18 @@ def ascend_weapon_transaction(vk_id: int, item_name: str) -> dict:
         rank_limit = get_rank_ascension_limit(int(user.get("rank_tier", 1) or 1))
         next_ascension = ascension + 1
         if next_ascension > rank_limit:
+            required_rank = get_required_rank_for_ascension(next_ascension)
+            required_text = (
+                f"\nСледующий прорыв {next_ascension}/10 откроется с ранга {required_rank}/24."
+                if required_rank
+                else ""
+            )
             return {
                 "success": False,
                 "message": (
                     f"Следующий прорыв закрыт рангом.\n"
                     f"Доступно по рангу: прорыв {rank_limit}/10."
+                    f"{required_text}"
                 ),
             }
 

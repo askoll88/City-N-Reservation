@@ -10,6 +10,7 @@ from game.weapon_progression import (
     get_event_weapon_bonus,
     get_rank_ascension_limit,
     get_rank_weapon_level_cap,
+    get_required_rank_for_ascension,
     get_weapon_cap,
     weapon_level_from_total_xp,
     weapon_total_xp_for_level,
@@ -30,6 +31,11 @@ class WeaponProgressionSystemTest(unittest.TestCase):
         self.assertEqual(get_rank_weapon_level_cap(19), 250)
         self.assertEqual(get_rank_ascension_limit(24), 10)
         self.assertEqual(get_rank_weapon_level_cap(24), 297)
+
+    def test_required_rank_for_ascension_matches_unlock_table(self):
+        self.assertEqual(get_required_rank_for_ascension(1), 2)
+        self.assertEqual(get_required_rank_for_ascension(4), 8)
+        self.assertEqual(get_required_rank_for_ascension(10), 24)
 
     def test_weapon_xp_level_conversion_respects_cap(self):
         total = weapon_total_xp_for_level(40)

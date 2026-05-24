@@ -165,6 +165,15 @@ def get_rank_ascension_limit(rank_tier: int | None) -> int:
     return result
 
 
+def get_required_rank_for_ascension(ascension: int | None) -> int | None:
+    """Минимальный ранг игрока для указанного прорыва оружия."""
+    target = normalize_weapon_ascension(ascension)
+    for required_tier, unlocked_ascension in RANK_ASCENSION_LIMITS:
+        if unlocked_ascension >= target:
+            return required_tier
+    return None
+
+
 def get_rank_weapon_level_cap(rank_tier: int | None) -> int:
     return get_weapon_cap(get_rank_ascension_limit(rank_tier))
 
