@@ -426,6 +426,45 @@ class InventorySectionsTest(unittest.TestCase):
             {"name": "Бусы", "quantity": 1, "weight": 0.5},
         ))
 
+    def test_sell_filter_allows_fishing_upgrade_materials_in_showcase(self):
+        self.assertTrue(self.inventory_module._is_sellable_shop_item(
+            self.player,
+            {"name": "Аномальная чешуя", "quantity": 3, "weight": 0.05},
+        ))
+        self.assertTrue(self.inventory_module._is_sellable_shop_item(
+            self.player,
+            {"name": "Затонувший контейнер", "quantity": 1, "weight": 0.4},
+        ))
+        self.assertTrue(self.inventory_module._is_sellable_shop_item(
+            self.player,
+            {"name": "Старая удочка", "quantity": 1, "weight": 1.2},
+        ))
+
+    def test_sell_fishing_upgrade_material_requires_confirmation(self):
+        self.player.sell_item = Mock(return_value=(True, "Продано"))
+
+        with patch.object(self.inventory_module.database, "get_runtime_state", return_value={}), \
+             patch.object(self.inventory_module.database, "set_runtime_state") as set_state:
+            self.inventory_module.handle_sell_item(self.player, "Аномальная чешуя", self.vk, user_id=1)
+
+        self.player.sell_item.assert_not_called()
+        set_state.assert_called()
+        self.assertIn("подтвердить продажу", self.vk.messages.sent[-1]["message"])
+
+    def test_confirm_sell_sells_pending_fishing_upgrade_material(self):
+        self.player.sell_item = Mock(return_value=(True, "Ты продал Аномальная чешуя за 170 руб."))
+
+        with patch.object(self.inventory_module.database, "get_runtime_state", return_value={
+            "item_name": "Аномальная чешуя",
+            "expires_at": 9999999999,
+        }), \
+             patch.object(self.inventory_module.database, "set_runtime_state"):
+            handled = self.inventory_module.handle_confirm_sell(self.player, self.vk, user_id=1)
+
+        self.assertTrue(handled)
+        self.player.sell_item.assert_called_once_with("Аномальная чешуя", merchant_id=None)
+        self.assertIn("Ты продал", self.vk.messages.sent[-1]["message"])
+
     def test_sell_artifacts_shows_inventory_duplicate_of_equipped_artifact(self):
         self.player.equipped_artifacts = ["Кристалл", "Кристальная колючка", "Бусы"]
         self.player.inventory.artifacts = [

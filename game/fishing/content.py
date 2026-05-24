@@ -216,6 +216,17 @@ LUCHIK_ROD_UPGRADES = {
     },
 }
 
+LUCHIK_PROTECTED_UPGRADE_ITEMS = frozenset(
+    {
+        "Старая удочка",
+        "Складная удочка",
+        "Армированная удочка",
+        "Изолированная удочка",
+        "Резонансная удочка",
+        *(name for upgrade in LUCHIK_ROD_UPGRADES.values() for name, _ in upgrade["requires"]),
+    }
+)
+
 
 JUNK_CATCHES = {
     "junk": [

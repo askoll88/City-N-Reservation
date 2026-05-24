@@ -469,6 +469,7 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
         handle_inspect_item,
         handle_equip_artifact,
         handle_unequip_backpack, handle_drop_item, handle_drop_item_by_index, handle_confirm_drop,
+        handle_confirm_sell,
         handle_sell_item_by_number,
         show_weapons, show_armor, show_backpacks,
         show_artifacts, show_other, show_resources_shop,
@@ -482,6 +483,8 @@ def _handle_item_commands(player, vk, user_id: int, text: str) -> bool:
 
     if text in {"подтвердить выброс", "подтвердить выбрасывание"}:
         return handle_confirm_drop(player, vk, user_id)
+    if text in {"подтвердить продажу", "подтвердить продать"}:
+        return handle_confirm_sell(player, vk, user_id)
 
     if current_ui.get("name") == "shop" and text.isdigit():
         shop_view = str(current_ui.get("view") or "").strip().lower()

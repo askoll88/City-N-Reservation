@@ -17,6 +17,8 @@ from handlers.keyboards import create_inventory_hud_keyboard, create_inventory_k
 INVENTORY_PAGE_SIZE = 10
 LEGENDARY_DROP_CONFIRM_TTL_SEC = 90
 LEGENDARY_DROP_STATE_KEY = "legendary_drop_confirm"
+PROTECTED_SELL_CONFIRM_TTL_SEC = 90
+PROTECTED_SELL_STATE_KEY = "protected_sell_confirm"
 
 
 def _fmt_weight(item: dict, default: float = 1.0) -> str:
@@ -89,6 +91,67 @@ def _require_legendary_drop_confirmation(item: dict, vk, user_id: int, keyboard)
             "Подтверждение действует 90 секунд."
         ),
         keyboard=keyboard,
+        random_id=0,
+    )
+    return True
+
+
+def _clear_protected_sell_confirmation(user_id: int) -> None:
+    try:
+        database.set_runtime_state(user_id, PROTECTED_SELL_STATE_KEY, {})
+    except Exception:
+        pass
+
+
+def _protected_sell_confirmation_matches(user_id: int, item_name: str) -> bool:
+    try:
+        state = database.get_runtime_state(user_id, PROTECTED_SELL_STATE_KEY) or {}
+    except Exception:
+        return False
+    if not isinstance(state, dict):
+        return False
+    if str(state.get("item_name") or "").lower() != str(item_name or "").lower():
+        return False
+    expires_at = int(state.get("expires_at") or 0)
+    return expires_at >= int(time.time())
+
+
+def _is_luchik_upgrade_item(item_name: str) -> bool:
+    try:
+        from game.fishing.content import LUCHIK_PROTECTED_UPGRADE_ITEMS
+        return str(item_name or "").strip() in LUCHIK_PROTECTED_UPGRADE_ITEMS
+    except Exception:
+        return False
+
+
+def _require_protected_sell_confirmation(item_name: str, vk, user_id: int) -> bool:
+    """Вернуть True, если продажу нужно остановить до подтверждения."""
+    if not _is_luchik_upgrade_item(item_name):
+        _clear_protected_sell_confirmation(user_id)
+        return False
+    if _protected_sell_confirmation_matches(user_id, item_name):
+        _clear_protected_sell_confirmation(user_id)
+        return False
+
+    expires_at = int(time.time()) + PROTECTED_SELL_CONFIRM_TTL_SEC
+    try:
+        database.set_runtime_state(
+            user_id,
+            PROTECTED_SELL_STATE_KEY,
+            {"item_name": item_name, "expires_at": expires_at},
+        )
+    except Exception:
+        pass
+    vk.messages.send(
+        user_id=user_id,
+        message=(
+            "⚠️ Этот предмет нужен для апгрейда удочек у Лучика.\n\n"
+            f"Предмет: {item_name}\n"
+            "Продать его можно, но только после подтверждения.\n\n"
+            "Напиши: подтвердить продажу\n"
+            f"Или повтори: продать {item_name}\n\n"
+            "Подтверждение действует 90 секунд."
+        ),
         random_id=0,
     )
     return True
@@ -1258,6 +1321,8 @@ def handle_sell_item(player, item_name: str, vk, user_id: int):
             merchant_id = database.NPC_MERCHANT_SOLDIER
         elif player.current_location_id == 'черный рынок':
             merchant_id = database.NPC_MERCHANT_TRADER
+    if _require_protected_sell_confirmation(item_name, vk, user_id):
+        return
     success, msg = player.sell_item(item_name, merchant_id=merchant_id)
     if success:
         track_quest_shop_sell(user_id, vk=vk)
@@ -1265,6 +1330,23 @@ def handle_sell_item(player, item_name: str, vk, user_id: int):
     vk.messages.send(user_id=user_id, message=f"{msg}{context}", random_id=0)
     if success and shop_data.get("sell_all"):
         show_trader_sell_all(player, vk, user_id, page=int(shop_data.get("page", 0) or 0))
+
+
+def handle_confirm_sell(player, vk, user_id: int) -> bool:
+    """Подтвердить продажу защищённого предмета для апгрейда удочек."""
+    try:
+        state = database.get_runtime_state(user_id, PROTECTED_SELL_STATE_KEY) or {}
+    except Exception:
+        state = {}
+    if not isinstance(state, dict) or not state.get("item_name"):
+        vk.messages.send(user_id=user_id, message="Нет продажи, ожидающей подтверждения.", random_id=0)
+        return True
+    if int(state.get("expires_at") or 0) < int(time.time()):
+        _clear_protected_sell_confirmation(user_id)
+        vk.messages.send(user_id=user_id, message="Подтверждение продажи истекло. Повтори продажу.", random_id=0)
+        return True
+    handle_sell_item(player, str(state["item_name"]), vk, user_id)
+    return True
 
 
 def handle_sell_all_trash(player, vk, user_id: int):

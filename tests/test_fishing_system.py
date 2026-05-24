@@ -8,6 +8,7 @@ from game.fishing import (
     FISH_LOCKER_CAPACITY,
     FISH_SPECIES,
     LAKE_LOCATION,
+    LUCHIK_PROTECTED_UPGRADE_ITEMS,
     LUCHIK_ROD_UPGRADES,
     SPOTS,
     _roll_fish_entry,
@@ -467,6 +468,12 @@ class FishingSystemTest(unittest.TestCase):
         self.assertEqual(requirements["Изолированная удочка"], 1)
         self.assertGreaterEqual(requirements["Аномальная чешуя"], 8)
         self.assertGreaterEqual(requirements["Затонувший контейнер"], 3)
+
+    def test_luchik_upgrade_materials_require_sell_confirmation(self):
+        self.assertIn("Аномальная чешуя", LUCHIK_PROTECTED_UPGRADE_ITEMS)
+        self.assertIn("Затонувший контейнер", LUCHIK_PROTECTED_UPGRADE_ITEMS)
+        self.assertIn("Старая удочка", LUCHIK_PROTECTED_UPGRADE_ITEMS)
+        self.assertIn("Резонансная удочка", LUCHIK_PROTECTED_UPGRADE_ITEMS)
 
 
 if __name__ == "__main__":
