@@ -9,7 +9,7 @@ from game.tutorial import (
 )
 from handlers.commands import handle_npc_selection
 from handlers.keyboards import create_npc_dialog_keyboard
-from handlers.npc import show_npc_dialog
+from handlers.npc import _handle_medic_supply, show_npc_dialog
 from models.npcs import get_npc
 
 
@@ -35,6 +35,19 @@ class DummyVK:
 class DummyPlayer:
     current_location_id = "убежище"
     level = 1
+
+
+class DummyInventory:
+    def reload(self):
+        pass
+
+
+class DummyMedicPlayer:
+    current_location_id = "больница"
+    level = 28
+    energy = 124
+    max_energy = 100
+    inventory = DummyInventory()
 
 
 class TutorialNpcTest(unittest.TestCase):
@@ -89,6 +102,20 @@ class TutorialNpcTest(unittest.TestCase):
 
         self.assertTrue(handled)
         self.assertIn("Старый проводник", self.vk.messages.sent[0]["message"])
+
+    def test_medic_supply_does_not_cut_overcap_energy(self):
+        player = DummyMedicPlayer()
+
+        with patch("handlers.npc.database.get_user_flag", return_value=0), \
+             patch("handlers.npc.database.update_user_stats") as update_stats, \
+             patch("handlers.npc.database.add_item_to_inventory", return_value=True), \
+             patch("handlers.npc.database.set_user_flag"):
+            handled = _handle_medic_supply(player, self.vk, 1003, "медик")
+
+        self.assertTrue(handled)
+        self.assertEqual(player.energy, 124)
+        update_stats.assert_called_once_with(1003, energy=124)
+        self.assertIn("Энергия: 124 → 124", self.vk.messages.sent[-1]["message"])
 
 
 if __name__ == "__main__":

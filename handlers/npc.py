@@ -880,7 +880,8 @@ def _handle_medic_supply(player, vk, user_id: int, npc_id: str):
         return True
 
     old_energy = int(player.energy)
-    new_energy = min(100, old_energy + MEDIC_SUPPLY_ENERGY)
+    energy_cap = max(100, int(getattr(player, "max_energy", 100) or 100))
+    new_energy = max(old_energy, min(energy_cap, old_energy + MEDIC_SUPPLY_ENERGY))
     database.update_user_stats(user_id, energy=new_energy)
     lvl = max(1, int(getattr(player, "level", 1) or 1))
     supply_items = [("Бинт", 1), ("Антирад", 1), ("Вода", 1)]
