@@ -14,6 +14,7 @@ from .content import (
     JUNK_CATCHES,
     LAKE_LOCATION,
     LUCHIK_ORDERS,
+    LUCHIK_ROD_UPGRADES,
     LUCHIK_SHOP_ITEMS,
     SPOT_ALIASES,
     SPOTS,

@@ -24,6 +24,7 @@ from .content import (
     JUNK_CATCHES,
     LAKE_LOCATION,
     LUCHIK_ORDERS,
+    LUCHIK_ROD_UPGRADES,
     LUCHIK_SHOP_ITEMS,
     SPOT_ALIASES,
     SPOTS,
@@ -97,6 +98,10 @@ def _inventory_quantities(vk_id: int, names: tuple[str, ...] | list[str]) -> dic
     if callable(getter):
         return getter(vk_id, tuple(names))
     return {}
+
+
+def _format_item_requirements(requirements: list[tuple[str, int]] | tuple[tuple[str, int], ...]) -> str:
+    return ", ".join(f"{name} x{qty}" for name, qty in requirements)
 
 
 def _select_gear(vk_id: int) -> FishingGear:
@@ -796,7 +801,12 @@ def show_luchik_shop(player, vk, user_id: int):
     for idx, item_name in enumerate(LUCHIK_SHOP_ITEMS, 1):
         item = database.get_item_by_name(item_name) or {}
         price = int(item.get("price", 0) or 0)
-        lines.append(f"{idx}. {item_name} — {price} руб.")
+        requirement = LUCHIK_ROD_UPGRADES.get(item_name)
+        if requirement:
+            req_text = _format_item_requirements(requirement["requires"])
+            lines.append(f"{idx}. {item_name} — {price} руб. + {req_text}")
+        else:
+            lines.append(f"{idx}. {item_name} — {price} руб.")
     lines.extend(["", "Команды: купить 2 черви, купить старая удочка."])
     vk.messages.send(
         user_id=user_id,
@@ -805,6 +815,41 @@ def show_luchik_shop(player, vk, user_id: int):
         random_id=0,
     )
     return True
+
+
+def _buy_luchik_rod_upgrade(player, user_id: int, item_name: str) -> tuple[bool, str]:
+    requirement = LUCHIK_ROD_UPGRADES.get(item_name)
+    if not requirement:
+        return player.buy_item(item_name)
+
+    required_items = list(requirement.get("requires") or [])
+    quantities = _inventory_quantities(user_id, [name for name, _ in required_items])
+    missing = [
+        f"{name} x{qty - quantities.get(name, 0)}"
+        for name, qty in required_items
+        if quantities.get(name, 0) < qty
+    ]
+    if missing:
+        return False, "Не хватает для апгрейда: " + ", ".join(missing) + "."
+
+    removed: list[tuple[str, int]] = []
+    for name, qty in required_items:
+        if not database.remove_item_from_inventory(user_id, name, qty):
+            for restored_name, restored_qty in removed:
+                database.add_item_to_inventory(user_id, restored_name, restored_qty)
+            return False, f"Не удалось списать компонент: {name}."
+        removed.append((name, qty))
+
+    success, message = player.buy_item(item_name)
+    if not success:
+        for restored_name, restored_qty in removed:
+            database.add_item_to_inventory(user_id, restored_name, restored_qty)
+        return False, message
+
+    return True, (
+        f"{message}\n"
+        f"Списано для апгрейда: {_format_item_requirements(required_items)}."
+    )
 
 
 def buy_luchik_shop_item(player, vk, user_id: int, payload: str):
@@ -832,16 +877,23 @@ def buy_luchik_shop_item(player, vk, user_id: int, payload: str):
         item_name = next((name for name in LUCHIK_SHOP_ITEMS if raw and raw in name.lower()), None)
     if not item_name:
         message = "У Лучика такого товара нет. Команда: снасти."
+    elif item_name in LUCHIK_ROD_UPGRADES and qty > 1:
+        message = "Удочки улучшаются по одной. Команда: купить складная удочка."
     else:
         bought = 0
         last_message = ""
         for _ in range(qty):
-            success, last_message = player.buy_item(item_name)
+            if item_name in LUCHIK_ROD_UPGRADES:
+                success, last_message = _buy_luchik_rod_upgrade(player, user_id, item_name)
+            else:
+                success, last_message = player.buy_item(item_name)
             if not success:
                 break
             bought += 1
         if bought <= 0:
             message = last_message or "Покупка не прошла."
+        elif item_name in LUCHIK_ROD_UPGRADES and bought == 1:
+            message = last_message
         elif bought == qty:
             message = f"Куплено: {item_name} x{bought}.\nДенег сейчас: {player.money} руб."
         else:

@@ -8,6 +8,7 @@ from game.fishing import (
     FISH_LOCKER_CAPACITY,
     FISH_SPECIES,
     LAKE_LOCATION,
+    LUCHIK_ROD_UPGRADES,
     SPOTS,
     _roll_fish_entry,
     _select_gear,
@@ -429,6 +430,43 @@ class FishingSystemTest(unittest.TestCase):
         self.assertTrue(handled)
         self.assertEqual(player.money, 80)
         self.assertIn("Черви x2", vk.messages.sent[-1]["message"])
+
+    def test_luchik_rod_upgrade_requires_previous_rod(self):
+        player = DummyPlayer()
+        player.current_location_id = "турбаза_лучик"
+        player.money = 100000
+        vk = DummyVk()
+
+        with patch("game.fishing.service.database.get_inventory_item_quantities", return_value={}), \
+             patch("game.fishing.service.database.remove_item_from_inventory") as remove_item:
+            handled = buy_luchik_shop_item(player, vk, 777, "складная удочка")
+
+        self.assertTrue(handled)
+        remove_item.assert_not_called()
+        self.assertIn("Не хватает для апгрейда", vk.messages.sent[-1]["message"])
+        self.assertIn("Старая удочка", vk.messages.sent[-1]["message"])
+
+    def test_luchik_rod_upgrade_consumes_components(self):
+        player = DummyPlayer()
+        player.current_location_id = "турбаза_лучик"
+        player.money = 100000
+        vk = DummyVk()
+
+        with patch("game.fishing.service.database.get_inventory_item_quantities", return_value={"Старая удочка": 1}), \
+             patch("game.fishing.service.database.remove_item_from_inventory", return_value=True) as remove_item, \
+             patch("game.fishing.service.invalidate_player_cache"):
+            handled = buy_luchik_shop_item(player, vk, 777, "складная удочка")
+
+        self.assertTrue(handled)
+        remove_item.assert_called_once_with(777, "Старая удочка", 1)
+        self.assertIn("Списано для апгрейда", vk.messages.sent[-1]["message"])
+
+    def test_luchik_top_rod_has_long_term_requirements(self):
+        requirements = dict(LUCHIK_ROD_UPGRADES["Резонансная удочка"]["requires"])
+
+        self.assertEqual(requirements["Изолированная удочка"], 1)
+        self.assertGreaterEqual(requirements["Аномальная чешуя"], 8)
+        self.assertGreaterEqual(requirements["Затонувший контейнер"], 3)
 
 
 if __name__ == "__main__":
