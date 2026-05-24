@@ -530,11 +530,11 @@ def create_fishing_keyboard(active: bool = False):
 def create_fishing_fight_keyboard():
     """Клавиатура короткого вываживания рыбы."""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("Тянуть", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Держать", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("Вываживать", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Удерживать", color=VkKeyboardColor.POSITIVE)
     keyboard.add_line()
-    keyboard.add_button("Отпустить", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("Подсечь", color=VkKeyboardColor.NEGATIVE)
+    keyboard.add_button("Стравить леску", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("Рывок", color=VkKeyboardColor.NEGATIVE)
     keyboard.add_line()
     _add_meta_row(keyboard)
     return keyboard

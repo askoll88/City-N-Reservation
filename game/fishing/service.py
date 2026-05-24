@@ -292,12 +292,22 @@ def _format_fight_signal(signal: str, perception: int) -> str:
     return text
 
 
-def _fight_turns_for(tier: str, early_success: bool) -> int:
+def _fight_turns_for(tier: str, early_success: bool, fish_entry: dict | None = None) -> int:
+    weight = float((fish_entry or {}).get("weight_kg", 0) or 0)
+    turns = 2
     if tier == "rare":
-        return 3
+        turns += 2
+    elif tier == "uncommon":
+        turns += 1
     if early_success:
-        return 2
-    return 2
+        turns += 1
+    if weight >= 2.0:
+        turns += 1
+    if weight >= 4.0:
+        turns += 1
+    if weight >= 6.0:
+        turns += 1
+    return min(7, max(2, turns))
 
 
 def _should_start_fight(tier: str, early_success: bool, fish_entry: dict, rng: random.Random) -> bool:
@@ -310,12 +320,34 @@ def _should_start_fight(tier: str, early_success: bool, fish_entry: dict, rng: r
     return int(fish_entry.get("value", 0) or 0) >= 350 and rng.randint(1, 100) <= 50
 
 
+def _fish_required_gear_tier(tier: str, spot_id: str, weight_kg: float) -> int:
+    required = {"common": 0, "uncommon": 2, "rare": 3}.get(tier, 1)
+    if spot_id == "deep":
+        required += 1
+    elif spot_id == "anomaly":
+        required += 2
+    if weight_kg >= 3.0:
+        required += 1
+    if weight_kg >= 5.0:
+        required += 1
+    return min(5, required)
+
+
+def _gear_gap_for_fish(gear: FishingGear, fish_entry: dict) -> int:
+    required = _fish_required_gear_tier(
+        str(fish_entry.get("tier") or "common"),
+        str(fish_entry.get("spot") or ""),
+        float(fish_entry.get("weight_kg", 0) or 0),
+    )
+    return max(0, required - int(gear.tier))
+
+
 def _fight_action_profile(move: str) -> dict:
     return {
         "pull": {"control": -6, "quality": 8, "progress": 1, "risk": 20},
         "hold": {"control": 9, "quality": 2, "progress": 1, "risk": 12},
         "release": {"control": 15, "quality": -5, "progress": 0, "risk": 8},
-        "strike": {"control": -12, "quality": 14, "progress": 99, "risk": 34},
+        "surge": {"control": -14, "quality": 4, "progress": 2, "risk": 38},
     }.get(move, {"control": 0, "quality": 0, "progress": 1, "risk": 20})
 
 
@@ -325,19 +357,19 @@ def _fight_signal_pressure(signal: str, move: str) -> dict:
             "pull": {"risk": 22, "control": -12, "quality": -5},
             "hold": {"risk": 8, "control": -2, "quality": 1},
             "release": {"risk": -10, "control": 8, "quality": -3},
-            "strike": {"risk": 26, "control": -16, "quality": -10},
+            "surge": {"risk": 24, "control": -14, "quality": -8},
         },
         "bottom": {
             "pull": {"risk": 8, "control": -4, "quality": 4},
             "hold": {"risk": -6, "control": 7, "quality": 2},
             "release": {"risk": 4, "control": 3, "quality": -8},
-            "strike": {"risk": 12, "control": -10, "quality": -4},
+            "surge": {"risk": 12, "control": -8, "quality": 0},
         },
         "tremble": {
             "pull": {"risk": -4, "control": -1, "quality": 5},
             "hold": {"risk": -2, "control": 4, "quality": 0},
             "release": {"risk": 8, "control": 5, "quality": -7},
-            "strike": {"risk": 2, "control": -6, "quality": 7},
+            "surge": {"risk": -2, "control": -7, "quality": 2},
         },
     }
     return pressure.get(signal, {}).get(move, {"risk": 0, "control": 0, "quality": 0})
@@ -357,9 +389,11 @@ def _resolve_fight_action(
     seed = int(state.get("seed", 0) or 0)
     turn = int(state.get("turn", 0) or 0)
     rng = random.Random(seed + turn * 104729 + len(move) * 97)
+    gear_gap = max(0, int(state.get("gear_gap", 0) or 0))
 
     risk = int(profile["risk"]) + int(pressure["risk"])
     risk += max(0, 45 - control) // 2
+    risk += gear_gap * (12 if move == "surge" else 8)
     risk -= min(14, _stat(player, "luck") + gear.tier * 2)
     risk = max(5, min(85, risk))
 
@@ -367,16 +401,24 @@ def _resolve_fight_action(
     swing = rng.randint(-4, 4)
     if stumble:
         control_delta = int(profile["control"]) + int(pressure["control"]) - rng.randint(8, 18)
-        quality_delta = int(profile["quality"]) + int(pressure["quality"]) - rng.randint(6, 16)
-        note = "Рыба сбила темп: решение не провалилось полностью, но улов потерял качество."
+        quality_delta = int(profile["quality"]) + int(pressure["quality"]) - rng.randint(6, 16) - gear_gap * 5
+        note = (
+            "Рывок вышел грубо: рыба ответила сильнее и сбила качество."
+            if move == "surge"
+            else "Рыба сбила темп: решение не провалилось полностью, но улов потерял качество."
+        )
     else:
         control_delta = int(profile["control"]) + int(pressure["control"]) + rng.randint(0, 8)
-        quality_delta = int(profile["quality"]) + int(pressure["quality"]) + swing
-        note = "Ты удержал ситуацию, но рыба всё ещё сопротивляется."
+        quality_delta = int(profile["quality"]) + int(pressure["quality"]) + swing - gear_gap * 2
+        note = (
+            "Рывок ускорил вываживание, но рыба ещё может сорваться на слабой снасти."
+            if move == "surge"
+            else "Ты удержал ситуацию, но рыба всё ещё сопротивляется."
+        )
 
     return {
-        "control": max(0, min(100, control + control_delta)),
-        "quality": max(65, min(125, quality + quality_delta)),
+        "control": max(0, min(100, control + control_delta - gear_gap * 3)),
+        "quality": max(65, min(125 - gear_gap * 10, quality + quality_delta)),
         "progress": int(profile["progress"]),
         "risk": risk,
         "stumble": stumble,
@@ -398,6 +440,11 @@ def _send_fight_prompt(player, vk, user_id: int, state: dict, intro: str | None 
         f"Осталось ходов: {int(state.get('turns_left', 1) or 1)}.",
         f"На кону: {fish_entry.get('name', 'рыба')} примерно {float(fish_entry.get('weight_kg', 0) or 0):.2f} кг.",
     ]
+    gear_gap = int(state.get("gear_gap", 0) or 0)
+    if gear_gap >= 2:
+        lines.append("Снасть на пределе: резкие действия могут сорвать рыбу.")
+    elif gear_gap == 1:
+        lines.append("Снасть справляется тяжело: лучше не жадничать с рывками.")
     vk.messages.send(
         user_id=user_id,
         message="\n".join(lines),
@@ -421,7 +468,21 @@ def _start_fishing_fight(
     seed: int,
     early_success: bool,
 ) -> bool:
-    turns = _fight_turns_for(tier, early_success)
+    gear_gap = _gear_gap_for_fish(gear, fish_entry)
+    if gear_gap >= 4:
+        return _finish_fishing_escape(
+            player,
+            vk,
+            user_id,
+            fish_name=str(fish_entry.get("name") or "рыба"),
+            spot=SPOTS.get(str(state.get("spot") or "shore"), SPOTS["shore"]),
+            gear=gear,
+            bait=bait,
+            bonus_rewards=bonus_rewards,
+            reason="рыба слишком крупная и сильная для этой снасти.",
+        )
+
+    turns = _fight_turns_for(tier, early_success, fish_entry) + min(2, gear_gap)
     fight_state = {
         "mode": "fight",
         "fish_entry": fish_entry,
@@ -437,8 +498,9 @@ def _start_fishing_fight(
         "seed": seed,
         "turn": 0,
         "turns_left": turns,
-        "control": 55 + min(20, _stat(player, "luck") + gear.tier * 3),
-        "quality_pct": 100,
+        "control": max(25, 55 + min(20, _stat(player, "luck") + gear.tier * 3) - gear_gap * 10),
+        "quality_pct": max(70, 100 - gear_gap * 5),
+        "gear_gap": gear_gap,
         "signal": _fight_signal(seed, 0),
     }
     _set_state(user_id, fight_state)
@@ -517,6 +579,48 @@ def _finish_fishing_result(
     if gained_xp:
         result_text += f"\n\nОпыт: +{gained_xp}."
     result_text += hazard_line
+
+    vk.messages.send(
+        user_id=user_id,
+        message=result_text,
+        keyboard=create_fishing_keyboard(active=False).get_keyboard(),
+        random_id=0,
+    )
+    return True
+
+
+def _finish_fishing_escape(
+    player,
+    vk,
+    user_id: int,
+    *,
+    fish_name: str,
+    spot: FishingSpot,
+    gear: FishingGear,
+    bait: FishingBait | None,
+    bonus_rewards: list[tuple[str, int]],
+    reason: str,
+) -> bool:
+    from handlers.keyboards import create_fishing_keyboard
+
+    reward_lines = []
+    for item_name, qty in [reward for reward in bonus_rewards if reward[0] not in FISH_SPECIES_NAMES][:1]:
+        if database.add_item_to_inventory(user_id, item_name, qty):
+            reward_lines.append(f"• {item_name} x{qty}")
+
+    _clear_state(user_id)
+    invalidate_player_cache(user_id)
+
+    result_text = (
+        f"🎣 Рыба сорвалась: {fish_name}.\n\n"
+        f"Снасть: {gear.label}.\n"
+        f"Наживка: {bait.label if bait else 'без наживки'}.\n"
+        f"Причина: {reason}\n\n"
+        "Улов:\n"
+        + ("\n".join(reward_lines) if reward_lines else "• ничего полезного")
+    )
+    if spot.id == "anomaly":
+        result_text += "\n\nАномальная вода плохо прощает слабую снасть."
 
     vk.messages.send(
         user_id=user_id,
@@ -652,8 +756,8 @@ def check_fishing(player, vk, user_id: int):
             vk.messages.send(
                 user_id=user_id,
                 message=(
-                    "🎣 Ты только что дёргал снасть.\n"
-                    f"Подожди ещё {wait} сек. или дождись полного таймера: {remaining // 60} мин. {remaining % 60} сек."
+                    "🎣 Вода ещё не успела успокоиться.\n"
+                    f"Проверь через {wait} сек. или дождись уверенного результата: {remaining // 60} мин. {remaining % 60} сек."
                 ),
                 keyboard=create_fishing_keyboard(active=True).get_keyboard(),
                 random_id=0,
@@ -668,13 +772,13 @@ def check_fishing(player, vk, user_id: int):
             early_bite_won = True
             remaining = 0
         else:
-            chance_text = f"Шанс ранней поклёвки был около {chance}%." if chance else "Слишком рано для нормальной поклёвки."
+            chance_text = f"Шанс ранней поклёвки был около {chance}%." if chance else "Снасть стоит слишком недавно."
             vk.messages.send(
                 user_id=user_id,
                 message=(
-                    "🎣 Ранней поклёвки нет.\n"
+                    "🎣 Поплавок пока молчит.\n"
                     f"{chance_text}\n"
-                    f"Гарантированная проверка через {remaining // 60} мин. {remaining % 60} сек."
+                    f"Уверенный результат будет через {remaining // 60} мин. {remaining % 60} сек."
                 ),
                 keyboard=create_fishing_keyboard(active=True).get_keyboard(),
                 random_id=0,
@@ -741,11 +845,17 @@ def handle_fishing_fight_action(player, vk, user_id: int, action: str) -> bool:
 
     normalized = (action or "").strip().lower()
     action_map = {
+        "вываживать": "pull",
         "тянуть": "pull",
+        "удерживать": "hold",
         "держать": "hold",
-        "отпустить": "release",
+        "стравить леску": "release",
+        "стравить": "release",
         "ослабить": "release",
-        "подсечь": "strike",
+        "отпустить": "release",
+        "рывок": "surge",
+        "резкий рывок": "surge",
+        "подсечь": "surge",
     }
     move = action_map.get(normalized)
     if not move:
@@ -759,12 +869,35 @@ def handle_fishing_fight_action(player, vk, user_id: int, action: str) -> bool:
     signal = str(state.get("signal") or "tremble")
     outcome = _resolve_fight_action(player, state, move, signal, gear)
     turns_left = max(0, int(state.get("turns_left", 1) or 1) - int(outcome["progress"]))
+    gear_gap = max(0, int(state.get("gear_gap", 0) or 0))
 
     state["control"] = outcome["control"]
     state["quality_pct"] = outcome["quality"]
     state["turns_left"] = turns_left
     state["turn"] = int(state.get("turn", 0) or 0) + 1
     state["signal"] = _fight_signal(int(state.get("seed", 0) or 0), int(state["turn"]))
+
+    escape_roll = random.Random(int(state.get("seed", 0) or 0) + int(state["turn"]) * 65537 + 13)
+    escape_chance = 0
+    if gear_gap >= 2 and outcome["stumble"]:
+        escape_chance += 18 * gear_gap
+    if state["control"] <= 0:
+        escape_chance += 45 + gear_gap * 15
+    if move == "surge" and gear_gap:
+        escape_chance += 10 * gear_gap
+    escape_chance = min(95, escape_chance)
+    if escape_chance and escape_roll.randint(1, 100) <= escape_chance:
+        return _finish_fishing_escape(
+            player,
+            vk,
+            user_id,
+            fish_name=str((state.get("fish_entry") or {}).get("name") or "рыба"),
+            spot=spot,
+            gear=gear,
+            bait=bait,
+            bonus_rewards=[(str(name), int(qty)) for name, qty in state.get("bonus_rewards", [])],
+            reason=f"снасть не выдержала рывок ({escape_chance}% риска срыва).",
+        )
 
     if turns_left > 0 and state["control"] > 0:
         _set_state(user_id, state)
@@ -1117,7 +1250,12 @@ def handle_fishing_command(player, vk, user_id: int, text: str) -> bool:
     if normalized in {"рыбачить", "рыбалка", "озеро"}:
         show_fishing_menu(player, vk, user_id)
         return True
-    if normalized in {"тянуть", "держать", "отпустить", "ослабить", "подсечь"}:
+    if normalized in {
+        "вываживать", "тянуть",
+        "удерживать", "держать",
+        "стравить леску", "стравить", "отпустить", "ослабить",
+        "рывок", "резкий рывок", "подсечь",
+    }:
         return handle_fishing_fight_action(player, vk, user_id, normalized)
     if normalized in {"проверить улов", "проверить рыбалку", "проверить", "улов"}:
         return check_fishing(player, vk, user_id)

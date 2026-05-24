@@ -7,14 +7,17 @@ from game.fishing import (
     FISHING_DURATION_SECONDS,
     FISH_LOCKER_CAPACITY,
     FISH_SPECIES,
+    FALLBACK_GEAR,
     GEAR,
     LAKE_LOCATION,
     LUCHIK_PROTECTED_UPGRADE_ITEMS,
     LUCHIK_ROD_UPGRADES,
     SPOTS,
     _roll_fish_entry,
+    _gear_gap_for_fish,
     _resolve_fight_action,
     _select_gear,
+    _start_fishing_fight,
     check_fishing,
     complete_luchik_order,
     cook_recipe,
@@ -232,7 +235,7 @@ class FishingSystemTest(unittest.TestCase):
              patch("game.fishing.service.database.add_fish_to_locker_transaction", return_value={"success": True}) as add_fish, \
              patch("game.fishing.service.database.clear_runtime_state") as clear_state, \
              patch("game.fishing.service.invalidate_player_cache"):
-            handled = handle_fishing_fight_action(player, vk, 777, "Тянуть")
+            handled = handle_fishing_fight_action(player, vk, 777, "Вываживать")
 
         self.assertTrue(handled)
         fish_entry = add_fish.call_args.args[1]
@@ -260,6 +263,59 @@ class FishingSystemTest(unittest.TestCase):
         self.assertGreaterEqual(release["risk"], 5)
         self.assertLessEqual(release["risk"], 85)
         self.assertNotEqual(pull["risk"], release["risk"])
+
+    def test_risky_surge_is_progress_not_one_click_finish(self):
+        player = DummyPlayer()
+        state = {
+            "seed": 12345,
+            "turn": 0,
+            "control": 61,
+            "quality_pct": 100,
+        }
+
+        surge = _resolve_fight_action(player, state, "surge", "tremble", FALLBACK_GEAR)
+
+        self.assertEqual(surge["progress"], 2)
+        self.assertGreaterEqual(surge["risk"], 25)
+        self.assertLessEqual(surge["quality"], 115)
+
+    def test_heavy_anomaly_fish_overloads_basic_line(self):
+        fish_entry = {
+            "name": "Аномальный голавль",
+            "tier": "rare",
+            "weight_kg": 4.57,
+            "spot": "anomaly",
+        }
+
+        self.assertGreaterEqual(_gear_gap_for_fish(FALLBACK_GEAR, fish_entry), 4)
+
+    def test_weak_gear_cannot_start_oversized_anomaly_fish_fight(self):
+        player = DummyPlayer()
+        vk = DummyVk()
+        state = {
+            "spot": "anomaly",
+        }
+        fish_entry = {
+            "name": "Аномальный голавль",
+            "tier": "rare",
+            "weight_kg": 4.57,
+            "price_per_kg": 500,
+            "value": 2285,
+            "spot": "anomaly",
+            "caught_at": int(time.time()),
+        }
+
+        with patch("game.fishing.service.database.add_fish_to_locker_transaction") as add_fish, \
+             patch("game.fishing.service.database.clear_runtime_state") as clear_state, \
+             patch("game.fishing.service.invalidate_player_cache"):
+            handled = _start_fishing_fight(
+                player, vk, 777, state, fish_entry, 180, "rare", False, [], FALLBACK_GEAR, None, 12345, True
+            )
+
+        self.assertTrue(handled)
+        add_fish.assert_not_called()
+        clear_state.assert_called_once_with(777, "fishing_state")
+        self.assertIn("Рыба сорвалась", vk.messages.sent[-1]["message"])
 
     def test_check_fishing_reports_missed_early_bite_roll(self):
         player = DummyPlayer()
@@ -290,7 +346,7 @@ class FishingSystemTest(unittest.TestCase):
         add_item.assert_not_called()
         add_fish.assert_not_called()
         clear_state.assert_not_called()
-        self.assertIn("Ранней поклёвки нет", vk.messages.sent[-1]["message"])
+        self.assertIn("Поплавок пока молчит", vk.messages.sent[-1]["message"])
         self.assertIn("37%", vk.messages.sent[-1]["message"])
 
     def test_fish_entry_has_weight_and_value_in_range(self):

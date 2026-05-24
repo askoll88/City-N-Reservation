@@ -44,10 +44,12 @@ from .service import (
     start_fishing,
     _fish_candidates,
     _format_fish_entry,
+    _gear_gap_for_fish,
     _pick_tier,
     _resolve_fight_action,
     _roll_bonus_drops,
     _roll_fish_entry,
     _select_bait,
     _select_gear,
+    _start_fishing_fight,
 )
