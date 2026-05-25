@@ -452,7 +452,7 @@ def _complete_pale_watcher_death(player, vk, user_id: int, tactic: HuntingTactic
             f"Тактика охоты: {tactic.label}.\n"
             f"Потеряно: {lost_money} руб., {lost_exp} опыта.\n\n"
             "Очнулся ты уже в больнице. Лесник долго молчит, потом говорит коротко:\n"
-            "«Значит, байка выбрала тебя. Второго раза не будет.»"
+            "«После Семнадцатого не возвращаются. Тебе просто повезло. На этом всё.»"
         ),
         keyboard=create_location_keyboard(player.current_location_id, getattr(player, "level", None)).get_keyboard(),
         random_id=0,
