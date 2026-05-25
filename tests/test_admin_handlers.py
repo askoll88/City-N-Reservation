@@ -147,13 +147,14 @@ class AdminHandlersTest(unittest.TestCase):
         _events_kbd_mock,
     ):
         handled = admin.handle_admin_commands(
-            self.player, self.vk, 1, "админ долговязый on", "админ долговязый on"
+            self.player, self.vk, 1, "админ семнадцатый on", "админ семнадцатый on"
         )
 
         self.assertTrue(handled)
         set_flag_mock.assert_called_once_with(1, "forest_hunting_pale_watcher_admin_force", 1)
         message = self.vk.messages.send.call_args.kwargs["message"]
         self.assertIn("включён", message)
+        self.assertIn("Семнадцатый", message)
 
     @patch("handlers.admin.create_admin_events_keyboard", return_value=DummyKeyboard())
     @patch("handlers.admin.create_admin_keyboard", return_value=DummyKeyboard())
@@ -167,7 +168,7 @@ class AdminHandlersTest(unittest.TestCase):
         _events_kbd_mock,
     ):
         handled = admin.handle_admin_commands(
-            self.player, self.vk, 1, "админ долговязый сброс", "админ долговязый сброс"
+            self.player, self.vk, 1, "админ семнадцатый сброс", "админ семнадцатый сброс"
         )
 
         self.assertTrue(handled)
