@@ -36,10 +36,24 @@ from .content import (
 )
 
 FISH_SPECIES_NAMES = frozenset(row.name for row in FISH_SPECIES)
+FISHING_DURATION_MIN_SECONDS = 3 * 60
+FISHING_DURATION_MAX_SECONDS = 5 * 60
 
 
 def _now() -> int:
     return int(time.time())
+
+
+def _format_timer(seconds: int) -> str:
+    seconds = max(0, int(seconds or 0))
+    minutes, seconds = divmod(seconds, 60)
+    if minutes <= 0:
+        return f"{seconds} сек."
+    return f"{minutes} мин. {seconds} сек."
+
+
+def _roll_fishing_duration() -> int:
+    return random.randint(FISHING_DURATION_MIN_SECONDS, FISHING_DURATION_MAX_SECONDS)
 
 
 def _get_state(vk_id: int) -> dict | None:
@@ -695,7 +709,7 @@ def start_fishing(player, vk, user_id: int, spot_id: str):
         if not database.remove_item_from_inventory(user_id, bait.name, 1):
             bait = None
     started_at = _now()
-    duration = FISHING_DURATION_SECONDS
+    duration = _roll_fishing_duration()
     seed = random.randint(1, 2_000_000_000)
     _set_state(user_id, {
         "started_at": started_at,
@@ -716,6 +730,7 @@ def start_fishing(player, vk, user_id: int, spot_id: str):
             f"Снасть: {gear.label}.\n"
             f"Наживка: {bait.label if bait else 'без наживки'}.\n"
             f"Потрачено: {spot.energy_cost}⚡.\n"
+            f"Уверенный результат будет примерно через {_format_timer(duration)}\n"
             "Вода у турбазы тихая только сверху. Можно проверять улов раньше, но ранняя поклёвка не гарантирована."
         ),
         keyboard=create_fishing_keyboard(active=True).get_keyboard(),
@@ -757,7 +772,7 @@ def check_fishing(player, vk, user_id: int):
                 user_id=user_id,
                 message=(
                     "🎣 Вода ещё не успела успокоиться.\n"
-                    f"Проверь через {wait} сек. или дождись уверенного результата: {remaining // 60} мин. {remaining % 60} сек."
+                    f"Проверь через {wait} сек. или дождись уверенного результата: {_format_timer(remaining)}"
                 ),
                 keyboard=create_fishing_keyboard(active=True).get_keyboard(),
                 random_id=0,
@@ -778,7 +793,7 @@ def check_fishing(player, vk, user_id: int):
                 message=(
                     "🎣 Поплавок пока молчит.\n"
                     f"{chance_text}\n"
-                    f"Уверенный результат будет через {remaining // 60} мин. {remaining % 60} сек."
+                    f"Уверенный результат будет через {_format_timer(remaining)}"
                 ),
                 keyboard=create_fishing_keyboard(active=True).get_keyboard(),
                 random_id=0,

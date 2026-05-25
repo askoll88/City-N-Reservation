@@ -27,6 +27,8 @@ from .content import (
     FishSpecies,
 )
 from .service import (
+    FISHING_DURATION_MAX_SECONDS,
+    FISHING_DURATION_MIN_SECONDS,
     cancel_fishing,
     check_fishing,
     complete_luchik_order,
@@ -44,6 +46,7 @@ from .service import (
     start_fishing,
     _fish_candidates,
     _format_fish_entry,
+    _format_timer,
     _gear_gap_for_fish,
     _pick_tier,
     _resolve_fight_action,

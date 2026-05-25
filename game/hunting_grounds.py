@@ -21,7 +21,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HUNTING_GROUNDS_LOCATION = "охотничьи_угодья"
 HUNTING_UNLOCK_FLAG = "forest_hunting_grounds_unlocked"
 HUNTING_STATE_KEY = "hunting_grounds_state"
+PALE_WATCHER_SCENE_STATE_KEY = "hunting_pale_watcher_scene"
 HUNT_DURATION_SECONDS = 5 * 60
+HUNT_DURATION_MIN_SECONDS = 4 * 60
+HUNT_DURATION_MAX_SECONDS = 6 * 60
 PALE_WATCHER_TRAIL_FLAG = "forest_hunting_pale_watcher_trail"
 PALE_WATCHER_DONE_FLAG = "forest_hunting_pale_watcher_done"
 PALE_WATCHER_ADMIN_FORCE_FLAG = "forest_hunting_pale_watcher_admin_force"
@@ -56,7 +59,7 @@ TACTICS: dict[str, HuntingTactic] = {
         risk=6,
         score_bonus=-4,
         rare_bonus=-5,
-        description="меньше риска, чаще мелкая добыча или пустой след",
+        description="тихий выход с меньшим риском, но добыча обычно мелкая",
     ),
     "ambush": HuntingTactic(
         id="ambush",
@@ -65,7 +68,7 @@ TACTICS: dict[str, HuntingTactic] = {
         risk=12,
         score_bonus=4,
         rare_bonus=3,
-        description="сбалансированная охота с нормальным шансом трофея",
+        description="спокойная середина между риском и шансом на трофей",
     ),
     "deep": HuntingTactic(
         id="deep",
@@ -74,14 +77,14 @@ TACTICS: dict[str, HuntingTactic] = {
         risk=22,
         score_bonus=12,
         rare_bonus=10,
-        description="выше шанс редкой добычи, но больше шанс нарваться на зверя",
+        description="глубже в лес, выше шанс редкой добычи и опасной встречи",
     ),
 }
 
 
 ANIMALS = {
     "empty": [
-        ("Пустой след", [], 25, 0),
+        ("Пустая тропа", [], 25, 0),
         ("Сбитая тропа", [], 35, 0),
     ],
     "common": [
@@ -123,6 +126,18 @@ def _now() -> int:
     return int(time.time())
 
 
+def _format_timer(seconds: int) -> str:
+    seconds = max(0, int(seconds or 0))
+    minutes, seconds = divmod(seconds, 60)
+    if minutes <= 0:
+        return f"{seconds} сек."
+    return f"{minutes} мин. {seconds} сек."
+
+
+def _roll_hunt_duration() -> int:
+    return random.randint(HUNT_DURATION_MIN_SECONDS, HUNT_DURATION_MAX_SECONDS)
+
+
 def _get_state(vk_id: int) -> dict | None:
     state = database.get_runtime_state(vk_id, HUNTING_STATE_KEY)
     return state if isinstance(state, dict) and state else None
@@ -134,6 +149,19 @@ def _set_state(vk_id: int, state: dict):
 
 def _clear_state(vk_id: int):
     database.clear_runtime_state(vk_id, HUNTING_STATE_KEY)
+
+
+def _get_scene_state(vk_id: int) -> dict | None:
+    state = database.get_runtime_state(vk_id, PALE_WATCHER_SCENE_STATE_KEY)
+    return state if isinstance(state, dict) and state else None
+
+
+def _set_scene_state(vk_id: int, state: dict):
+    database.set_runtime_state(vk_id, PALE_WATCHER_SCENE_STATE_KEY, state)
+
+
+def _clear_scene_state(vk_id: int):
+    database.clear_runtime_state(vk_id, PALE_WATCHER_SCENE_STATE_KEY)
 
 
 def _has_unlock(vk_id: int) -> bool:
@@ -244,46 +272,37 @@ def _pale_watcher_hunting_note(omen_count: int, done: bool = False) -> str | Non
 def _format_pale_watcher_omen(omen_count: int, tactic: HuntingTactic) -> str:
     if omen_count <= 1:
         omen_text = (
-            "Сначала ты решаешь, что это усталость.\n\n"
-            "Лес не замолкает сразу. Он выцветает по звуку, слой за слоем: сперва пропадают дальние птицы, "
-            "потом шорох мелких лап, потом мокрый скрип стволов. Остаётся только твоё дыхание, и оно звучит "
-            "слишком громко, будто ты дышишь не для себя, а чтобы кто-то мог легче считать вдохи.\n\n"
-            "На мягкой земле рядом с твоей старой меткой продавлен след босой ноги. Не свежий и не старый — "
-            "такой, словно земля вспомнила его только сейчас. Пятка узкая, пальцы вытянуты, шаг невозможный: "
-            "отпечаток начинается там, куда человек не достал бы без разбега, а рядом нет ни сломанной ветки, "
-            "ни смазанного края, ни второй опоры.\n\n"
-            "Ты долго стоишь над ним и внезапно понимаешь, что рука уже лежит на оружии. Не потому что ты решил. "
-            "Тело решило раньше головы."
+            "Ты находишь босой след рядом со своей меткой.\n\n"
+            "След слишком длинный. Пятка узкая, пальцы вытянуты. Второго отпечатка рядом нет, будто кто-то "
+            "поставил ногу и просто исчез.\n\n"
+            "Поначалу это не пугает. Скорее раздражает: в угодьях и без того хватает странностей. Но потом "
+            "становится тихо. Не полностью. Просто лес как будто перестаёт заниматься тобой.\n\n"
+            "Ты ещё пару минут проверяешь землю вокруг, хотя уже понимаешь: нормального объяснения не будет. "
+            "Уходишь без добычи."
         )
     elif omen_count == 2:
         omen_text = (
-            "Ты сбиваешься с маршрута на знакомом участке.\n\n"
-            "Компас не бесится, метки на месте, тропа та же, но каждый поворот выводит тебя к одному и тому же "
-            "низкому пню. На нём лежит твоя вчерашняя гильза. Ты точно забрал её. Ты помнишь щелчок металла "
-            "в кармане, помнишь грязь под ногтем, помнишь, как проверял патронташ перед выходом.\n\n"
-            "Теперь гильза стоит вертикально, донцем вверх. На краю донца нацарапана короткая черта, потом вторая, "
-            "потом третья. Они похожи не на счет и не на знак. Скорее на терпеливую проверку: сколько раз ты "
-            "ещё вернёшься сюда, прежде чем поймёшь, что тебя не путают, а ведут.\n\n"
-            "Холод поднимается от поясницы к затылку. Ты не видишь никого. Именно это хуже всего. Лес оставляет "
-            "для тебя место в тишине, и ты начинаешь бояться его занять."
+            "Ты три раза выходишь к одному и тому же пню.\n\n"
+            "Метки на месте. Компас не чудит. Маршрут знакомый. Но каждый раз перед тобой снова этот пень.\n\n"
+            "На нём стоит твоя гильза. Та самая, которую ты вчера забрал с земли и убрал в карман. Она стоит "
+            "донцем вверх. На донце три короткие царапины.\n\n"
+            "Ты не видишь никого. Не слышишь шагов. Никто не смеётся в кустах. От этого только хуже.\n\n"
+            "В какой-то момент ты перестаёшь искать добычу и начинаешь считать, сколько осталось до заимки."
         )
     else:
         omen_text = (
             "На обратной тропе ты находишь свои метки перевёрнутыми внутрь леса.\n\n"
-            "Не сорванными, не испорченными, не случайно сдвинутыми ветром. Аккуратно перевёрнутыми. Каждая "
-            "бирка висит на том же сучке, но смотрит в чащу, как маленькая стрелка, которой больше не нужен ты.\n\n"
-            "Под последней меткой кора вспорота тонкими параллельными линиями. Не когтями: слишком ровно. "
-            "Не ножом: слишком глубоко для такого чистого края. Из прорезей медленно сочится тёмная древесная "
-            "влага, и на секунду тебе кажется, что ствол дышит через рану.\n\n"
-            "Ты уже не думаешь о добыче. Ты думаешь о том, как далеко до заимки, слышит ли тебя Лесник, "
-            "и почему собственные шаги позади звучат на один лишний удар. Когда оборачиваешься, тропа пуста. "
-            "Но сердце всё равно пропускает удар, потому что пустота успела посмотреть в ответ."
+            "Их не сорвали и не сломали. Каждую просто развернули на том же сучке. Аккуратно, без спешки.\n\n"
+            "Под последней меткой кора прорезана ровными линиями. Слишком ровно для зверя. Слишком глубоко "
+            "для случайной ветки.\n\n"
+            "Ты стоишь и понимаешь неприятную вещь: тебя не путают. Тебя ведут.\n\n"
+            "Назад ты идёшь быстро, но не бежишь. Бежать почему-то кажется худшей идеей."
         )
     return (
-        f"🐾 Охота сорвалась: {tactic.label}.\n\n"
+        f"🐾 Вылазка сорвалась: {tactic.label}.\n\n"
         f"{omen_text}\n\n"
-        "Ты уходишь без добычи и почти не помнишь дорогу назад. Уже у границы угодий приходит самая мерзкая мысль: "
-        "всё это время ты спешил не выбраться из леса, а успеть до того, как тебя позовут по имени."
+        "Лесник когда-то говорил про местную легенду. Тогда это звучало как байка для новичков. "
+        "Сейчас уже не звучит."
     )
 
 
@@ -302,69 +321,97 @@ def _finish_pale_watcher_omen(player, vk, user_id: int, tactic: HuntingTactic, o
     return True
 
 
-def _finish_pale_watcher_death(player, vk, user_id: int, tactic: HuntingTactic) -> bool:
-    from handlers.keyboards import create_location_keyboard
+PALE_WATCHER_SCENE_STEPS = [
+    {
+        "label": "Идти дальше",
+        "message": (
+            "🐾 Охота не складывается.\n\n"
+            "След оборвался там, где не должен был. Добычи нет. Шороха нет. Даже ветер пропал.\n\n"
+            "Ты стоишь среди деревьев и понимаешь, что это уже не охота. Это продолжение той самой байки, "
+            "которую Лесник рассказывал вполголоса."
+        ),
+    },
+    {
+        "label": "Поднять оружие",
+        "message": (
+            "Между деревьями кто-то стоит.\n\n"
+            "Сначала кажется, что это белый ствол. Потом ствол чуть меняет положение.\n\n"
+            "Он слишком высокий для человека. Руки длинные, почти до колен. Кожа бледная, без нормального "
+            "цвета. Лицо не звериное и не человеческое до конца: будто знакомые черты собрали неправильно "
+            "и оставили без выражения.\n\n"
+            "Он не прячется. Не рычит. Просто стоит и смотрит чуть мимо тебя, как будто уже знает, где ты "
+            "окажешься через несколько секунд."
+        ),
+        "attachment": True,
+    },
+    {
+        "label": "Отступить",
+        "message": (
+            "Ты пытаешься поднять оружие.\n\n"
+            "Пальцы двигаются медленно. Слишком медленно. Ремень цепляется за рукав. В обычный день ты бы "
+            "выругался. Сейчас даже на это не хватает воздуха.\n\n"
+            "Он всё ещё стоит на месте. От этого хуже. Если бы он бросился, тело хотя бы поняло, что делать."
+        ),
+    },
+    {
+        "label": "Вдохнуть",
+        "message": (
+            "Ты делаешь шаг назад.\n\n"
+            "Под ботинком хрустит ветка. Звук выходит громким, глупым, почти стыдным.\n\n"
+            "Он больше не между деревьями. Он ближе.\n\n"
+            "Ты не видел движения. Просто расстояние закончилось."
+        ),
+    },
+    {
+        "label": "Закрыть глаза",
+        "message": (
+            "Удар приходит в грудь.\n\n"
+            "Его белая рука оказывается слишком близко. Внутри что-то сухо трещит. В груди ломается кость.\n\n"
+            "Ты пытаешься вдохнуть, но вдох не получается. Только короткий хлюпающий мокрый звук. Ноги ещё ищут землю, "
+            "руки ещё пытаются что-то удержать, но тело уже не слушается.\n\n"
+            "Самое страшное приходит не от боли. Страшно от простой мысли: ты всё ещё здесь, всё ещё понимаешь, "
+            "что происходит, но уже ничего не можешь исправить. Ни поднять оружие. Ни отползти. Ни позвать.\n\n"
+            "Хочется домой. Не к трофеям, не к разговорам у костра, не к чужим рассказам о том, как надо было "
+            "поступить. Просто домой. Туда, где тебя должны были дождаться.\n\n"
+            "А лес стоит рядом и молчит."
+        ),
+    },
+    {
+        "message": (
+            "Ты закрываешь глаза.\n\n"
+            "На секунду становится легче. Не потому что боль ушла. Просто больше не нужно смотреть на него.\n\n"
+            "Последняя мысль простая и очень человеческая: надо было поверить Леснику."
+        ),
+        "final": True,
+    },
+]
 
-    messages = [
-        (
-            "Ты понимаешь, что сегодня всё закончится, ещё до первого настоящего признака.\n\n"
-            "Не приходит мысль. Приходит телесная уверенность, древняя и тупая, как боль от удара. "
-            "Кожа на спине стягивается так, будто под куртку насыпали ледяной золы. Пальцы немеют на ремне оружия, "
-            "и ремень кажется чужим: слишком тонким, слишком поздним, смешным предметом из мира, где опасность "
-            "можно остановить железом.\n\n"
-            "Лес вокруг не молчит. Он слушает. Каждая ветка, каждая мокрая ямка, каждая чёрная щель между корнями "
-            "держит паузу вместе с тобой. Ты делаешь шаг — и слышишь, как где-то далеко повторяют этот шаг. "
-            "Не эхом. Не зверем. Слишком ровно. Слишком терпеливо."
-        ),
-        (
-            "Потом ты видишь его.\n\n"
-            "Не вспышкой и не движением. Он просто оказывается там, где секунду назад было расстояние между "
-            "деревьями. Долговязый, бледный, чудовищно высокий. Не худой — вытянутый, будто тело когда-то было "
-            "человеческим, а потом его долго тянули вверх за кости, пока суставы не стали неправильными.\n\n"
-            "Плечи почти касаются нижних веток. Шея слишком длинная и неподвижная. Голова слегка наклонена, "
-            "как у того, кто прислушивается не к словам, а к работе сердца. Кожа матовая, без живого оттенка, "
-            "натянутая на острые ключицы и плоскую грудь. На лице нет ни оскала, ни злобы, ни голода. Только "
-            "гладкая, страшная сосредоточенность существа, которое уже знает, чем ты закончишься.\n\n"
-            "Руки висят ниже колен. Пальцы длинные, тонкие, неподвижные, будто ими никогда не брали вещи — "
-            "только указывали, ломали или вытаскивали. Он не рычит. Не скалится. Не делает ни шага. В этом и есть "
-            "самое страшное: ему не нужно приближаться, чтобы ты понял расстояние между вами неправильно. "
-            "Оно уже принадлежит ему.\n\n"
-            "Ты пытаешься вспомнить, как дышать тихо. Как поднимать оружие. Как кричать. Ничего не вспоминается. "
-            "В голове остаётся только детская, унизительная мысль: если не шевелиться, может быть, тебя не выберут."
-        ),
-        (
-            "Ты мешкаешь ровно настолько, насколько нужно живому человеку.\n\n"
-            "Белая рука вытягивается без замаха. Движение почти ленивое, будто он не нападает, а заканчивает "
-            "дело, начатое давно: тем следом в грязи, той гильзой на пне, тем лишним шагом за спиной.\n\n"
-            "Пальцы складываются в узкий белый клин и входят точно в центр грудины.\n\n"
-            "Не как когти. Не как нож. Хуже. Сухой удар проходит сквозь одежду, ремни и кость так буднично, "
-            "что мозг первую долю секунды отказывается принимать случившееся. Ты слышишь внутри себя короткий "
-            "треск — не громкий, почти домашний, как ломается тонкая доска. Потом грудина раскрывается горячей "
-            "чёрной болью, и весь воздух, который был в тебе, разом становится чужим.\n\n"
-            "Ты пытаешься вдохнуть, но грудь больше не слушается. В горле поднимается влажный хрип. Руки "
-            "хватают его запястье и находят только холодную гладкую кожу, сухую и неподвижную, как корень под "
-            "зимней землёй. Он держит тебя на вытянутой руке, без усилия. Ноги ищут опору, скребут грязь, "
-            "цепляют мох, но тело уже не весит для него ничего.\n\n"
-            "Боль приходит волнами: сперва в груди, потом в спине, потом где-то глубоко под рёбрами, где всё "
-            "становится мокрым и неправильным. Мир сжимается до его лица над тобой, до мокрой коры сбоку, "
-            "до запаха земли и железа, до собственного хрипа, который звучит стыдно и жалко.\n\n"
-            "Последнее, что ты успеваешь понять: он не злится. Не торопится. Не радуется. Он просто смотрит, "
-            "как из тебя уходит жизнь, с тем же пустым терпением, с каким человек смотрит на дверь, которую "
-            "давно пора было открыть."
-        ),
-    ]
-    attachment = _upload_pale_watcher_image(vk, user_id)
-    for index, message in enumerate(messages):
-        if index == 1:
-            vk_messages.send(
-                vk,
-                user_id=user_id,
-                message=message,
-                attachment=attachment,
-                random_id=0,
-            )
-        else:
-            vk.messages.send(user_id=user_id, message=message, random_id=0)
+
+def _finish_pale_watcher_death(player, vk, user_id: int, tactic: HuntingTactic) -> bool:
+    from handlers.keyboards import create_pale_watcher_scene_keyboard
+
+    _clear_state(user_id)
+    _set_scene_state(
+        user_id,
+        {
+            "step": 0,
+            "tactic": tactic.id,
+            "started_at": _now(),
+        },
+    )
+    first_step = PALE_WATCHER_SCENE_STEPS[0]
+    vk_messages.send(
+        vk,
+        user_id=user_id,
+        message=first_step["message"],
+        keyboard=create_pale_watcher_scene_keyboard(first_step["label"]),
+        random_id=0,
+    )
+    return True
+
+
+def _complete_pale_watcher_death(player, vk, user_id: int, tactic: HuntingTactic) -> bool:
+    from handlers.keyboards import create_location_keyboard
 
     old_money = max(0, int(getattr(player, "money", 0) or 0))
     old_exp = max(0, int(getattr(player, "experience", 0) or 0))
@@ -378,6 +425,7 @@ def _finish_pale_watcher_death(player, vk, user_id: int, tactic: HuntingTactic) 
     player.current_location_id = "больница"
 
     _clear_state(user_id)
+    _clear_scene_state(user_id)
     database.set_user_flag(user_id, PALE_WATCHER_TRAIL_FLAG, 0)
     database.set_user_flag(user_id, PALE_WATCHER_DONE_FLAG, 1)
     database.update_user_location(user_id, "больница")
@@ -399,12 +447,47 @@ def _finish_pale_watcher_death(player, vk, user_id: int, tactic: HuntingTactic) 
             "Ты погиб.\n"
             f"Тактика охоты: {tactic.label}.\n"
             f"Потеряно: {lost_money} руб., {lost_exp} опыта.\n\n"
-            "Очнулся ты уже в больнице. Лесник потом скажет только одно: "
-            "«Значит, байка всё-таки выбрала тебя.»"
+            "Очнулся ты уже в больнице. Лесник долго молчит, потом говорит коротко:\n"
+            "«Значит, байка выбрала тебя. Второго раза не будет.»"
         ),
         keyboard=create_location_keyboard(player.current_location_id, getattr(player, "level", None)).get_keyboard(),
         random_id=0,
     )
+    return True
+
+
+def handle_pale_watcher_scene_callback(player, vk, user_id: int, payload: dict | None = None) -> bool:
+    from handlers.keyboards import create_pale_watcher_scene_keyboard
+
+    state = _get_scene_state(user_id)
+    if not state:
+        vk_messages.send(vk, user_id=user_id, message="Эта сцена уже закрыта.", random_id=0)
+        return True
+
+    next_step = int(state.get("step", 0) or 0) + 1
+    if next_step >= len(PALE_WATCHER_SCENE_STEPS):
+        tactic = TACTICS.get(str(state.get("tactic") or "ambush"), TACTICS["ambush"])
+        return _complete_pale_watcher_death(player, vk, user_id, tactic)
+
+    state["step"] = next_step
+    _set_scene_state(user_id, state)
+    step = PALE_WATCHER_SCENE_STEPS[next_step]
+    attachment = _upload_pale_watcher_image(vk, user_id) if step.get("attachment") else None
+    keyboard = None
+    if not step.get("final"):
+        keyboard = create_pale_watcher_scene_keyboard(str(step["label"]))
+
+    vk_messages.send(
+        vk,
+        user_id=user_id,
+        message=str(step["message"]),
+        attachment=attachment,
+        keyboard=keyboard,
+        random_id=0,
+    )
+    if step.get("final"):
+        tactic = TACTICS.get(str(state.get("tactic") or "ambush"), TACTICS["ambush"])
+        return _complete_pale_watcher_death(player, vk, user_id, tactic)
     return True
 
 
@@ -431,7 +514,7 @@ def _format_menu(player, active: bool = False, user_id: int | None = None) -> st
     lines = [
         "🐾 ОХОТНИЧЬИ УГОДЬЯ",
         "",
-        "Выбери тактику. Охота займёт около 5 минут и не заменяет обычное исследование.",
+        "Выбери, как пойдёшь в лес. Вылазка займёт несколько минут и не заменяет обычное исследование.",
         "",
     ]
     for tactic in TACTICS.values():
@@ -447,7 +530,7 @@ def _format_menu(player, active: bool = False, user_id: int | None = None) -> st
         if note:
             lines.extend(["", note])
     if active:
-        lines.append("Сейчас у тебя уже идёт охота.")
+        lines.append("Ты уже оставил метки в угодьях. Можно вернуться к ним позже.")
     return "\n".join(lines)
 
 
@@ -492,9 +575,10 @@ def start_hunt(player, vk, user_id: int, tactic_id: str):
 
     player.energy = energy - tactic.energy_cost
     database.update_user_stats(user_id, energy=player.energy)
+    duration = _roll_hunt_duration()
     state = {
         "started_at": _now(),
-        "duration": HUNT_DURATION_SECONDS,
+        "duration": duration,
         "tactic": tactic.id,
         "seed": random.randint(1, 2_000_000_000),
     }
@@ -502,9 +586,10 @@ def start_hunt(player, vk, user_id: int, tactic_id: str):
     vk.messages.send(
         user_id=user_id,
         message=(
-            f"🐾 Ты начал охоту: {tactic.label}.\n\n"
+            f"🐾 Ты вышел в угодья: {tactic.label}.\n\n"
             f"Потрачено: {tactic.energy_cost}⚡.\n"
-            "Лесник учил: на охоте важна не скорость, а момент. Вернись через несколько минут и проверь след."
+            f"Возвращайся к меткам примерно через {_format_timer(duration)}.\n"
+            "Лесник учил: на охоте важен момент. Рано вернёшься — только распугаешь добычу."
         ),
         keyboard=create_hunting_grounds_keyboard(active=True).get_keyboard(),
         random_id=0,
@@ -527,7 +612,11 @@ def check_hunt(player, vk, user_id: int):
     if remaining > 0:
         vk.messages.send(
             user_id=user_id,
-            message=f"🐾 След ещё не закрылся.\nОсталось примерно: {max(1, remaining // 60)} мин. {remaining % 60} сек.",
+            message=(
+                "🐾 К меткам ещё рано.\n"
+                "Дай лесу успокоиться. Вернуться стоит примерно через "
+                f"{_format_timer(remaining)}."
+            ),
             keyboard=create_hunting_grounds_keyboard(active=True).get_keyboard(),
             random_id=0,
         )
@@ -567,13 +656,13 @@ def check_hunt(player, vk, user_id: int):
 
     if not reward_lines:
         result_text = (
-            f"🐾 Охота завершена: {animal_name}.\n\n"
+            f"🐾 Итог вылазки: {animal_name}.\n\n"
             "След ушёл в мокрый валежник. Ты нашёл место лёжки, но добычу брать было уже поздно."
         )
     else:
         result_text = (
-            f"🐾 Охота завершена: {animal_name}.\n\n"
-            "Добыча:\n"
+            f"🐾 Итог вылазки: {animal_name}.\n\n"
+            "Трофеи:\n"
             + "\n".join(reward_lines)
         )
     if gained_xp:
@@ -594,9 +683,9 @@ def cancel_hunt(player, vk, user_id: int):
 
     if _get_state(user_id):
         _clear_state(user_id)
-        message = "🐾 Ты свернул охоту и вернулся к меткам. Потраченную энергию уже не вернуть."
+        message = "🐾 Ты снял метки и вернулся к тропе. Потраченную энергию уже не вернуть."
     else:
-        message = "🐾 Сейчас у тебя нет активной охоты."
+        message = "🐾 Сейчас у тебя нет вылазки в угодьях."
     vk.messages.send(
         user_id=user_id,
         message=message,
@@ -608,12 +697,22 @@ def cancel_hunt(player, vk, user_id: int):
 
 def handle_hunting_command(player, vk, user_id: int, text: str) -> bool:
     normalized = (text or "").strip().lower()
-    if normalized in {"охотиться", "охота", "угодья"}:
+    if normalized in {"выйти на охоту", "охотиться", "охота", "угодья"}:
         show_hunting_menu(player, vk, user_id)
         return True
-    if normalized in {"проверить охоту", "проверить", "след", "идти"}:
+    if normalized in {
+        "вернуться к меткам",
+        "к меткам",
+        "метки",
+        "идти к меткам",
+        "проверить след",
+        "проверить охоту",
+        "проверить",
+        "след",
+        "идти",
+    }:
         return check_hunt(player, vk, user_id)
-    if normalized in {"отменить охоту", "отмена охоты", "отмена", "стоп"}:
+    if normalized in {"снять метки", "свернуть вылазку", "отменить охоту", "отмена охоты", "отмена", "стоп"}:
         return cancel_hunt(player, vk, user_id)
     tactic_id = TACTIC_ALIASES.get(normalized)
     if tactic_id:

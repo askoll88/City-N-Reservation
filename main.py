@@ -1129,6 +1129,13 @@ def _do_callback_processing(event, vk):
         handle_storage_callback(player, vk, user_id, payload)
         return
 
+    if payload.get("command") == "pale_watcher_scene":
+        _answer_callback(event, vk, None, show_snackbar=False)
+        player = get_player(user_id)
+        from game.hunting_grounds import handle_pale_watcher_scene_callback
+        handle_pale_watcher_scene_callback(player, vk, user_id, payload)
+        return
+
     if payload.get("command") == "tutorial_home":
         _answer_callback(event, vk, "Разделы обучения")
         from game.tutorial import show_tutorial_home

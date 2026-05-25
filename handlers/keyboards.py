@@ -261,8 +261,8 @@ def create_location_keyboard(location_id: str, player_level: int = None):
 
     # --- Охотничьи угодья ---
     elif location_id == "охотничьи_угодья":
-        keyboard.add_button("Охотиться", color=VkKeyboardColor.POSITIVE)
-        keyboard.add_button("Проверить охоту", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Выйти на охоту", color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button("Вернуться к меткам", color=VkKeyboardColor.PRIMARY)
         keyboard.add_line()
         keyboard.add_button("Заимка лесника", color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()
@@ -497,8 +497,8 @@ def create_hunting_grounds_keyboard(active: bool = False):
     """Клавиатура охотничьих угодий."""
     keyboard = VkKeyboard(one_time=False)
     if active:
-        keyboard.add_button("Проверить охоту", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button("Отменить охоту", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button("Вернуться к меткам", color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button("Снять метки", color=VkKeyboardColor.NEGATIVE)
     else:
         keyboard.add_button("Тихая тропа", color=VkKeyboardColor.POSITIVE)
         keyboard.add_button("Засада у солонца", color=VkKeyboardColor.PRIMARY)
@@ -507,6 +507,19 @@ def create_hunting_grounds_keyboard(active: bool = False):
         keyboard.add_button("Заимка лесника", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     _add_meta_row(keyboard)
+    return keyboard
+
+
+def create_pale_watcher_scene_keyboard(label: str = "Дальше"):
+    """Inline-кнопка для пошаговой сцены лесной легенды."""
+    keyboard = VkKeyboard(one_time=False, inline=True)
+    _add_callback_button(
+        keyboard,
+        label,
+        command="pale_watcher_scene",
+        action="next",
+        color=VkKeyboardColor.PRIMARY,
+    )
     return keyboard
 
 

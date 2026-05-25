@@ -4,6 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from game.fishing import (
+    FISHING_DURATION_MAX_SECONDS,
+    FISHING_DURATION_MIN_SECONDS,
     FISHING_DURATION_SECONDS,
     FISH_LOCKER_CAPACITY,
     FISH_SPECIES,
@@ -14,6 +16,7 @@ from game.fishing import (
     LUCHIK_ROD_UPGRADES,
     SPOTS,
     _roll_fish_entry,
+    _format_timer,
     _gear_gap_for_fish,
     _resolve_fight_action,
     _select_gear,
@@ -65,6 +68,11 @@ class DummyPlayer:
 
 
 class FishingSystemTest(unittest.TestCase):
+    def test_format_timer_under_minute_does_not_round_to_one_minute(self):
+        self.assertEqual(_format_timer(45), "45 сек.")
+        self.assertEqual(_format_timer(60), "1 мин. 0 сек.")
+        self.assertEqual(_format_timer(185), "3 мин. 5 сек.")
+
     def test_lake_is_midgame_fishing_location(self):
         tourbase = get_map_location("турбаза_лучик")
         lake = get_map_location("озеро")
@@ -93,6 +101,8 @@ class FishingSystemTest(unittest.TestCase):
         self.assertEqual(set_state.call_args.args[2]["gear_label"], "Леска с крючком")
         self.assertEqual(set_state.call_args.args[2]["early_checks"], 0)
         self.assertEqual(set_state.call_args.args[2]["last_check_at"], 0)
+        self.assertGreaterEqual(set_state.call_args.args[2]["duration"], FISHING_DURATION_MIN_SECONDS)
+        self.assertLessEqual(set_state.call_args.args[2]["duration"], FISHING_DURATION_MAX_SECONDS)
         remove_item.assert_not_called()
         self.assertIn("Глубокий заброс", vk.messages.sent[-1]["message"])
 
