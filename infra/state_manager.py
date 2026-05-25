@@ -742,7 +742,7 @@ def invalidate_edit_targets(user_id: int):
     _ui_message_state.pop(user_id, None)
 
 
-def try_edit_or_send_ui(vk, user_id: int, screen_key: str, message: str, keyboard=None):
+def try_edit_or_send_ui(vk, user_id: int, screen_key: str, message: str, keyboard=None, attachment: str | None = None):
     """
     Попытаться редактировать активное сообщение конкретного UI-экрана.
     Если не удалось — отправить новое и запомнить его для этого экрана.
@@ -758,13 +758,14 @@ def try_edit_or_send_ui(vk, user_id: int, screen_key: str, message: str, keyboar
                 message_id=last_msg["msg_id"],
                 message=message,
                 keyboard=keyboard,
+                attachment=attachment,
             )
             return
         except Exception:
             logger.exception("Не удалось отредактировать UI-сообщение: user_id=%s screen=%s", user_id, screen_key)
 
     try:
-        msg_id = vk_messages.send(vk, user_id=user_id, message=message, keyboard=keyboard)
+        msg_id = vk_messages.send(vk, user_id=user_id, message=message, keyboard=keyboard, attachment=attachment)
         set_ui_message(user_id, screen_key, msg_id, peer_id=user_id)
     except Exception:
         logger.exception("Не удалось отправить UI-сообщение: user_id=%s screen=%s", user_id, screen_key)

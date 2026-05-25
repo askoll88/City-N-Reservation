@@ -51,6 +51,37 @@ MSK_TZ = timezone(timedelta(hours=3))
 FORESTER_HUNTING_UNLOCK_FLAG = "forest_hunting_unlocked"
 FORESTER_HUNTING_GROUNDS_UNLOCK_FLAG = "forest_hunting_grounds_unlocked"
 FORESTER_HUNTING_UNLOCK_LEVEL = 10
+FORESTER_PALE_WATCHER_TRAIL_FLAG = "forest_hunting_pale_watcher_trail"
+FORESTER_PALE_WATCHER_DONE_FLAG = "forest_hunting_pale_watcher_done"
+
+
+def _forester_pale_watcher_note(user_id: int) -> str | None:
+    if int(database.get_user_flag(user_id, FORESTER_PALE_WATCHER_DONE_FLAG, 0) or 0) > 0:
+        return (
+            "Он долго смотрит на тебя и говорит тише обычного:\n\n"
+            "«Раз видел его и вернулся, не проси объяснений. Такое не рассказывают два раза. "
+            "И он второй раз не приходит.»"
+        )
+
+    omen_count = max(0, int(database.get_user_flag(user_id, FORESTER_PALE_WATCHER_TRAIL_FLAG, 0) or 0))
+    if omen_count >= 3:
+        return (
+            "Лесник сразу замечает, что ты молчишь не как обычно.\n\n"
+            "«Метки внутрь леса? Всё. Сегодня не ходи. Завтра тоже не ходи, если голова на месте. "
+            "Если всё равно пойдёшь — оружие не спасёт.»"
+        )
+    if omen_count == 2:
+        return (
+            "Лесник хмурится, когда слышит про гильзу.\n\n"
+            "«Донцем вверх? Значит, тебя уже не путают. Тебя проверяют. "
+            "Увидишь такое ещё раз — бросай добычу и уходи.»"
+        )
+    if omen_count == 1:
+        return (
+            "Лесник не смеётся над босым следом. Только спрашивает, не мерил ли ты его сапогом.\n\n"
+            "«Не мерь. И не стой над ним долго. В угодьях иногда след смотрит на тебя раньше, чем ты на него.»"
+        )
+    return None
 
 
 def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None):
@@ -71,9 +102,14 @@ def show_npc_dialog(player, vk, user_id: int, npc_id: str, dialog_id: str = None
         from handlers.quests import track_quest_talk_npc
         track_quest_talk_npc(user_id, vk=vk)
         set_dialog_state(user_id, npc_id, "menu")
+        message = npc.greeting
+        if npc_id == "лесник":
+            note = _forester_pale_watcher_note(user_id)
+            if note:
+                message = f"{message}\n\n{note}"
         vk.messages.send(
             user_id=user_id,
-            message=npc.greeting,
+            message=message,
             keyboard=create_npc_dialog_keyboard(npc_id).get_keyboard(),
             random_id=0
         )
@@ -297,15 +333,16 @@ def _handle_forester_unlock_hunting(player, vk, user_id: int, npc_id: str):
 
     from handlers.quests import accept_story_quest
     accept_story_quest(user_id, "forester_marks")
-    set_dialog_state(user_id, npc_id, "forester_trial:tracks")
+    set_dialog_state(user_id, npc_id, "forester_trial:tracks:0")
     vk.messages.send(
         user_id=user_id,
         message=(
             "🌲Лесник:\n\n"
-            "«Метки не дают тем, кто просто просит. Бумажка дорогу не запомнит за тебя.»\n\n"
-            "Он кладёт на стол кусок коры с тремя насечками и старую гильзу, набитую землёй.\n\n"
-            "Первая проверка: след уходит через мокрый мох. Чуть дальше на траве кровь, а слева в чаще хрустнуло.\n"
-            "Что читаешь первым?"
+            "«Метки не дают за храбрость. Храбрость в лесу чаще всего просто шумит.»\n\n"
+            "Он высыпает на стол влажную землю, кладёт рядом обломанную ветку и тряпицу с тёмной кровью.\n\n"
+            "Проверка первая: на мягком грунте отпечаток копыта продавлен глубже обычного, кровь лежит пятнами через "
+            "полтора шага, а в стороне разово хрустнула ветка. Нужно понять, зверь ранен, ведёт тебя или рядом второй.\n"
+            "С чего начинаешь разбор?"
         ),
         keyboard=create_forester_trial_keyboard("tracks").get_keyboard(),
         random_id=0
@@ -318,42 +355,81 @@ def handle_forester_trial_choice(player, vk, user_id: int, text: str, stage: str
     from infra.state_manager import set_dialog_state
 
     choice = (text or "").strip().lower()
-    step = stage.split(":", 1)[1] if ":" in stage else "tracks"
-    expected = {
-        "tracks": "смотреть мох",
-        "wind": "зайти под ветер",
-        "bait": "обойти тушу кругом",
+    parts = stage.split(":")
+    step = parts[1] if len(parts) > 1 else "tracks"
+    try:
+        score = int(parts[2]) if len(parts) > 2 else 0
+    except (TypeError, ValueError):
+        score = 0
+    choices = {
+        "tracks": {
+            "good": {"снять слепок следа", "проверить грунт", "смотреть мох", "мох", "грунт", "след"},
+            "ok": {"проверить кровь", "разобрать кровь", "идти по крови", "кровь"},
+            "bad": {"замереть на шум", "слушать чащу", "стрелять в шум", "шум", "чаща"},
+            "good_note": "«Сначала вес и направление. Грунт показывает скорость, размер и перекос лапы. Кровь и шум читают уже после.»",
+            "ok_note": "«Кровь полезна, но она хуже следа: её можно размазать, увести или оставить приманкой.»",
+            "bad_note": "«Шум проверяют, когда знаешь след. Иначе тебя разворачивают туда, где удобно ждать.»",
+        },
+        "wind": {
+            "good": {"проверить ветер", "сменить дугу", "зайти под ветер", "под ветер", "дуга", "ветер"},
+            "ok": {"обойти валежник", "обойти сушняк", "обойти по сухим веткам", "сушняк", "валежник"},
+            "bad": {"срезать просеку", "идти напрямик", "напрямик", "просека"},
+            "good_note": "«Ветер проверяют до маршрута. Если запах пошёл к зверю, вся тихая ходьба уже не спасёт.»",
+            "ok_note": "«Валежник может выдать шаг, но это второе. Без ветра ты обходишь шум, а не опасность.»",
+            "bad_note": "«Просека экономит время тем, кто не против стать силуэтом. На охоте это не маршрут, а витрина.»",
+        },
+        "bait": {
+            "good": {"осмотреть периметр", "проверить круг", "обойти тушу кругом", "круг", "обойти", "периметр"},
+            "ok": {"выждать дистанцию", "залечь и ждать", "ждать у туши", "ждать", "дистанцию"},
+            "bad": {"снять трофей", "взять трофей", "забрать приманку", "трофей", "приманку"},
+            "good_note": "«У приманки сначала читают периметр: входы, выходы, свежий помёт, место для броска.»",
+            "ok_note": "«Дистанция спасает от первой ошибки, но сама по себе не говорит, кто поставил стол.»",
+            "bad_note": "«Трофей снимают после проверки. Кто наклоняется первым, тот отдаёт шею.»",
+        },
+        "shot": {
+            "good": {"ждать разворот", "ждать", "разворот", "выждать разворот"},
+            "ok": {"сместиться ниже", "ниже", "сместиться", "сменить позицию"},
+            "bad": {"бить по силуэту", "стрелять по силуэту", "силуэт", "стрелять"},
+            "good_note": "«Выстрел делают не когда видно, а когда понятно, куда зверь отдаст корпус после рывка.»",
+            "ok_note": "«Смена позиции лучше поспешного выстрела, но лишний шаг может выдать тебя раньше зверя.»",
+            "bad_note": "«Силуэт в кустах — это не цель, а надежда. Надежда на охоте ранит чаще, чем убивает.»",
+        },
+        "exit": {
+            "good": {"пометить тропу", "метки", "пометить", "тропа"},
+            "ok": {"слушать стаю", "слушать", "стая", "проверить стаю"},
+            "bad": {"добрать сразу", "добрать", "догнать", "сразу"},
+            "good_note": "«После контакта главное — обратная дорога. Метки спасают, когда лес начинает двигаться за спиной.»",
+            "ok_note": "«Стаю слушать надо, но без меток ты можешь услышать её уже не с той стороны.»",
+            "bad_note": "«Добор без выхода — азарт. Азарт в угодьях быстро делает тебя вторым трофеем.»",
+        },
     }
-    next_step = {"tracks": "wind", "wind": "bait"}
 
     if choice in {"к выбору npc", "назад"}:
         show_npc_dialog(player, vk, user_id, "лесник", None)
         return True
 
-    if choice != expected.get(step):
-        set_dialog_state(user_id, "лесник", "menu")
-        vk.messages.send(
-            user_id=user_id,
-            message=(
-                "🌲Лесник:\n\n"
-                "Он молча забирает кору со стола.\n\n"
-                "«Вот так люди и пропадают: видят кровь, слышат шум и забывают про землю под ногами. "
-                "Попробуешь ещё раз, когда голова станет тише.»"
-            ),
-            keyboard=create_npc_dialog_keyboard("лесник").get_keyboard(),
-            random_id=0
-        )
-        return True
+    config = choices.get(step, choices["tracks"])
+    if choice in config["good"]:
+        score += 2
+        note = config["good_note"]
+    elif choice in config["ok"]:
+        score += 1
+        note = config["ok_note"]
+    elif choice in config["bad"]:
+        note = config["bad_note"]
+    else:
+        note = "«Если не можешь назвать решение, значит в лесу ты уже опоздал.»"
 
     if step == "tracks":
-        set_dialog_state(user_id, "лесник", "forester_trial:wind")
+        set_dialog_state(user_id, "лесник", f"forester_trial:wind:{score}")
         vk.messages.send(
             user_id=user_id,
             message=(
                 "🌲Лесник:\n\n"
-                "«Верно. Кровь могли пролить специально, шум могли сделать нарочно. Мох врёт реже.»\n\n"
-                "Вторая проверка: зверь кормится у солонца. Ветер тянет от него к тебе, сухие ветки лежат справа, "
-                "короткая просека идёт напрямик. Как заходишь?"
+                f"{note}\n\n"
+                "Проверка вторая: солонец стоит в низине. Слева мокрый ельник, справа валежник и сухие ветки, "
+                "прямо к точке идёт короткая просека. Пепел с костра тянет неустойчиво, порывами.\n"
+                "Как строишь подход?"
             ),
             keyboard=create_forester_trial_keyboard("wind").get_keyboard(),
             random_id=0
@@ -361,16 +437,65 @@ def handle_forester_trial_choice(player, vk, user_id: int, text: str, stage: str
         return True
 
     if step == "wind":
-        set_dialog_state(user_id, "лесник", "forester_trial:bait")
+        set_dialog_state(user_id, "лесник", f"forester_trial:bait:{score}")
         vk.messages.send(
             user_id=user_id,
             message=(
                 "🌲Лесник:\n\n"
-                "«Под ветер. Сухие ветки сдадут тебя, прямая тропа сдаст ещё быстрее.»\n\n"
-                "Третья проверка: на поляне лежит свежая туша. Вокруг тихо, слишком тихо. "
-                "Трофей хороший, но рядом нет ни птиц, ни мелкой падали. Что делаешь?"
+                f"{note}\n\n"
+                "Проверка третья: на краю поляны лежит свежая туша кабана. Подбрюшье вскрыто чисто, но птицы не садятся, "
+                "мелкая падаль не подходит, а трава за тушей примята полукругом.\n"
+                "Как работаешь с находкой?"
             ),
             keyboard=create_forester_trial_keyboard("bait").get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    if step == "bait":
+        set_dialog_state(user_id, "лесник", f"forester_trial:shot:{score}")
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🌲Лесник:\n\n"
+                f"{note}\n\n"
+                "Проверка четвёртая: зверь вышел не полностью. Видна лопатка между ветками, голова закрыта стволом, "
+                "а за зверем начинается низина с мокрой травой. Ветер держится, но время уходит.\n"
+                "Что делаешь перед выстрелом?"
+            ),
+            keyboard=create_forester_trial_keyboard("shot").get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    if step == "shot":
+        set_dialog_state(user_id, "лесник", f"forester_trial:exit:{score}")
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🌲Лесник:\n\n"
+                f"{note}\n\n"
+                "Проверка пятая: зверь ушёл в ельник после попадания. Кровь есть, но редкая. "
+                "Слева откликнулась стая, позади быстро темнеет, а тропа назад уже похожа на три одинаковые просеки.\n"
+                "Что делаешь первым после контакта?"
+            ),
+            keyboard=create_forester_trial_keyboard("exit").get_keyboard(),
+            random_id=0
+        )
+        return True
+
+    if score < 7:
+        set_dialog_state(user_id, "лесник", "menu")
+        vk.messages.send(
+            user_id=user_id,
+            message=(
+                "🌲Лесник:\n\n"
+                f"{note}\n\n"
+                "Лесник долго молчит, потом убирает бирки обратно в жестяную коробку.\n\n"
+                "«Ты видишь детали, но ещё путаешь порядок. В угодьях порядок важнее смелости: "
+                "след, ветер, сектор, выстрел, выход. Вернёшься, когда сможешь держать эту цепочку без подсказки.»"
+            ),
+            keyboard=create_npc_dialog_keyboard("лесник").get_keyboard(),
             random_id=0
         )
         return True
@@ -385,8 +510,11 @@ def handle_forester_trial_choice(player, vk, user_id: int, text: str, stage: str
         user_id=user_id,
         message=(
             "🌲Лесник:\n\n"
+            f"{note}\n\n"
             "Лесник наконец кивает и отдаёт тебе три потёртые бирки с насечками.\n\n"
-            "«Живую добычу ищут глазами. Опасную — спиной. Если туша лежит слишком удобно, значит охотятся уже на тебя.»\n\n"
+            "«Запомни порядок: след говорит, куда смотреть; ветер решает, можно ли подходить; "
+            "периметр отвечает, не стали ли добычей уже ты; выстрел требует позиции; выход важнее добора. "
+            "С этим в угодья пущу.»\n\n"
             "✅ Открыт маршрут: Охотничьи угодья.\n"
             "Теперь от заимки можно выйти к угодьям, выбирать тактику охоты и приносить трофеи Леснику."
         ),

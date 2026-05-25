@@ -89,6 +89,15 @@ class StateManagerTest(unittest.TestCase):
         self.assertEqual(vk.messages.edited[0]["message_id"], 1)
         self.assertEqual(vk.messages.edited[0]["message"], "map-2")
 
+    def test_try_edit_or_send_ui_passes_attachment_to_send_and_edit(self):
+        vk = DummyVK()
+
+        state_manager.try_edit_or_send_ui(vk, 12, "inventory", "inv-1", attachment="photo1_2")
+        state_manager.try_edit_or_send_ui(vk, 12, "inventory", "inv-2", attachment="photo1_2")
+
+        self.assertEqual(vk.messages.sent[0]["attachment"], "photo1_2")
+        self.assertEqual(vk.messages.edited[0]["attachment"], "photo1_2")
+
     def test_invalidate_edit_targets_forces_fresh_ui_message(self):
         vk = DummyVK()
 

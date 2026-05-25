@@ -262,6 +262,7 @@ def _show_category(vk, user_id: int, category: str):
                 "• админ ивент старт <event_id>\n"
                 "• админ ивент стоп\n"
                 "• админ кулдаун <vk_id> снять|инфо\n"
+                "• админ долговязый on|off|статус|сброс — тест легенды на себе\n"
                 "• админ инвентарь <vk_id>\n"
                 "• админ локация <vk_id> <локация>\n"
                 "• админ онлайн\n",
@@ -318,6 +319,57 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         _show_category(vk, user_id, "gacha"); return True
     if text in {"❓ помощь", "помощь", "админка", "admin", "админ"}:
         _show_main_menu(vk, user_id); return True
+
+    m = re.match(r"^админ\s+долговязый\s+(on|off|статус|status|сброс|reset)$", text)
+    if m:
+        from game.hunting_grounds import (
+            PALE_WATCHER_ADMIN_FORCE_FLAG,
+            PALE_WATCHER_DONE_FLAG,
+            PALE_WATCHER_TRAIL_FLAG,
+        )
+
+        action = m.group(1)
+        if action == "on":
+            database.set_user_flag(user_id, PALE_WATCHER_ADMIN_FORCE_FLAG, 1)
+            _send(
+                vk,
+                user_id,
+                "✅ Тест Белого Долговязого включён для твоего админ-аккаунта.\n"
+                "Каждая завершённая охота будет двигать цепочку на следующий шаг.",
+                create_admin_events_keyboard(),
+            )
+            return True
+        if action == "off":
+            database.set_user_flag(user_id, PALE_WATCHER_ADMIN_FORCE_FLAG, 0)
+            _send(vk, user_id, "⛔ Тест Белого Долговязого выключен.", create_admin_events_keyboard())
+            return True
+        if action in {"сброс", "reset"}:
+            database.set_user_flag(user_id, PALE_WATCHER_TRAIL_FLAG, 0)
+            database.set_user_flag(user_id, PALE_WATCHER_DONE_FLAG, 0)
+            database.set_user_flag(user_id, PALE_WATCHER_ADMIN_FORCE_FLAG, 1)
+            _send(
+                vk,
+                user_id,
+                "✅ Цепочка Белого Долговязого сброшена и форс включён.\n"
+                "Следующая завершённая охота даст первое знамение.",
+                create_admin_events_keyboard(),
+            )
+            return True
+
+        force = int(database.get_user_flag(user_id, PALE_WATCHER_ADMIN_FORCE_FLAG, 0) or 0)
+        trail = int(database.get_user_flag(user_id, PALE_WATCHER_TRAIL_FLAG, 0) or 0)
+        done = int(database.get_user_flag(user_id, PALE_WATCHER_DONE_FLAG, 0) or 0)
+        _send(
+            vk,
+            user_id,
+            "🧪 Белый Долговязый: админ-тест\n\n"
+            f"Форс: {'on' if force else 'off'}\n"
+            f"Знамения: {trail}/3\n"
+            f"Финал уже был: {'да' if done else 'нет'}\n\n"
+            "Команды: админ долговязый on, off, статус, сброс.",
+            create_admin_events_keyboard(),
+        )
+        return True
 
     # === Кнопка "Назад" из подменю ===
     if text in {"⬅️ назад", "назад"} and _get_admin_menu(user_id):

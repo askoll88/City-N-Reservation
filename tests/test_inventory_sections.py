@@ -270,11 +270,13 @@ class InventorySectionsTest(unittest.TestCase):
     def test_inventory_summary_uses_lower_category_keyboard_without_pages(self):
         invalidate_edit_targets(8802)
 
-        self.inventory_module.show_all(self.player, self.vk, user_id=8802)
+        with patch.object(self.inventory_module, "_inventory_overview_attachment", return_value="photo9_9"):
+            self.inventory_module.show_all(self.player, self.vk, user_id=8802)
         message = self.vk.messages.sent[0]["message"]
         keyboard = json.loads(self.vk.messages.sent[0]["keyboard"])
 
         self.assertNotIn("Страница:", message)
+        self.assertEqual(self.vk.messages.sent[0]["attachment"], "photo9_9")
         self.assertFalse(keyboard["inline"])
         self.assertEqual(
             json.loads(keyboard["buttons"][0][0]["action"]["payload"]),

@@ -65,6 +65,8 @@ def _upload_location_image(vk, user_id: int, location_id: str) -> str | None:
     if not image_path.exists():
         logger.warning("Картинка локации не найдена: location=%s path=%s", location_id, image_path)
         return None
+    if not hasattr(vk, "photos"):
+        return None
 
     try:
         import requests
@@ -651,12 +653,7 @@ def go_to_location(player, location_id: str, vk, user_id: int, bypass_risk_confi
 
     if location_id == from_location:
         set_ui_screen(user_id, {"name": "location"}, clear_stack=True)
-        vk.messages.send(
-            user_id=user_id,
-            message="Ты уже находишься в этой локации.",
-            keyboard=create_location_keyboard(from_location, player.level).get_keyboard(),
-            random_id=0,
-        )
+        _send_location_overview(player, vk, user_id, from_location)
         return
 
     try:

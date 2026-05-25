@@ -544,20 +544,30 @@ def create_forester_trial_keyboard(stage: str):
     """Клавиатура испытания Лесника."""
     keyboard = VkKeyboard(one_time=False)
     if stage == "tracks":
-        keyboard.add_button("Смотреть мох", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button("Идти по крови", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button("Снять слепок следа", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Проверить кровь", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
-        keyboard.add_button("Стрелять в шум", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button("Замереть на шум", color=VkKeyboardColor.SECONDARY)
     elif stage == "wind":
-        keyboard.add_button("Зайти под ветер", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button("Идти напрямик", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button("Проверить ветер", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Срезать просеку", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
-        keyboard.add_button("Обойти по сухим веткам", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Обойти валежник", color=VkKeyboardColor.SECONDARY)
+    elif stage == "bait":
+        keyboard.add_button("Осмотреть периметр", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Снять трофей", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+        keyboard.add_button("Выждать дистанцию", color=VkKeyboardColor.SECONDARY)
+    elif stage == "shot":
+        keyboard.add_button("Ждать разворот", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Бить по силуэту", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+        keyboard.add_button("Сместиться ниже", color=VkKeyboardColor.SECONDARY)
     else:
-        keyboard.add_button("Обойти тушу кругом", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button("Забрать приманку", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button("Пометить тропу", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Добрать сразу", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
-        keyboard.add_button("Ждать у туши", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button("Слушать стаю", color=VkKeyboardColor.SECONDARY)
     keyboard.add_line()
     keyboard.add_button("К выбору NPC", color=VkKeyboardColor.NEGATIVE)
     return keyboard

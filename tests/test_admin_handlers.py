@@ -135,6 +135,46 @@ class AdminHandlersTest(unittest.TestCase):
         get_shards_mock.assert_called_once_with(777)
         add_shards_mock.assert_called_once_with(777, 160)
 
+    @patch("handlers.admin.create_admin_events_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.create_admin_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.database.set_user_flag")
+    @patch("handlers.admin.database.is_user_admin", return_value=True)
+    def test_pale_watcher_admin_force_toggle_self_only(
+        self,
+        _is_admin_mock,
+        set_flag_mock,
+        _main_kbd_mock,
+        _events_kbd_mock,
+    ):
+        handled = admin.handle_admin_commands(
+            self.player, self.vk, 1, "админ долговязый on", "админ долговязый on"
+        )
+
+        self.assertTrue(handled)
+        set_flag_mock.assert_called_once_with(1, "forest_hunting_pale_watcher_admin_force", 1)
+        message = self.vk.messages.send.call_args.kwargs["message"]
+        self.assertIn("включён", message)
+
+    @patch("handlers.admin.create_admin_events_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.create_admin_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.database.set_user_flag")
+    @patch("handlers.admin.database.is_user_admin", return_value=True)
+    def test_pale_watcher_admin_force_reset_clears_chain_and_enables_force(
+        self,
+        _is_admin_mock,
+        set_flag_mock,
+        _main_kbd_mock,
+        _events_kbd_mock,
+    ):
+        handled = admin.handle_admin_commands(
+            self.player, self.vk, 1, "админ долговязый сброс", "админ долговязый сброс"
+        )
+
+        self.assertTrue(handled)
+        set_flag_mock.assert_any_call(1, "forest_hunting_pale_watcher_trail", 0)
+        set_flag_mock.assert_any_call(1, "forest_hunting_pale_watcher_done", 0)
+        set_flag_mock.assert_any_call(1, "forest_hunting_pale_watcher_admin_force", 1)
+
 
 if __name__ == "__main__":
     unittest.main()

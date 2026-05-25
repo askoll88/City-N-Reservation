@@ -307,14 +307,29 @@ def _shop_hud_keyboard(view: str, page: int, total_pages: int):
     return create_shop_hud_keyboard(view=view, page=page, total_pages=total_pages).get_keyboard()
 
 
-def _send_inventory_screen(vk, user_id: int, message: str, keyboard=None, *, section: str = "all", page: int = 0):
+def _inventory_overview_attachment(vk, user_id: int) -> str | None:
+    from handlers.location import _upload_location_image
+
+    return _upload_location_image(vk, user_id, "инвентарь")
+
+
+def _send_inventory_screen(
+    vk,
+    user_id: int,
+    message: str,
+    keyboard=None,
+    *,
+    section: str = "all",
+    page: int = 0,
+    attachment: str | None = None,
+):
     """Обновить активный экран инвентаря без засорения чата."""
     from infra.state_manager import try_edit_or_send_ui
 
     current_ui = get_ui_current_screen(user_id)
     push_current = current_ui.get("name") != "inventory"
     set_ui_screen(user_id, {"name": "inventory", "section": section, "page": int(page or 0)}, push_current=push_current)
-    try_edit_or_send_ui(vk, user_id, "inventory", message, keyboard=keyboard)
+    try_edit_or_send_ui(vk, user_id, "inventory", message, keyboard=keyboard, attachment=attachment)
 
 
 def _send_shop_screen(vk, user_id: int, message: str, keyboard=None, *, view: str = "buy", page: int = 0):
@@ -1116,6 +1131,7 @@ def show_all(player, vk, user_id: int, page: int = 0):
         keyboard=create_inventory_keyboard().get_keyboard(),
         section="all",
         page=0,
+        attachment=_inventory_overview_attachment(vk, user_id),
     )
 
 
