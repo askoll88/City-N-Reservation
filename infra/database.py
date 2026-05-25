@@ -264,6 +264,23 @@ def init_db():
             )
         """)
 
+        # -- user_economy_log ---------------------------------------------
+        # Денежный аудит: откуда пришли/куда ушли рубли.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_economy_log (
+                id             BIGSERIAL PRIMARY KEY,
+                user_id        INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                vk_id          BIGINT       NOT NULL,
+                source         VARCHAR(80)  NOT NULL,
+                amount         INTEGER      NOT NULL,
+                balance_before INTEGER      NOT NULL,
+                balance_after  INTEGER      NOT NULL,
+                actor_vk_id    BIGINT,
+                details        JSONB        NOT NULL DEFAULT '{}'::jsonb,
+                created_at     TIMESTAMP    NOT NULL DEFAULT NOW()
+            )
+        """)
+
         # -- items ----------------------------------------------------------
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS items (
@@ -533,6 +550,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_user_storage_item     ON user_storage(item_id)",
             "CREATE INDEX IF NOT EXISTS idx_user_fish_locker_user ON user_fish_locker(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_user_fish_locker_name ON user_fish_locker(user_id, fish_name)",
+            "CREATE INDEX IF NOT EXISTS idx_user_economy_log_user_created ON user_economy_log(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_user_economy_log_source_created ON user_economy_log(source, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_items_category        ON items(category)",
             "CREATE INDEX IF NOT EXISTS idx_user_equipment_user   ON user_equipment(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status)",
@@ -810,13 +829,29 @@ def cleanup_retired_trash_items_cashback() -> list[dict]:
             cashback = int(data["cashback"])
             if cashback <= 0:
                 continue
+            cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (int(data["vk_id"]),))
+            user = cursor.fetchone()
+            if not user:
+                continue
             cursor.execute(
                 """
                 UPDATE users
                 SET money = money + %s
                 WHERE vk_id = %s
+                RETURNING money
                 """,
                 (cashback, int(data["vk_id"])),
+            )
+            new_balance = int(cursor.fetchone()["money"])
+            _insert_economy_log_tx(
+                cursor,
+                user_id=int(user["id"]),
+                vk_id=int(data["vk_id"]),
+                source="retired_items_cashback",
+                amount=cashback,
+                balance_before=int(user.get("money", 0) or 0),
+                balance_after=new_balance,
+                details={"items_removed": data.get("items_removed"), "details": data.get("details")},
             )
             notifications.append(data)
 
@@ -1369,6 +1404,69 @@ def update_user_location(vk_id: int, location: str):
         )
 
 
+def _economy_details_json(details: dict | None) -> str:
+    if not isinstance(details, dict):
+        details = {}
+    return json.dumps(details, ensure_ascii=False, default=str)
+
+
+def _insert_economy_log_tx(
+    cursor,
+    *,
+    user_id: int,
+    vk_id: int,
+    source: str,
+    amount: int,
+    balance_before: int,
+    balance_after: int,
+    actor_vk_id: int | None = None,
+    details: dict | None = None,
+):
+    amount = int(amount or 0)
+    if amount == 0:
+        return
+    cursor.execute(
+        """
+        INSERT INTO user_economy_log (
+            user_id, vk_id, source, amount, balance_before, balance_after,
+            actor_vk_id, details
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+        """,
+        (
+            int(user_id),
+            int(vk_id),
+            str(source or "unknown")[:80],
+            amount,
+            int(balance_before or 0),
+            int(balance_after or 0),
+            int(actor_vk_id) if actor_vk_id is not None else None,
+            _economy_details_json(details),
+        ),
+    )
+
+
+def get_user_economy_log(vk_id: int, limit: int = 30, offset: int = 0) -> list[dict]:
+    """Последние денежные операции игрока для аудита экономики."""
+    safe_limit = max(1, min(200, int(limit or 30)))
+    safe_offset = max(0, int(offset or 0))
+    with db_cursor() as (cursor, _):
+        cursor.execute(
+            """
+            SELECT l.id, l.vk_id, l.source, l.amount,
+                   l.balance_before, l.balance_after,
+                   l.actor_vk_id, l.details, l.created_at
+            FROM user_economy_log l
+            JOIN users u ON u.id = l.user_id
+            WHERE u.vk_id = %s
+            ORDER BY l.created_at DESC, l.id DESC
+            LIMIT %s OFFSET %s
+            """,
+            (vk_id, safe_limit, safe_offset),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
 # Поля которые разрешено обновлять через update_user_stats()
 _ALLOWED_USER_FIELDS = frozenset({
     "health", "energy", "radiation", "money",
@@ -1416,6 +1514,10 @@ def update_user_stats(vk_id: int, **fields):
     if not fields:
         return
 
+    money_source = str(fields.pop("_money_source", "") or "update_user_stats")
+    money_details = fields.pop("_money_details", None)
+    money_actor_vk_id = fields.pop("_money_actor_vk_id", None)
+
     user_fields = {}
     equipment_updates = {}  # {slot: item_name or None}
 
@@ -1431,18 +1533,34 @@ def update_user_stats(vk_id: int, **fields):
 
     with db_cursor() as (cursor, _):
         # Получаем internal id
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (vk_id,))
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         row = cursor.fetchone()
         if not row:
             logger.error("update_user_stats: пользователь vk_id=%s не найден", vk_id)
             return
         user_id = row["id"]
+        old_money = int(row.get("money", 0) or 0)
 
         # Обновляем основную таблицу
         if user_fields:
             sets = ", ".join(f"{k} = %s" for k in user_fields)
             params = list(user_fields.values()) + [vk_id]
             cursor.execute(f"UPDATE users SET {sets} WHERE vk_id = %s", params)
+            if "money" in user_fields:
+                new_money = int(user_fields.get("money") or 0)
+                _insert_economy_log_tx(
+                    cursor,
+                    user_id=user_id,
+                    vk_id=vk_id,
+                    source=money_source,
+                    amount=new_money - old_money,
+                    balance_before=old_money,
+                    balance_after=new_money,
+                    actor_vk_id=money_actor_vk_id,
+                    details=money_details if isinstance(money_details, dict) else {
+                        "fields": sorted(user_fields.keys()),
+                    },
+                )
 
         # Обновляем экипировку
         for slot, item_name in equipment_updates.items():
@@ -1674,7 +1792,7 @@ def move_item_from_storage_transaction(vk_id: int, item_name: str, quantity: int
     """Забрать предмет из шкафа в инвентарь (атомарно)."""
     safe_qty = max(1, int(quantity or 1))
     with db_cursor() as (cursor, _):
-        cursor.execute("SELECT id, level FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, level, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден."}
@@ -1866,12 +1984,29 @@ def add_user_money(vk_id: int, amount: int) -> int | None:
         user = get_user_by_vk(vk_id)
         return int(user.get("money", 0) or 0) if user else None
     with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        user = cursor.fetchone()
+        if not user:
+            return None
         cursor.execute(
             "UPDATE users SET money = money + %s WHERE vk_id = %s RETURNING money",
             (safe_amount, vk_id),
         )
         row = cursor.fetchone()
-        return int(row["money"]) if row else None
+        if not row:
+            return None
+        new_balance = int(row["money"])
+        old_balance = int(user.get("money", 0) or 0)
+        _insert_economy_log_tx(
+            cursor,
+            user_id=int(user["id"]),
+            vk_id=vk_id,
+            source="add_user_money",
+            amount=safe_amount,
+            balance_before=old_balance,
+            balance_after=new_balance,
+        )
+        return new_balance
 
 
 def _fish_entry_caught_at(entry: dict) -> datetime:
@@ -2062,6 +2197,16 @@ def sell_fish_locker_transaction(vk_id: int) -> dict:
             (total, user_id),
         )
         new_balance = int(cursor.fetchone()["money"])
+        _insert_economy_log_tx(
+            cursor,
+            user_id=user_id,
+            vk_id=vk_id,
+            source="fishing_sell_locker",
+            amount=total,
+            balance_before=int(user.get("money", 0) or 0),
+            balance_after=new_balance,
+            details={"sold_count": len(sold)},
+        )
     return {"success": True, "sold": sold, "total": total, "remaining_money": new_balance}
 
 
@@ -2622,6 +2767,16 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
             updated = cursor.fetchone()
             new_balance = int(updated["money"])
             new_shells = int(updated["shells"])
+            _insert_economy_log_tx(
+                cursor,
+                user_id=int(user["id"]),
+                vk_id=vk_id,
+                source="npc_buy",
+                amount=-price,
+                balance_before=have,
+                balance_after=new_balance,
+                details={"item": item_data["name"], "merchant_id": merchant_id, "shells": shell_qty},
+            )
 
             if merchant_id:
                 cursor.execute(
@@ -2653,6 +2808,16 @@ def buy_item_transaction(vk_id: int, item_name: str, merchant_id: str | None = N
             (price, user["id"]),
         )
         new_balance = int(cursor.fetchone()["money"])
+        _insert_economy_log_tx(
+            cursor,
+            user_id=int(user["id"]),
+            vk_id=vk_id,
+            source="npc_buy",
+            amount=-price,
+            balance_before=have,
+            balance_after=new_balance,
+            details={"item": item_data["name"], "merchant_id": merchant_id},
+        )
 
         inv_level = 1
         inv_rank = normalize_weapon_rank(None, item_data)
@@ -2722,7 +2887,7 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
         if is_gacha_event_item(item["name"]):
             return {"success": False, "message": "Ивентовые предметы Резонанса нельзя продавать."}
 
-        cursor.execute("SELECT id, shells FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, money, shells FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден"}
@@ -2752,6 +2917,16 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
             row = cursor.fetchone()
             if not row:
                 return {"success": False, "message": f"У тебя нет {shell_qty} гильз для продажи."}
+            _insert_economy_log_tx(
+                cursor,
+                user_id=int(user["id"]),
+                vk_id=vk_id,
+                source="npc_sell",
+                amount=sell_price,
+                balance_before=int(user.get("money", 0) or 0),
+                balance_after=int(row["money"]),
+                details={"item": item["name"], "merchant_id": merchant_id, "quantity": shell_qty},
+            )
 
             bonuses = []
             if sell_bonus_pct:
@@ -2830,6 +3005,16 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
             (sell_price, vk_id),
         )
         new_balance = int(cursor.fetchone()["money"])
+        _insert_economy_log_tx(
+            cursor,
+            user_id=int(user["id"]),
+            vk_id=vk_id,
+            source="npc_sell",
+            amount=sell_price,
+            balance_before=int(user.get("money", 0) or 0),
+            balance_after=new_balance,
+            details={"item": item_name, "merchant_id": merchant_id, "quantity": 1},
+        )
 
     bonuses = []
     if sell_bonus_pct:
@@ -2848,7 +3033,7 @@ def sell_item_transaction(vk_id: int, item_name: str, sell_bonus_pct: int = 0, m
 def sell_all_trash_transaction(vk_id: int, sell_bonus_pct: int = 0, merchant_id: str | None = None) -> dict:
     """Атомарно продать весь хлам из инвентаря игрока."""
     with db_cursor() as (cursor, _):
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден"}
@@ -2909,6 +3094,16 @@ def sell_all_trash_transaction(vk_id: int, sell_bonus_pct: int = 0, merchant_id:
             (total_price, user["id"]),
         )
         new_balance = int(cursor.fetchone()["money"])
+        _insert_economy_log_tx(
+            cursor,
+            user_id=int(user["id"]),
+            vk_id=vk_id,
+            source="npc_sell_trash",
+            amount=total_price,
+            balance_before=int(user.get("money", 0) or 0),
+            balance_after=new_balance,
+            details={"sold_quantity": total_quantity, "merchant_id": merchant_id},
+        )
 
     bonuses = []
     if sell_bonus_pct:
@@ -2962,7 +3157,7 @@ def sell_forester_trophies_transaction(vk_id: int) -> dict:
     """Атомарно продать Леснику все лесные трофеи из инвентаря игрока."""
     trophy_names = tuple(FORESTER_TROPHY_PRICES.keys())
     with db_cursor() as (cursor, _):
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден.", "sold": [], "total": 0}
@@ -3012,6 +3207,16 @@ def sell_forester_trophies_transaction(vk_id: int) -> dict:
             (total, user["id"]),
         )
         new_balance = int(cursor.fetchone()["money"])
+        _insert_economy_log_tx(
+            cursor,
+            user_id=int(user["id"]),
+            vk_id=vk_id,
+            source="forester_sell_trophies",
+            amount=total,
+            balance_before=int(user.get("money", 0) or 0),
+            balance_after=new_balance,
+            details={"sold": sold},
+        )
 
     return {
         "success": True,
@@ -3026,7 +3231,7 @@ def sell_luchik_fish_transaction(vk_id: int) -> dict:
     """Атомарно продать Лучику весь базовый рыбный улов игрока."""
     fish_names = tuple(LUCHIK_FISH_PRICES.keys())
     with db_cursor() as (cursor, _):
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         user = cursor.fetchone()
         if not user:
             return {"success": False, "message": "Пользователь не найден.", "sold": [], "total": 0}
@@ -3076,6 +3281,16 @@ def sell_luchik_fish_transaction(vk_id: int) -> dict:
             (total, user["id"]),
         )
         new_balance = int(cursor.fetchone()["money"])
+        _insert_economy_log_tx(
+            cursor,
+            user_id=int(user["id"]),
+            vk_id=vk_id,
+            source="luchik_sell_fish",
+            amount=total,
+            balance_before=int(user.get("money", 0) or 0),
+            balance_after=new_balance,
+            details={"sold": sold},
+        )
 
     return {
         "success": True,
@@ -3236,6 +3451,16 @@ def complete_luchik_order_transaction(vk_id: int, order: dict) -> dict:
                 (reward_money, user_id),
             )
             new_balance = int(cursor.fetchone()["money"])
+            _insert_economy_log_tx(
+                cursor,
+                user_id=user_id,
+                vk_id=vk_id,
+                source="luchik_order",
+                amount=reward_money,
+                balance_before=int(user.get("money", 0) or 0),
+                balance_after=new_balance,
+                details={"order": order.get("label") or order.get("id") or "unknown"},
+            )
 
         granted: list[str] = []
         for item_name, qty in order.get("reward_items", []):
@@ -3740,15 +3965,32 @@ def admin_set_user_field(vk_id: int, field: str, value: int) -> dict:
             "message": f"Поле '{field}' нельзя редактировать через админку.",
         }
     with db_cursor() as (cursor, _):
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        before = cursor.fetchone()
+        if not before:
+            return {"success": False, "message": "Пользователь не найден."}
+        old_money = int(before.get("money", 0) or 0)
         cursor.execute(f"""
             UPDATE users
             SET {field} = %s
             WHERE vk_id = %s
-            RETURNING vk_id, name, {field}
+            RETURNING vk_id, name, {field}, money
         """, (value, vk_id))
         row = cursor.fetchone()
         if not row:
             return {"success": False, "message": "Пользователь не найден."}
+        if field == "money":
+            new_money = int(row.get("money", 0) or 0)
+            _insert_economy_log_tx(
+                cursor,
+                user_id=int(before["id"]),
+                vk_id=vk_id,
+                source="admin_set_money",
+                amount=new_money - old_money,
+                balance_before=old_money,
+                balance_after=new_money,
+                details={"field": field, "value": value},
+            )
     return {
         "success": True,
         "message": f"{row['name']} ({row['vk_id']}): {field} = {row[field]}",
@@ -4082,6 +4324,17 @@ def create_market_listing(vk_id: int, item_name: str, price_per_item: int, quant
             }
 
         cursor.execute("UPDATE users SET money = money - %s WHERE vk_id = %s", (listing_fee, vk_id))
+        if listing_fee > 0:
+            _insert_economy_log_tx(
+                cursor,
+                user_id=int(seller["id"]),
+                vk_id=vk_id,
+                source="market_listing_fee",
+                amount=-listing_fee,
+                balance_before=int(seller.get("money", 0) or 0),
+                balance_after=int(seller.get("money", 0) or 0) - listing_fee,
+                details={"item": item["name"], "quantity": quantity, "price_per_item": price_per_item},
+            )
         cursor.execute("""
             UPDATE user_inventory
             SET quantity = quantity - %s
@@ -4312,7 +4565,7 @@ def buy_market_listing(vk_id: int, listing_id: int) -> dict:
     with db_cursor() as (cursor, _):
         _expire_market_listings_tx(cursor)
 
-        cursor.execute("SELECT id, level FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
+        cursor.execute("SELECT id, level, money FROM users WHERE vk_id = %s FOR UPDATE", (vk_id,))
         buyer = cursor.fetchone()
         if not buyer:
             return {"success": False, "message": "Покупатель не найден."}
@@ -4340,7 +4593,7 @@ def buy_market_listing(vk_id: int, listing_id: int) -> dict:
         sale_fee = _calc_fee(total_price, config.MARKET_SALE_FEE_PCT)
         seller_payout = max(0, total_price - sale_fee)
 
-        cursor.execute("SELECT id FROM users WHERE vk_id = %s", (lot["seller_vk_id"],))
+        cursor.execute("SELECT id, money FROM users WHERE vk_id = %s FOR UPDATE", (lot["seller_vk_id"],))
         seller = cursor.fetchone()
         if not seller:
             return {"success": False, "message": "Продавец не найден."}
@@ -4354,12 +4607,42 @@ def buy_market_listing(vk_id: int, listing_id: int) -> dict:
         buyer_balance = cursor.fetchone()
         if not buyer_balance:
             return {"success": False, "message": f"Не хватает денег. Нужно {total_price} руб."}
+        _insert_economy_log_tx(
+            cursor,
+            user_id=int(buyer["id"]),
+            vk_id=vk_id,
+            source="market_buy",
+            amount=-total_price,
+            balance_before=int(buyer.get("money", 0) or 0),
+            balance_after=int(buyer_balance["money"]),
+            details={"listing_id": listing_id, "item": lot["item_name"], "quantity": lot["quantity"]},
+        )
 
         cursor.execute("""
             UPDATE users
             SET money = money + %s
             WHERE vk_id = %s
+            RETURNING money
         """, (seller_payout, lot["seller_vk_id"]))
+        seller_balance = cursor.fetchone()
+        if seller_payout > 0 and seller_balance:
+            _insert_economy_log_tx(
+                cursor,
+                user_id=int(seller["id"]),
+                vk_id=int(lot["seller_vk_id"]),
+                source="market_sale",
+                amount=seller_payout,
+                balance_before=int(seller.get("money", 0) or 0),
+                balance_after=int(seller_balance["money"]),
+                actor_vk_id=vk_id,
+                details={
+                    "listing_id": listing_id,
+                    "item": lot["item_name"],
+                    "quantity": lot["quantity"],
+                    "sale_fee": sale_fee,
+                    "total_price": total_price,
+                },
+            )
 
         cursor.execute("""
             INSERT INTO user_inventory (
@@ -6036,7 +6319,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 return {"error": "already_claimed"}
 
             cursor.execute("""
-                SELECT id, level, rank_tier, experience,
+                SELECT id, money, level, rank_tier, experience,
                        health, energy, strength, stamina, perception, luck,
                        max_weight, max_health_bonus
                 FROM users
@@ -6048,6 +6331,7 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                 return {"error": "user_not_found"}
 
             user_internal_id = int(user_meta["id"])
+            old_money = int(user_meta.get("money", 0) or 0)
             user_level = int(user_meta.get("level", 1) or 1)
             user_experience = int(user_meta.get("experience", 0) or 0)
             user_rank_tier = max(1, int(user_meta.get("rank_tier", 1) or 1))
@@ -6152,6 +6436,17 @@ def claim_daily_rewards(vk_id: int) -> dict | None:
                           max_weight, max_health_bonus
             """, (total_money, total_xp, vk_id))
             user_row = cursor.fetchone()
+            if user_row and total_money:
+                _insert_economy_log_tx(
+                    cursor,
+                    user_id=user_internal_id,
+                    vk_id=vk_id,
+                    source="daily_quests",
+                    amount=total_money,
+                    balance_before=old_money,
+                    balance_after=int(user_row.get("money", 0) or 0),
+                    details={"streak": new_streak, "quests": [q.get("id") for q in quests]},
+                )
             level_up = _apply_level_ups_after_xp(cursor, vk_id, user_row) if user_row else None
             if level_up and level_up.get("user"):
                 user_row = level_up["user"]

@@ -139,7 +139,7 @@ def _show_users_page(vk, user_id: int, page: int = 1, query: str | None = None) 
 
     lines.extend([
         "",
-        "Команды: админ профиль <id>, админ инвентарь <id>, админ локация <id> <локация>",
+        "Команды: админ профиль <id>, админ экономика <id>, админ инвентарь <id>, админ локация <id> <локация>",
     ])
     _send(vk, user_id, "\n".join(lines), create_admin_users_list_keyboard(safe_page, pages))
 
@@ -156,6 +156,20 @@ def _fmt_dt_msk(ts: int) -> str:
     return datetime.fromtimestamp(int(ts), tz=timezone.utc).astimezone(MSK_TZ).strftime("%Y-%m-%d %H:%M:%S МСК")
 
 
+def _fmt_db_dt_msk(value) -> str:
+    if not value:
+        return "-"
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(MSK_TZ).strftime("%Y-%m-%d %H:%M:%S МСК")
+    try:
+        return _fmt_dt_msk(int(value))
+    except Exception:
+        return str(value)
+
+
 def _parse_msk_datetime(raw: str) -> int | None:
     value = str(raw or "").strip()
     if not value:
@@ -169,6 +183,33 @@ def _parse_msk_datetime(raw: str) -> int | None:
         except ValueError:
             continue
     return None
+
+
+def _format_economy_log(rows: list[dict], target_vk_id: int) -> str:
+    lines = [f"💰 ЭКОНОМИКА {target_vk_id}", ""]
+    if not rows:
+        lines.append("Денежных операций в логе пока нет.")
+        return "\n".join(lines)
+
+    for row in rows:
+        amount = int(row.get("amount") or 0)
+        sign = "+" if amount > 0 else ""
+        source = row.get("source") or "unknown"
+        before = int(row.get("balance_before") or 0)
+        after = int(row.get("balance_after") or 0)
+        lines.append(f"{_fmt_db_dt_msk(row.get('created_at'))}")
+        lines.append(f"• {source}: {sign}{amount} руб. ({before} → {after})")
+        details = row.get("details") or {}
+        if isinstance(details, dict):
+            compact = []
+            for key in ("item", "quantity", "merchant_id", "listing_id", "order", "sold_count", "sale_fee"):
+                if key in details and details.get(key) not in (None, "", []):
+                    compact.append(f"{key}={details.get(key)}")
+            if compact:
+                lines.append(f"  {', '.join(compact)}")
+        if row.get("actor_vk_id"):
+            lines.append(f"  actor={row['actor_vk_id']}")
+    return "\n".join(lines)
 
 
 def _format_gacha_banner_admin_status() -> str:
@@ -253,6 +294,7 @@ def _show_category(vk, user_id: int, category: str):
         "help": "📖 СПРАВКА АДМИНА\n\nВсе команды начинаются с админ:\n"
                 "• админ пользователи [поиск] — список/поиск\n"
                 "• админ профиль <vk_id> — профиль\n"
+                "• админ экономика <vk_id> [лимит] — денежный лог\n"
                 "• админ права <vk_id> on|off — права\n"
                 "• админ выдать <vk_id> <кол-во> <предмет>\n"
                 "• админ удалить <vk_id> <предмет> [кол-во]\n"
@@ -412,7 +454,7 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         _send(vk, user_id, "\n".join(lines), create_admin_users_keyboard()); return True
 
     if text == "профиль (по vk_id)":
-        _send(vk, user_id, "Введи:\nадмин профиль <vk_id>", create_admin_users_keyboard()); return True
+        _send(vk, user_id, "Введи:\nадмин профиль <vk_id>\nадмин экономика <vk_id> [лимит]", create_admin_users_keyboard()); return True
     if text == "инвентарь (по vk_id)":
         _send(vk, user_id, "Введи:\nадмин инвентарь <vk_id>", create_admin_users_keyboard()); return True
     if text == "права on/off":
@@ -810,6 +852,13 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
             name_lines.append(f"VK короткое имя: {user['vk_screen_name']}")
         name_lines.append(f"Ник: {user['name']}")
         _send(vk, user_id, f"🧾 ПРОФИЛЬ {user['vk_id']}\n\n{chr(10).join(name_lines)}\nЛокация: {user['location']}\nУровень: {user['level']}\nДеньги: {user['money']}\nАдмин: {user['is_admin']}\nБан: {user['is_banned']}\nПричина: {user.get('ban_reason') or '-'}"); return True
+
+    m = re.match(r"^админ\s+экономика\s+(\d+)(?:\s+(\d+))?$", text)
+    if m:
+        target = int(m.group(1))
+        limit = int(m.group(2) or 20)
+        rows = database.get_user_economy_log(target, limit=limit)
+        _send(vk, user_id, _format_economy_log(rows, target)); return True
 
     m = re.match(r"^админ\s+права\s+(\d+)\s+(on|off)$", text)
     if m:
