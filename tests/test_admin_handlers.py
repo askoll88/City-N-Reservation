@@ -72,6 +72,42 @@ class AdminHandlersTest(unittest.TestCase):
         self.assertIn("ID: 777 | Ник: Сталкер", message)
         search_mock.assert_called_once_with(query=None, limit=10, offset=0)
 
+    @patch("handlers.admin.create_admin_users_list_keyboard", return_value=DummyKeyboard())
+    @patch("handlers.admin.database.set_user_flag")
+    @patch("handlers.admin.database.get_user_flag", return_value=0)
+    @patch("handlers.admin.database.admin_search_users")
+    @patch("handlers.admin.database.admin_count_users", return_value=1)
+    @patch("handlers.admin.database.is_user_admin", return_value=True)
+    def test_users_page_uses_stored_vk_name_without_api_call(
+        self,
+        _is_admin_mock,
+        _count_mock,
+        search_mock,
+        _get_flag_mock,
+        _set_flag_mock,
+        _kbd_mock,
+    ):
+        search_mock.return_value = [{
+            "vk_id": 888,
+            "name": "Сталкер_888",
+            "vk_display_name": "Анна Соколова",
+            "level": 4,
+            "experience": 80,
+            "money": 120,
+            "location": "кпп",
+            "is_admin": 0,
+            "is_banned": 0,
+        }]
+
+        handled = admin.handle_admin_commands(
+            self.player, self.vk, 1, "последние пользователи", "Последние пользователи"
+        )
+
+        self.assertTrue(handled)
+        message = self.vk.messages.send.call_args.kwargs["message"]
+        self.assertIn("Анна Соколова", message)
+        self.vk.users.get.assert_not_called()
+
     @patch("handlers.admin.create_admin_keyboard", return_value=DummyKeyboard())
     @patch("handlers.admin.database.is_user_admin", return_value=True)
     @patch("handlers.admin.database.set_user_ban")

@@ -81,6 +81,15 @@ def _fetch_vk_display_names(vk, vk_ids: list[int]) -> dict[int, str]:
     return names
 
 
+def _stored_vk_display_name(user: dict) -> str:
+    display_name = str(user.get("vk_display_name") or "").strip()
+    if display_name:
+        return display_name
+    first = str(user.get("vk_first_name") or "").strip()
+    last = str(user.get("vk_last_name") or "").strip()
+    return f"{first} {last}".strip()
+
+
 def _show_users_page(vk, user_id: int, page: int = 1, query: str | None = None) -> None:
     total = database.admin_count_users(query=query)
     pages = max(1, (total + ADMIN_USERS_PER_PAGE - 1) // ADMIN_USERS_PER_PAGE)
@@ -93,7 +102,12 @@ def _show_users_page(vk, user_id: int, page: int = 1, query: str | None = None) 
         limit=ADMIN_USERS_PER_PAGE,
         offset=(safe_page - 1) * ADMIN_USERS_PER_PAGE,
     )
-    vk_names = _fetch_vk_display_names(vk, [int(u.get("vk_id") or 0) for u in users])
+    missing_vk_name_ids = [
+        int(u.get("vk_id") or 0)
+        for u in users
+        if int(u.get("vk_id") or 0) > 0 and not _stored_vk_display_name(u)
+    ]
+    vk_names = _fetch_vk_display_names(vk, missing_vk_name_ids)
 
     title = f"🔎 ИГРОКИ: {query}" if query else "👥 ИГРОКИ"
     lines = [
@@ -106,7 +120,7 @@ def _show_users_page(vk, user_id: int, page: int = 1, query: str | None = None) 
         lines.append("Пользователи не найдены.")
     for idx, u in enumerate(users, start=(safe_page - 1) * ADMIN_USERS_PER_PAGE + 1):
         vk_id = int(u.get("vk_id") or 0)
-        vk_name = vk_names.get(vk_id)
+        vk_name = _stored_vk_display_name(u) or vk_names.get(vk_id)
         game_name = str(u.get("name") or "-")
         flags = []
         if u.get("is_admin"):
@@ -790,8 +804,10 @@ def handle_admin_commands(player, vk, user_id: int, text: str, original_text: st
         user = database.get_admin_user(target)
         if not user:
             _send(vk, user_id, "Пользователь не найден."); return True
-        vk_name = _fetch_vk_display_names(vk, [target]).get(target)
+        vk_name = _stored_vk_display_name(user) or _fetch_vk_display_names(vk, [target]).get(target)
         name_lines = [f"VK: {vk_name}"] if vk_name else []
+        if user.get("vk_screen_name"):
+            name_lines.append(f"VK короткое имя: {user['vk_screen_name']}")
         name_lines.append(f"Ник: {user['name']}")
         _send(vk, user_id, f"🧾 ПРОФИЛЬ {user['vk_id']}\n\n{chr(10).join(name_lines)}\nЛокация: {user['location']}\nУровень: {user['level']}\nДеньги: {user['money']}\nАдмин: {user['is_admin']}\nБан: {user['is_banned']}\nПричина: {user.get('ban_reason') or '-'}"); return True
 

@@ -98,6 +98,9 @@ _last_state_cleanup_ts = 0.0
 _STATE_CLEANUP_INTERVAL_SEC = 60
 _SHELTER_REGEN_TS_FLAG = "shelter_energy_regen_ts"
 _SHELTER_REGEN_ACTIVE_FLAG = "shelter_energy_regen_active"
+_VK_PROFILE_SYNC_TTL_SEC = 6 * 60 * 60
+_vk_profile_sync_ts: dict[int, float] = {}
+_vk_profile_sync_lock = threading.Lock()
 
 
 def _maybe_cleanup_inactive_states():
@@ -205,6 +208,37 @@ def get_player(user_id: int):
     return player
 
 
+def _sync_vk_profile(user_id: int, vk):
+    """Периодически сохранять реальные имя/фамилию VK в БД для админки."""
+    now = time.monotonic()
+    with _vk_profile_sync_lock:
+        last_sync = _vk_profile_sync_ts.get(user_id)
+        if last_sync is not None and now - last_sync < _VK_PROFILE_SYNC_TTL_SEC:
+            return
+        _vk_profile_sync_ts[user_id] = now
+
+    users_api = getattr(vk, "users", None)
+    get_method = getattr(users_api, "get", None)
+    if not callable(get_method):
+        return
+
+    try:
+        response = get_method(user_ids=str(user_id), fields="screen_name")
+        if isinstance(response, dict) and "response" in response:
+            response = response.get("response")
+        row = (response or [None])[0]
+        if not isinstance(row, dict):
+            return
+        database.update_user_vk_profile(
+            user_id,
+            first_name=row.get("first_name"),
+            last_name=row.get("last_name"),
+            screen_name=row.get("screen_name") or row.get("domain"),
+        )
+    except Exception:
+        logger.debug("Не удалось синхронизировать VK-профиль user_id=%s", user_id, exc_info=True)
+
+
 def handle_message(event, vk):
     """Обработка входящего сообщения"""
     user_id = event.obj.message['from_id']
@@ -213,6 +247,7 @@ def handle_message(event, vk):
 
     # Получаем игрока
     player = get_player(user_id)
+    _sync_vk_profile(user_id, vk)
     ensure_runtime_state_loaded(user_id)
     try:
         _apply_shelter_passive_energy_regen(player, user_id)

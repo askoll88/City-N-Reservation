@@ -193,6 +193,11 @@ def init_db():
                 id          SERIAL PRIMARY KEY,
                 vk_id       BIGINT UNIQUE NOT NULL,
                 name        VARCHAR(100) NOT NULL,
+                vk_first_name   VARCHAR(100),
+                vk_last_name    VARCHAR(100),
+                vk_display_name VARCHAR(220),
+                vk_screen_name  VARCHAR(100),
+                vk_profile_updated_at TIMESTAMPTZ,
                 location    VARCHAR(50)  DEFAULT 'город',
                 health      INTEGER      DEFAULT 100,
                 energy      INTEGER      DEFAULT 100,
@@ -642,6 +647,11 @@ def _migrate_legacy_schema():
         # которые уже имеют таблицу users но без новых полей)
         new_columns = [
             ("player_class",          "VARCHAR(50)"),
+            ("vk_first_name",         "VARCHAR(100)"),
+            ("vk_last_name",          "VARCHAR(100)"),
+            ("vk_display_name",       "VARCHAR(220)"),
+            ("vk_screen_name",        "VARCHAR(100)"),
+            ("vk_profile_updated_at", "TIMESTAMPTZ"),
             ("previous_location",     "VARCHAR(50)"),
             ("hospital_treatments",   "INTEGER DEFAULT 0"),
             ("max_health_bonus",      "INTEGER DEFAULT 0"),
@@ -1287,16 +1297,68 @@ def get_user_by_vk(vk_id: int) -> dict | None:
     return _build_user_dict(dict(user_row), list(equipment), list(flags))
 
 
-def create_user(vk_id: int, name: str) -> dict:
+def create_user(
+    vk_id: int,
+    name: str,
+    vk_first_name: str | None = None,
+    vk_last_name: str | None = None,
+    vk_screen_name: str | None = None,
+) -> dict:
+    first = (vk_first_name or "").strip()[:100] or None
+    last = (vk_last_name or "").strip()[:100] or None
+    screen_name = (vk_screen_name or "").strip()[:100] or None
+    display_name = " ".join(part for part in (first, last) if part)[:220] or None
     with db_cursor() as (cursor, _):
         cursor.execute("""
-            INSERT INTO users (vk_id, name, location, health, energy, radiation,
+            INSERT INTO users (vk_id, name, vk_first_name, vk_last_name,
+                               vk_display_name, vk_screen_name, vk_profile_updated_at,
+                               location, health, energy, radiation,
                                money, level, experience, strength, stamina,
                                perception, luck, armor_defense, max_weight)
-            VALUES (%s,%s,'город',100,100,0,%s,1,0,4,4,4,4,0,20)
+            VALUES (%s,%s,%s,%s,%s,%s,
+                    CASE WHEN %s IS NULL AND %s IS NULL AND %s IS NULL THEN NULL ELSE NOW() END,
+                    'город',100,100,0,%s,1,0,4,4,4,4,0,20)
             ON CONFLICT (vk_id) DO NOTHING
-        """, (vk_id, name, config.START_MONEY))
+        """, (
+            vk_id,
+            name,
+            first,
+            last,
+            display_name,
+            screen_name,
+            first,
+            last,
+            screen_name,
+            config.START_MONEY,
+        ))
     return get_user_by_vk(vk_id)
+
+
+def update_user_vk_profile(
+    vk_id: int,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    screen_name: str | None = None,
+) -> bool:
+    """Сохранить реальные данные VK-профиля рядом с игровым ником."""
+    first = (first_name or "").strip()[:100] or None
+    last = (last_name or "").strip()[:100] or None
+    screen = (screen_name or "").strip()[:100] or None
+    display = " ".join(part for part in (first, last) if part)[:220] or None
+    if not any((first, last, screen)):
+        return False
+
+    with db_cursor() as (cursor, _):
+        cursor.execute("""
+            UPDATE users
+            SET vk_first_name = %s,
+                vk_last_name = %s,
+                vk_display_name = %s,
+                vk_screen_name = %s,
+                vk_profile_updated_at = NOW()
+            WHERE vk_id = %s
+        """, (first, last, display, screen, vk_id))
+        return cursor.rowcount > 0
 
 
 def update_user_location(vk_id: int, location: str):
@@ -3526,7 +3588,9 @@ def set_user_ban(vk_id: int, banned: bool, reason: str | None = None) -> dict:
 def get_admin_user(vk_id: int) -> dict | None:
     with db_cursor() as (cursor, _):
         cursor.execute("""
-            SELECT vk_id, name, level, money, is_admin, is_banned, ban_reason, location
+            SELECT vk_id, name, vk_first_name, vk_last_name, vk_display_name,
+                   vk_screen_name, vk_profile_updated_at,
+                   level, money, is_admin, is_banned, ban_reason, location
             FROM users
             WHERE vk_id = %s
         """, (vk_id,))
@@ -3541,8 +3605,13 @@ def admin_count_users(query: str | None = None) -> int:
             cursor.execute("""
                 SELECT COUNT(*) AS cnt
                 FROM users
-                WHERE CAST(vk_id AS TEXT) ILIKE %s OR name ILIKE %s
-            """, (q, q))
+                WHERE CAST(vk_id AS TEXT) ILIKE %s
+                   OR name ILIKE %s
+                   OR COALESCE(vk_display_name, '') ILIKE %s
+                   OR COALESCE(vk_first_name, '') ILIKE %s
+                   OR COALESCE(vk_last_name, '') ILIKE %s
+                   OR COALESCE(vk_screen_name, '') ILIKE %s
+            """, (q, q, q, q, q, q))
         else:
             cursor.execute("SELECT COUNT(*) AS cnt FROM users")
         row = cursor.fetchone()
@@ -3554,16 +3623,25 @@ def admin_search_users(query: str | None = None, limit: int = 20, offset: int = 
         if query:
             q = f"%{query}%"
             cursor.execute("""
-                SELECT vk_id, name, level, experience, money, location, is_admin, is_banned
+                SELECT vk_id, name, vk_first_name, vk_last_name, vk_display_name,
+                       vk_screen_name, vk_profile_updated_at,
+                       level, experience, money, location, is_admin, is_banned
                 FROM users
-                WHERE CAST(vk_id AS TEXT) ILIKE %s OR name ILIKE %s
+                WHERE CAST(vk_id AS TEXT) ILIKE %s
+                   OR name ILIKE %s
+                   OR COALESCE(vk_display_name, '') ILIKE %s
+                   OR COALESCE(vk_first_name, '') ILIKE %s
+                   OR COALESCE(vk_last_name, '') ILIKE %s
+                   OR COALESCE(vk_screen_name, '') ILIKE %s
                 ORDER BY id DESC
                 LIMIT %s
                 OFFSET %s
-            """, (q, q, limit, offset))
+            """, (q, q, q, q, q, q, limit, offset))
         else:
             cursor.execute("""
-                SELECT vk_id, name, level, experience, money, location, is_admin, is_banned
+                SELECT vk_id, name, vk_first_name, vk_last_name, vk_display_name,
+                       vk_screen_name, vk_profile_updated_at,
+                       level, experience, money, location, is_admin, is_banned
                 FROM users
                 ORDER BY id DESC
                 LIMIT %s
